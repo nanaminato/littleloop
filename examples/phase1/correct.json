@@ -1,0 +1,23 @@
+{
+  "input": {
+    "id": "correct",
+    "goal": "Route the ticket before the deadline",
+    "minutesRemaining": 30,
+    "observation": {
+      "source": "simulated-triage",
+      "observedAt": "2026-11-14T08:00:00+08:00",
+      "suggestedRoute": "operations",
+      "confidence": 0.9
+    },
+    "role": {
+      "version": "analyst/1",
+      "confidenceThreshold": 0.75
+    },
+    "constraints": {
+      "allowExecution": true,
+      "canAsk": true,
+      "actionBudget": 1
+    }
+  },
+  "actualRoute": "operations"
+}

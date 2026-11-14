@@ -1,0 +1,23 @@
+{
+  "input": {
+    "id": "deferred",
+    "goal": "Route the ticket before the deadline",
+    "minutesRemaining": 30,
+    "observation": {
+      "source": "simulated-triage",
+      "observedAt": "2026-11-14T08:00:00+08:00",
+      "suggestedRoute": null,
+      "confidence": 0
+    },
+    "role": {
+      "version": "analyst/1",
+      "confidenceThreshold": 0.75
+    },
+    "constraints": {
+      "allowExecution": true,
+      "canAsk": false,
+      "actionBudget": 1
+    }
+  },
+  "actualRoute": "operations"
+}

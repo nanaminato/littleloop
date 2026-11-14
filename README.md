@@ -32,8 +32,16 @@
 
 C# / .NET 作为主语言；核心使用无 UI 依赖的类库，提供 CLI 实验宿主与单元测试。最初使用内存实现与本地持久化，未来按测量结果引入索引、图存储或其他后端。感知和外部 AI 服务均为可选适配器。
 
-**当前状态：概念初始化。** 文档中的模块是研究提案，不代表已有功能实现。
+**当前状态：第一阶段的模拟工单决策闭环已实现。** 使用 .NET 10 SDK 运行：
+
+```powershell
+dotnet build src/LittleLoop.Cli
+dotnet run --no-build --project src/LittleLoop.Cli -- run examples/phase1/incorrect.json > trace.json
+dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
+```
+
+`run` 先根据观察和角色阈值决策，再由模拟器用情境中的真实路线生成回执。重放重新计算并核对决策，使用原回执，无需再次执行。输出是 JSON。示例目录包含正确、错误、追问和暂缓四种情境。风险估计使用 `1 - 观察置信度`，目前没有经过校准。
 
 ## 项目构建模型
 
-[奇点项目模型](.singularity/README.md) 描述认知循环、事件契约、设计决策、实施任务与验证计划，供开发过程追溯使用。它不存储运行时认知记忆；当前模型中的设计和实验仍处于规划阶段。
+[奇点项目模型](.singularity/README.md) 描述认知循环、事件契约、设计决策、实施任务与验证计划，供开发过程追溯使用。它不存储运行时认知记忆；模型记录设计与实验计划，首阶段可运行样例见上文。
