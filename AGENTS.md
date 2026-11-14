@@ -1,6 +1,6 @@
 # LittleLoop agent guidance
 
-Read README.md and task-relevant design documents. This project is currently a research/design proposal; do not describe planned cognitive capabilities as implemented.
+Read README.md, docs/06-design-baseline.md, and task-relevant design documents. This project is currently a research/design proposal; do not describe planned cognitive capabilities as implemented.
 
 The project construction model is `.singularity/model.json` (Singularity 0.4 / format 3). Read `.singularity/README.md` for the local tool path and usage.
 

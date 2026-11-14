@@ -19,6 +19,8 @@
 
 ## 文档
 
+- [初版架构与阶段路线](docs/06-design-baseline.md) — 当前设计基线与第一阶段验收
+
 - [总体概念与研究问题](docs/00-vision.md)
 - [认知架构与模块设计](docs/01-architecture.md)
 - [记忆、存储与注意力](docs/02-memory.md)
