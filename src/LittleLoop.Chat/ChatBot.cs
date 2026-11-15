@@ -54,6 +54,13 @@ sealed class ChatBot : BackgroundService
     public SourceCitation Cite(string path, int start, int end) => AgentConversationSupport.Cite(files, path, start, end);
     public string Folder(BotWork work) => Path.Combine(work.Kind == "legacy" ? legacyDirectory ?? directory : directory, work.Id.ToString("N"));
     public bool HasLegacyEvidence => legacyDirectory is not null;
+    public async Task<bool> IsPendingFcmApproval(FcmDelivery notice)
+    {
+        if (notice.Work is not { } id || notice.Nonce is not { } nonce || !CanApprove(notice.User)) return false;
+        var work = await store.ReadBotWork(id, notice.User);
+        return work is { Kind: "task", Status: "running" } && SupportsApproval(work.Input.Provider) &&
+            AgentConversationSupport.IsApprovalPending(Folder(work), nonce);
+    }
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -104,7 +111,11 @@ sealed class ChatBot : BackgroundService
                     await store.SetBotStatus(lease, work, "stale-source", "文件已变化，请重新引用后安排任务。");
                     continue;
                 }
-                var outcome = await adapter.Run(work, Folder(work), token);
+                var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
+                {
+                    try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }
+                    catch (MySqlConnector.MySqlException e) { log.LogWarning("Could not queue approval notification, MySQL error {Error}.", e.Number); }
+                }, token);
                 await store.SetBotStatus(lease, work, outcome.Status, output: outcome.Report);
             }
             catch (Exception e) when (!token.IsCancellationRequested)

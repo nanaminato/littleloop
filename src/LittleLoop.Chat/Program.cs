@@ -47,7 +47,10 @@ builder.Services.AddAuthorization();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<ChatConnections>();
 builder.Services.AddSingleton<PasswordHasher<Account>>();
-var store = new ChatStore(builder.Configuration.GetConnectionString("Chat") ?? throw new InvalidOperationException("Set ConnectionStrings__Chat"));
+var fcmProject = config["ChatFcm:ProjectId"]?.Trim();
+if (string.IsNullOrEmpty(fcmProject)) fcmProject = null;
+var store = new ChatStore(builder.Configuration.GetConnectionString("Chat") ?? throw new InvalidOperationException("Set ConnectionStrings__Chat"),
+    fcmProject is not null);
 await store.Initialize();
 builder.Services.AddSingleton(store);
 var pushIdentity = ChatPush.LoadIdentity(config["ChatPush:KeyFile"] ?? Path.Combine(keyDirectory.FullName, "web-push.json"));
@@ -58,6 +61,9 @@ if (config["ChatBot:Policy"] is not null)
     builder.Services.AddSingleton<ChatBot>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatBot>());
 }
+if (fcmProject is not null)
+    builder.Services.AddHostedService(sp => new ChatFcm(store, sp.GetService<ChatBot>(), fcmProject,
+        sp.GetRequiredService<ILogger<ChatFcm>>()));
 
 var app = builder.Build();
 app.Use(async (ctx, next) =>
@@ -175,6 +181,7 @@ ChatSpaceEndpoints.Map(secured, store);
 ChatSettingsEndpoints.Map(secured, store);
 IdentityEndpoints.Map(secured, store);
 ChatPush.Map(secured, store, pushIdentity);
+ChatFcm.Map(secured, store, app.Services.GetService<ChatBot>(), fcmProject);
 ChatBotEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
 await app.RunAsync();
 

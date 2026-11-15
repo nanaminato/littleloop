@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.io.IOException
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -16,18 +17,36 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.BufferedSink
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class Session(val base: HttpUrl, val cookie: String)
+data class Session(val base: HttpUrl, val cookie: String) {
+    val outboxKey: String by lazy {
+        val data = "$base\n$cookie".toByteArray(Charsets.UTF_8)
+        Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(data), Base64.NO_WRAP)
+    }
+}
 data class Room(val id: String, val title: String, val type: String, val latest: Long, val unread: Long,
                 val read: Long, val muted: Boolean, val archived: Boolean, val canPost: Boolean, val preview: String)
-data class ChatMessage(val sequence: Long, val sender: String, val text: String, val deleted: Boolean, val sentAt: String)
+data class ChatMessage(val sequence: Long, val clientId: String, val sender: String, val text: String,
+                       val deleted: Boolean, val sentAt: String, val replyTo: Long?, val attachment: ChatAttachment?,
+                       val card: BotCard?)
+data class ChatAttachment(val id: String, val name: String, val mime: String, val size: Long) {
+    val image get() = mime in setOf("image/png", "image/jpeg", "image/webp", "image/gif")
+    fun json() = json("id" to id, "name" to name, "mime" to mime, "size" to size)
+}
+
+const val MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+
+internal fun JSONObject.attachment() = ChatAttachment(getString("id"), getString("name"), getString("mime"), getLong("size"))
 class ChatRequestException(val status: Int, val body: String) : IOException("HTTP $status")
 
 class SessionStorage(context: Context) {
@@ -104,12 +123,48 @@ class ChatApi(private val storage: SessionStorage) {
 
     fun clear() { session = null; storage.clear() }
 
-    suspend fun request(path: String, body: JSONObject? = null): String = withContext(Dispatchers.IO) {
-        val current = session ?: throw ChatRequestException(401, "")
+    suspend fun request(path: String, body: JSONObject? = null, expected: Session? = session): String = withContext(Dispatchers.IO) {
+        val current = expected?.takeIf { it === session } ?: throw ChatRequestException(401, "")
         http.newCall(build(current.base, current.cookie, path, body)).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw ChatRequestException(response.code, text)
             text
+        }
+    }
+
+    suspend fun upload(id: String, name: String, bytes: ByteArray, progress: (Int) -> Unit): String =
+        withContext(Dispatchers.IO) {
+            val current = session ?: throw ChatRequestException(401, "")
+            val file = object : RequestBody() {
+                override fun contentType() = "application/octet-stream".toMediaType()
+                override fun contentLength() = bytes.size.toLong()
+                override fun writeTo(sink: BufferedSink) {
+                    for (offset in bytes.indices step 16_384) {
+                        val count = minOf(16_384, bytes.size - offset)
+                        sink.write(bytes, offset, count)
+                        progress((offset + count) * 100 / bytes.size)
+                    }
+                }
+            }
+            val form = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("uploadId", id)
+                .addFormDataPart("file", name, file).build()
+            val request = build(current.base, current.cookie, "/attachments", null).newBuilder()
+                .header("X-LittleLoop-Chat", "1").post(form).build()
+            http.newBuilder().callTimeout(90, TimeUnit.SECONDS).build().newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) throw ChatRequestException(response.code, body)
+                JSONObject(body).getString("id")
+            }
+        }
+
+    suspend fun download(room: String, sequence: Long): ByteArray = withContext(Dispatchers.IO) {
+        val current = session ?: throw ChatRequestException(401, "")
+        val request = build(current.base, current.cookie, "/rooms/$room/messages/$sequence/attachment", null)
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw ChatRequestException(response.code, "")
+            val body = response.body ?: throw IOException("附件无内容")
+            body.byteStream().use { it.readLimitedAttachment() }
         }
     }
 

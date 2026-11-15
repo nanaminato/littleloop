@@ -14,18 +14,26 @@ static class ChatFeatureEndpoints
             return Results.Ok(new { room.Id });
         });
 
-        api.MapGet("/search", async (string q, Guid? room, ClaimsPrincipal user) =>
+        api.MapGet("/search", async (string q, Guid? room, int? offset, ClaimsPrincipal user) =>
         {
             string term = q.Trim();
             return term.Length is < 1 or > 100
                 ? Results.BadRequest("请输入 1–100 个字符。")
-                : Results.Ok(await store.Search(Id(user), term, room?.ToString()));
+                : offset < 0 ? Results.BadRequest("搜索偏移量无效。")
+                : Results.Ok(await store.Search(Id(user), term, room?.ToString(), offset ?? 0));
         });
 
         api.MapPost("/attachments", async (HttpRequest request, ClaimsPrincipal user) =>
         {
             if (!request.HasFormContentType) return Results.BadRequest("请选择一个文件。");
             var form = await request.ReadFormAsync(request.HttpContext.RequestAborted);
+            Guid? uploadId = null;
+            if (form.TryGetValue("uploadId", out var supplied))
+            {
+                if (supplied.Count != 1 || !Guid.TryParseExact(supplied[0], "D", out var id) || id == Guid.Empty)
+                    return Results.BadRequest("上传标识无效。");
+                uploadId = id;
+            }
             if (form.Files.Count != 1 || form.Files[0].Length is <= 0 or > MaxFileSize)
                 return Results.BadRequest("每条消息可添加一个不超过 5 MB 的非空文件。");
             var upload = form.Files[0];
@@ -35,7 +43,8 @@ static class ChatFeatureEndpoints
             using var stream = new MemoryStream((int)upload.Length);
             await upload.CopyToAsync(stream, request.HttpContext.RequestAborted);
             byte[] bytes = stream.ToArray();
-            return Results.Ok(await store.Upload(Id(user), new(name, Mime(bytes), bytes)));
+            var saved = await store.Upload(Id(user), new(name, Mime(bytes), bytes), uploadId);
+            return saved is null ? Results.Conflict("上传标识已被使用。") : Results.Ok(saved);
         });
 
         api.MapGet("/rooms/{room:guid}/messages/{seq:long}/attachment",

@@ -1560,6 +1560,248 @@
       "references": [
         "REF-ANDROID-CHAT"
       ]
+    },
+    {
+      "id": "INTENT-ANDROID-CHAT-SYNC",
+      "type": "intent",
+      "title": "Evolve Android chat architecture using open-source Telegram clients as references",
+      "body": "Research popular open-source Telegram clients and improve LittleLoop Android architecture and chat capabilities.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit request to reference popular open-source Telegram clients while upgrading LittleLoop Android architecture",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-CHAT-SYNC",
+      "type": "module",
+      "title": "Android chat local storage and synchronization",
+      "body": "Share a repository between Compose and background notifications. Separate SignalR invalidations from HTTP reconciliation. Persist recent chat history and a session-scoped send queue in SQLite. Allow reply references, local failure handling and server-idempotent retries.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-CHAT-SYNC"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-CHAT-SYNC"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-CHAT-SYNC",
+      "type": "evidence",
+      "title": "Offline process restart and browser reply reconciliation",
+      "body": "Android debug build and lint passed. Android emulator restored cached history and a queued reply after network removal and force-stop. Chrome received the reply on reconnect, reference sequence matched, and repeating the same client ID returned the same server sequence with one message in MySQL.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android-upgrade/result.json and offline/online screenshots"
+      },
+      "references": [
+        "REF-ANDROID-CHAT-SYNC"
+      ]
+    },
+    {
+      "id": "INTENT-ANDROID-ATTACHMENTS",
+      "type": "intent",
+      "title": "Android image and file messages with durable uploads",
+      "body": "Use Android file selection, progress, retry, preview and download with the existing chat outbox. Verify bidirectional browser and emulator transfers, permissions, offline process recovery and no duplicates.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit request for durable Android image and file messages and end-to-end acceptance",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-ATTACHMENTS",
+      "type": "module",
+      "title": "Durable Android image and file messages",
+      "body": "Android document selection and saving, image and text previews, upload progress, retry and atomic SQLite-backed attachment data. Optional upload UUID is idempotent for matching owner and bytes. Existing room permissions and message deduplication apply.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-ATTACHMENTS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-ATTACHMENTS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-ATTACHMENTS",
+      "type": "evidence",
+      "title": "Emulator and Chrome attachment exchange with permission and restart checks",
+      "body": "Live MySQL with three Chrome accounts and Android 17 emulator. Both clients sent images and files. Android preview and saved SHA256 matched. Offline queued file survived force-stop and moving the original. On reconnect Chrome saw one message and verified downloaded bytes. Outsider downloads returned 404, upload ownership was enforced and repeated upload/message IDs returned existing records. Builds and Android Lint passed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android-attachments/result.json, device-download.ok and screenshots"
+      },
+      "references": [
+        "REF-ANDROID-ATTACHMENTS"
+      ]
+    },
+    {
+      "id": "INTENT-ANDROID-MESSAGE-SEARCH",
+      "type": "intent",
+      "title": "Online and offline Android message search with history navigation",
+      "body": "Add global and in-room message search to Android, jump to the original message, search full accessible history online and local cache offline. Verify results, navigation and nonmember isolation with Chrome and the emulator.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for Android message search and online offline permissions testing",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-MESSAGE-SEARCH",
+      "type": "module",
+      "title": "Android global and scoped message search",
+      "body": "Search accessible complete history via paged server queries and fallback to login-scoped SQLite snapshots on connection failures. Jump to a bounded history window and highlight the exact message without moving server read state.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-MESSAGE-SEARCH"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-MESSAGE-SEARCH"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-MESSAGE-SEARCH",
+      "type": "evidence",
+      "title": "Chrome and Android MySQL and offline search verification",
+      "body": "Android 17 emulator and Chrome located message 1 when the room had 67 messages. The server returned two pages and excluded another room from scoped search. After restarting offline, Android found and opened a cached recent message and excluded the older uncached message. Nonmember searches were empty and direct history lookup returned 404. Android debug build, lint and .NET build passed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android-search/browser-result.json, Android verification markers and screenshots"
+      },
+      "references": [
+        "REF-ANDROID-MESSAGE-SEARCH"
+      ]
+    },
+    {
+      "id": "INTENT-ANDROID-BOT-CARDS",
+      "type": "intent",
+      "title": "Android LittleLoop work and approval cards",
+      "body": "Add source-quoted questions, scheduling from a chat message, approval and execution evidence to Android. Verify the cross-client flow on RelaxKonOS, including unauthorized approval and duplicate execution protection.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for Android bot cards and cross-client RelaxKonOS approval verification",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-BOT-CARDS",
+      "type": "module",
+      "title": "Android source, work and approval cards",
+      "body": "Use existing robot endpoints and account roles for source citation, task creation from a message, work polling, approval and execution evidence. Cache citation cards with history.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-BOT-CARDS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-BOT-CARDS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-BOT-CARDS",
+      "type": "evidence",
+      "title": "Cross-client RelaxKonOS execution and authorization",
+      "body": "Android submitted LittleLoop source question and anchored development task against an isolated RelaxKonOS copy. Chrome saw authorizations. Android accepted one comment-only patch, Chrome accepted the test command, Android displayed patch and test receipt. Nonapprove UI omits action and API 403. Duplicate nonces 409, one patch and one execution with 19 passing cases. Android build and lint passed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android-bot/result.json, android-evidence.ok and screenshots"
+      },
+      "references": [
+        "REF-ANDROID-BOT-CARDS"
+      ]
+    },
+    {
+      "id": "INTENT-ANDROID-FCM",
+      "type": "intent",
+      "title": "Native Android FCM notifications",
+      "body": "Send direct and group chat messages and pending approvals through native Firebase Cloud Messaging. Open the source message or work card, enforce mute and approval roles and deduplicate delivery. Verify background and OS-reclaimed process delivery in the emulator and browser.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for Android FCM delivery, deep links, permissions and deduplication",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-FCM",
+      "type": "module",
+      "title": "Native Android Firebase Cloud Messaging",
+      "body": "Configurable Android Firebase SDK and HTTP v1 sender, device-scoped MySQL queue, authorization recheck, durable deduplication and original message or work deep links.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-FCM"
+      ],
+      "verification_basis": [
+        "EVIDENCE-ANDROID-FCM-LOCAL",
+        "EVIDENCE-ANDROID-FCM-LIVE"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-FCM-LOCAL",
+      "type": "evidence",
+      "title": "Local push rules and Android routing evidence",
+      "body": "Chrome and real MySQL verified direct and group fanout, mute, single message queue record, approval role checks and consumed approval invalidation. Emulator verified original message and task deep links from explicitly local intents. .NET, Android debug APK and lint passed. No FCM delivery claim.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android-fcm/browser-result.json and emulator-result.json"
+      },
+      "references": [
+        "REF-ANDROID-FCM"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-FCM-LIVE",
+      "type": "evidence",
+      "verification": "unverified",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "attributes": {
+        "observation": "data/chat-android-fcm/live-result.json, live-gateway.log and live screenshots"
+      },
+      "references": [
+        "REF-ANDROID-FCM"
+      ],
+      "body": "Real Chrome, MySQL, Firebase HTTP v1 and Android 17. Actual FCM delivered a direct message while the app was backgrounded, and a group message after adb am kill confirmed the process was absent. Both notification taps opened the original message. A live approval notification opened the pending task card. A muted message produced no native notification. Repeated message submission yielded one device queue record. Nonapprover resolution and decision returned 404 and 403. Replayed approval returned 409.",
+      "delivery": "implemented",
+      "title": "Real Firebase gateway delivery and Android process reclaim"
     }
   ],
   "relations": [
@@ -2210,6 +2452,102 @@
       "type": "supports",
       "source": "EVIDENCE-ANDROID-CHAT",
       "target": "MOD-ANDROID-CHAT"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SYNC-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-CHAT-SYNC",
+      "target": "INTENT-ANDROID-CHAT-SYNC"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SYNC-BASE",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-CHAT-SYNC",
+      "target": "MOD-ANDROID-CHAT"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SYNC-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-CHAT-SYNC",
+      "target": "MOD-ANDROID-CHAT-SYNC"
+    },
+    {
+      "id": "REL-ANDROID-ATTACHMENTS-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-ATTACHMENTS",
+      "target": "INTENT-ANDROID-ATTACHMENTS"
+    },
+    {
+      "id": "REL-ANDROID-ATTACHMENTS-SYNC",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-ATTACHMENTS",
+      "target": "MOD-ANDROID-CHAT-SYNC"
+    },
+    {
+      "id": "REL-ANDROID-ATTACHMENTS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-ATTACHMENTS",
+      "target": "MOD-ANDROID-ATTACHMENTS"
+    },
+    {
+      "id": "REL-ANDROID-MESSAGE-SEARCH-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-MESSAGE-SEARCH",
+      "target": "INTENT-ANDROID-MESSAGE-SEARCH"
+    },
+    {
+      "id": "REL-ANDROID-MESSAGE-SEARCH-SYNC",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-MESSAGE-SEARCH",
+      "target": "MOD-ANDROID-CHAT-SYNC"
+    },
+    {
+      "id": "REL-ANDROID-MESSAGE-SEARCH-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-MESSAGE-SEARCH",
+      "target": "MOD-ANDROID-MESSAGE-SEARCH"
+    },
+    {
+      "id": "REL-ANDROID-BOT-CARDS-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-BOT-CARDS",
+      "target": "INTENT-ANDROID-BOT-CARDS"
+    },
+    {
+      "id": "REL-ANDROID-BOT-CARDS-CHAT",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-BOT-CARDS",
+      "target": "MOD-CHAT-PHASE-C"
+    },
+    {
+      "id": "REL-ANDROID-BOT-CARDS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-BOT-CARDS",
+      "target": "MOD-ANDROID-BOT-CARDS"
+    },
+    {
+      "id": "REL-ANDROID-FCM-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-FCM",
+      "target": "INTENT-ANDROID-FCM"
+    },
+    {
+      "id": "REL-ANDROID-FCM-BOT",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-FCM",
+      "target": "MOD-ANDROID-BOT-CARDS"
+    },
+    {
+      "id": "REL-ANDROID-FCM-LOCAL-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-FCM-LOCAL",
+      "target": "MOD-ANDROID-FCM"
+    },
+    {
+      "source": "EVIDENCE-ANDROID-FCM-LIVE",
+      "type": "supports",
+      "target": "MOD-ANDROID-FCM",
+      "id": "REL-ANDROID-FCM-LIVE-EVIDENCE"
     }
   ],
   "references": [
@@ -2708,6 +3046,41 @@
       "kind": "project_file",
       "target": "docs/31-android-chat.md",
       "purpose": "Android setup, implemented behavior and live validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-CHAT-SYNC",
+      "kind": "project_file",
+      "target": "docs/32-android-chat-sync.md",
+      "purpose": "Open source references, SQLite cache, durable outbox and sync validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-ATTACHMENTS",
+      "kind": "project_file",
+      "target": "docs/33-android-attachments.md",
+      "purpose": "Durable Android attachment transfers, authorization and live validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-MESSAGE-SEARCH",
+      "kind": "project_file",
+      "target": "docs/34-android-message-search.md",
+      "purpose": "Android online/offline search architecture and live verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-BOT-CARDS",
+      "kind": "project_file",
+      "target": "docs/35-android-bot-cards.md",
+      "purpose": "Android robot cards and live RelaxKonOS verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-FCM",
+      "kind": "project_file",
+      "target": "docs/36-android-fcm.md",
+      "purpose": "Firebase configuration, native push design and scoped local verification",
       "tracking": "live"
     }
   ],

@@ -85,3 +85,13 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 [聊天设置补齐](docs/30-telegram-settings.md)说明用户名、屏蔽、双语和后台推送。
 
 [原生 Android 聊天客户端](docs/31-android-chat.md)使用 Kotlin 和 Jetpack Compose，复用同一套账号、会话、已读与设置接口。
+
+[Android 同步架构](docs/32-android-chat-sync.md)说明本地历史、持久发送队列和引用回复，以及 Telegram 开源客户端提供的设计参考。
+
+[Android 图片与文件](docs/33-android-attachments.md)说明系统文件选择器、上传进度、断网续发和附件权限。
+
+[Android 消息搜索](docs/34-android-message-search.md)覆盖全局搜索、会话内搜索、历史定位和离线缓存。
+
+[Android LittleLoop 机器人](docs/35-android-bot-cards.md)支持源码问答、从消息安排开发任务、审批和查看执行证据。
+
+[Android FCM 云推送](docs/36-android-fcm.md)说明 Firebase 配置、会话与待审批通知，以及如何验收后台送达。

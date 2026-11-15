@@ -13,7 +13,7 @@ sealed record PostMessage(string ClientId, string Text, long? ReplyTo, string? A
 sealed record ReadTo(long Sequence);
 sealed record SendResult(ChatMessage Message, string[] Recipients, bool IsNew);
 
-sealed partial class ChatStore(string connection)
+sealed partial class ChatStore(string connection, bool fcmEnabled)
 {
     private readonly string connectionString = new MySqlConnectionStringBuilder(connection)
     {
@@ -233,7 +233,11 @@ sealed partial class ChatStore(string connection)
             ("attachment", attachment?.Id), ("forwarded", forwardedFrom), ("request", requestKey), ("card", card is null ? null : ToJson(card))))
             await insert.ExecuteNonQueryAsync();
         if (job is not null) await InsertJob(db, tx, job with { Sequence = seq });
-        if (roomType != "legacy") await EnqueuePush(db, tx, room, seq, user);
+        if (roomType != "legacy")
+        {
+            await EnqueuePush(db, tx, room, seq, user);
+            if (fcmEnabled) await EnqueueFcmMessage(db, tx, room, seq, user);
+        }
         await using var select = Command(db, tx, "SELECT user_id FROM chat_members WHERE room_id=@room", ("room", room));
         var recipients = new List<string>();
         await using (var reader = await select.ExecuteReaderAsync())

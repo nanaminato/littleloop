@@ -30,6 +30,19 @@ sealed partial class ChatStore
                 INDEX(due), INDEX(expires), UNIQUE(device_id,room_id,seq),
                 FOREIGN KEY(device_id) REFERENCES chat_push_devices(device_id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS chat_fcm_devices (
+                device_id CHAR(36) PRIMARY KEY, token VARCHAR(4096) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                token_hash CHAR(64) NOT NULL UNIQUE,
+                FOREIGN KEY(device_id) REFERENCES chat_devices(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS chat_fcm_queue (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY, device_id CHAR(36) NOT NULL,
+                room_id CHAR(36) NOT NULL, seq BIGINT NOT NULL, event_key VARCHAR(42) NOT NULL,
+                work_id CHAR(36) NULL, nonce CHAR(32) NULL, sent BOOLEAN NOT NULL DEFAULT FALSE,
+                due DATETIME NOT NULL, expires DATETIME NOT NULL,
+                INDEX(sent,due), INDEX(expires), UNIQUE(device_id,room_id,event_key),
+                FOREIGN KEY(device_id) REFERENCES chat_fcm_devices(device_id) ON DELETE CASCADE
+            );
             """);
         await cmd.ExecuteNonQueryAsync();
     }

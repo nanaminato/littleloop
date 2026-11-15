@@ -1,7 +1,9 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services") version "4.4.4" apply false
 }
+if (file("google-services.json").isFile) apply(plugin = "com.google.gms.google-services")
 android {
     namespace = "dev.littleloop.chat"
     compileSdk = 36
@@ -27,4 +29,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.foundation:foundation")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.firebase:firebase-messaging:26.0.2")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
 }

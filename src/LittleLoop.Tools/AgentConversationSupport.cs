@@ -70,13 +70,7 @@ public static class AgentConversationSupport
     {
         if (!File.Exists(Path.Combine(folder, "agent.json"))) return null;
         var state = new AgentDelegationHost(folder).Read();
-        AgentApprovalRequest? approval = null;
-        string approvalFile = Path.Combine(folder, "approval.json");
-        if (showApproval && state.Status == "awaiting-approval" && File.Exists(approvalFile))
-        {
-            approval = JsonSerializer.Deserialize<AgentApprovalRequest>(File.ReadAllText(approvalFile), Json);
-            if (approval?.Status != "pending" || File.Exists(Path.Combine(folder, "answer-" + approval.Nonce + ".json"))) approval = null;
-        }
+        var approval = showApproval && state.Status == "awaiting-approval" ? ReadPendingApproval(folder) : null;
         string learningFile = Path.Combine(folder, "tools-learning.json");
         var episodes = File.Exists(learningFile) ? new LearningSession(learningFile).Read().Episodes : [];
         var receipts = episodes.Where(x => x.Result?.Command is not null).Select(x => x.Result!.Command!).ToArray();
@@ -91,5 +85,19 @@ public static class AgentConversationSupport
         }
         return new { state.Status, state.ThreadId, approval, receipts, changes, writableFiles = state.Policy.Development?.WritableFiles,
             turns = state.Turns.Select(t => new { t.Status, t.Report, t.Issues }) };
+    }
+
+    public static bool IsApprovalPending(string folder, string nonce) =>
+        File.Exists(Path.Combine(folder, "agent.json")) &&
+        new AgentDelegationHost(folder).Read().Status == "awaiting-approval" &&
+        ReadPendingApproval(folder)?.Nonce == nonce;
+
+    private static AgentApprovalRequest? ReadPendingApproval(string folder)
+    {
+        string file = Path.Combine(folder, "approval.json");
+        if (!File.Exists(file)) return null;
+        var approval = JsonSerializer.Deserialize<AgentApprovalRequest>(File.ReadAllText(file), Json);
+        return approval?.Status == "pending" && !File.Exists(Path.Combine(folder, "answer-" + approval.Nonce + ".json"))
+            ? approval : null;
     }
 }

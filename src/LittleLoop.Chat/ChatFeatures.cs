@@ -68,15 +68,25 @@ sealed partial class ChatStore
         }
     }
 
-    public async Task<Attachment> Upload(string user, StoredFile file)
+    public async Task<Attachment?> Upload(string user, StoredFile file, Guid? uploadId)
     {
-        var result = new Attachment(Guid.NewGuid().ToString(), file.Name, file.Mime, file.Content.Length);
+        var result = new Attachment((uploadId ?? Guid.NewGuid()).ToString(), file.Name, file.Mime, file.Content.Length);
         await using var db = await Open();
-        await using var cmd = Command(db, null, """
+        await using var tx = await db.BeginTransactionAsync();
+        await using var cmd = Command(db, tx, """
             INSERT INTO chat_attachments(id,owner_id,name,mime,size,content) VALUES(@id,@user,@name,@mime,@size,@content)
+            ON DUPLICATE KEY UPDATE id=id
             """, ("id", result.Id), ("user", user), ("name", file.Name), ("mime", file.Mime), ("size", file.Content.Length), ("content", file.Content));
         await cmd.ExecuteNonQueryAsync();
-        return result;
+        await using var lookup = Command(db, tx, """
+            SELECT name,mime,content FROM chat_attachments WHERE id=@id AND owner_id=@user FOR UPDATE
+            """, ("id", result.Id), ("user", user));
+        bool matches;
+        await using (var saved = await lookup.ExecuteReaderAsync())
+            matches = await saved.ReadAsync() && saved.GetString(0) == file.Name
+                && saved.GetString(1) == file.Mime && saved.GetFieldValue<byte[]>(2).AsSpan().SequenceEqual(file.Content);
+        await tx.CommitAsync();
+        return matches ? result : null;
     }
 
     public async Task<StoredFile?> Download(string user, string room, long seq)
@@ -116,7 +126,7 @@ sealed partial class ChatStore
             ? JsonSerializer.SerializeToUtf8Bytes(new { message, forward })
             : JsonSerializer.SerializeToUtf8Bytes(new { message, forward, card, input })));
 
-    public async Task<ChatMessage[]> Search(string user, string text, string? room)
+    public async Task<ChatMessage[]> Search(string user, string text, string? room, int offset)
     {
         await using var db = await Open();
         await using var cmd = Command(db, null, MessageSelect + """
@@ -124,8 +134,8 @@ sealed partial class ChatStore
              JOIN chat_rooms r ON r.id=msg.room_id
              WHERE NOT msg.deleted AND (@room IS NULL OR msg.room_id=@room)
                AND (LOCATE(@text,msg.body)>0 OR LOCATE(@text,f.name)>0)
-             ORDER BY r.last_activity DESC,msg.room_id,msg.seq DESC LIMIT 50
-            """, ("user", user), ("text", text), ("room", room));
+             ORDER BY r.last_activity DESC,msg.room_id,msg.seq DESC LIMIT 50 OFFSET @offset
+            """, ("user", user), ("text", text), ("room", room), ("offset", offset));
         await using var reader = await cmd.ExecuteReaderAsync();
         var items = new List<ChatMessage>();
         while (await reader.ReadAsync()) items.Add(Message(reader, reader.GetString(13)));

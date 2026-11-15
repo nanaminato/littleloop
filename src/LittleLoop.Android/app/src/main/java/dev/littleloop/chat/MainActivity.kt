@@ -38,6 +38,9 @@ import androidx.core.view.WindowCompat
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 private val messageTime = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -68,7 +71,12 @@ class MainActivity : ComponentActivity() {
         openNotification(intent)
     }
     private fun openNotification(intent: Intent?) {
-        intent?.getStringExtra("room")?.let { chat.select(it) }
+        val supplied = intent?.getStringExtra("room") ?: return
+        val room = runCatching { UUID.fromString(supplied).toString() }.getOrNull() ?: return
+        val scope = intent.getStringExtra("pushScope")
+        if (scope != null) chat.openNotification(room, intent.getLongExtra("sequence", 0), intent.getStringExtra("work"), scope)
+        else chat.select(room)
+        intent.removeExtra("room")
     }
 }
 
@@ -77,40 +85,96 @@ private fun ChatScreen(chat: ChatRepository, state: ChatState, theme: String) {
     val context = LocalContext.current
     val service = remember { Intent(context, ChatNotificationService::class.java) }
     val listening by chat.backgroundEnabled.collectAsState()
+    val cloudEnabled by chat.push.enabled.collectAsState()
+    val uiScope = rememberCoroutineScope()
+    var cloudBusy by remember { mutableStateOf(false) }
+    var cloudError by remember { mutableStateOf<String?>(null) }
+    val setCloud: (Boolean) -> Unit = { value ->
+        if (!cloudBusy) {
+            cloudBusy = true
+            cloudError = null
+            uiScope.launch {
+                try {
+                    chat.push.setEnabled(value)
+                    if (value && chat.push.enabled.value) context.stopService(service)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: ChatRequestException) {
+                    cloudError = if (error.status == 404 || error.status == 400) "服务器未配置匹配的 Firebase 项目"
+                        else "云推送设置失败，请重试"
+                } catch (_: Exception) {
+                    cloudError = "无法注册云推送，请检查网络和 Google Play 服务"
+                } finally { cloudBusy = false }
+            }
+        }
+    }
+    val cloudPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        if (it) setCloud(true) else cloudError = "请在 Android 设置中允许通知"
+    }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) context.startForegroundService(service)
     }
     var settings by rememberSaveable { mutableStateOf(false) }
     var create by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var searchRoom by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.notificationTarget) {
+        state.notificationTarget?.let { id ->
+            searching = false
+            settings = false
+            create = false
+            chat.notificationLinkOpened(id)
+        }
+    }
     val room = state.rooms.firstOrNull { it.id == state.selected }
-    BackHandler(settings || room != null) {
-        if (settings) settings = false else chat.select(null)
+    BackHandler(settings || searching || room != null) {
+        if (searching) searching = false else if (settings) settings = false else chat.select(null)
     }
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
             when {
                 state.resuming -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 state.username.isEmpty() -> LoginScreen(chat, state)
+                searching -> {
+                    Header(if (searchRoom == null) "搜索消息" else "会话内搜索", "返回", { searching = false })
+                    MessageSearch(chat, state.rooms, searchRoom) { searching = false }
+                }
                 settings -> {
                     Header("设置", "返回", { settings = false })
-                    SettingsScreen(chat, state, theme, listening, { enabled ->
+                    SettingsScreen(chat, state, theme, listening, cloudEnabled, { enabled ->
                         if (!enabled) context.stopService(service)
                         else if (Build.VERSION.SDK_INT >= 33 &&
                             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                             permission.launch(Manifest.permission.POST_NOTIFICATIONS)
                         else context.startForegroundService(service)
-                    }, {
+                    }, cloud = {
+                        if (chat.push.configured) {
+                            SettingToggle("后台通知（云推送）", cloudEnabled, !cloudBusy) { value ->
+                                if (value && Build.VERSION.SDK_INT >= 33 &&
+                                    context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                                    cloudPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                else setCloud(value)
+                            }
+                        } else Text("此安装包尚未配置 Firebase 云推送", style = MaterialTheme.typography.bodySmall)
+                        cloudError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    }, logout = {
                         context.stopService(service)
                         settings = false
                         chat.logout()
                     })
                 }
-                room != null -> Conversation(chat, state, room)
+                room != null -> key(room.id) {
+                    Conversation(chat, state, room) { searchRoom = room.id; searching = true }
+                }
                 else -> {
-                    Header("LittleLoop", "设置", { settings = true }, "新会话", { create = true })
-                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(12.dp),
-                        singleLine = true, placeholder = { Text("搜索会话") }, shape = RoundedCornerShape(24.dp))
+                    Header("LittleLoop", "设置", { settings = true }, "新会话") { create = true }
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(query, { query = it }, Modifier.weight(1f),
+                            singleLine = true, placeholder = { Text("搜索会话") }, shape = RoundedCornerShape(24.dp))
+                        TextButton(onClick = { searchRoom = null; searching = true }) { Text("搜索消息") }
+                    }
                     if (!state.connected) Text("正在重新连接", Modifier.padding(horizontal = 16.dp))
                     state.error?.let { Text(it, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error) }
                     LazyColumn(Modifier.weight(1f)) {
@@ -128,12 +192,14 @@ private fun ChatScreen(chat: ChatRepository, state: ChatState, theme: String) {
 }
 
 @Composable
-private fun Header(title: String, action: String, onAction: () -> Unit, end: String? = null, onEnd: () -> Unit = {}) {
+private fun Header(title: String, action: String, onAction: () -> Unit, end: String? = null,
+                   extra: (@Composable () -> Unit)? = null, onEnd: () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().background(Color(0xff2879ad)).padding(horizontal = 6.dp).heightIn(min = 56.dp),
         verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onAction) { Text(action, color = Color.White) }
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, color = Color.White,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
+        extra?.invoke()
         if (end != null) TextButton(onClick = onEnd) { Text(end, color = Color.White) }
     }
 }
@@ -175,30 +241,143 @@ private fun RoomRow(room: Room, open: () -> Unit) {
 }
 
 @Composable
-private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, room: Room) {
+private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, room: Room, onSearch: () -> Unit) {
     var draft by rememberSaveable(room.id) { mutableStateOf("") }
+    var replyTo by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
+    var file by remember(room.id) { mutableStateOf<SelectedAttachment?>(null) }
+    var preview by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
+    var fileError by remember(room.id) { mutableStateOf<String?>(null) }
+    var robot by remember(room.id) { mutableStateOf<BotRoom?>(null) }
+    var botError by remember(room.id) { mutableStateOf<String?>(null) }
+    var installing by remember(room.id) { mutableStateOf(false) }
+    var asking by rememberSaveable(room.id) { mutableStateOf(false) }
+    var scheduleFrom by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
+    var botDetails by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(state.openWork, state.focus) {
+        if (state.openWork != null && state.focus != null) {
+            botDetails = state.focus
+            chat.workLinkOpened()
+        }
+    }
+    val pickerScope = rememberCoroutineScope()
+    LaunchedEffect(room.id, state.connected) {
+        if (state.connected) {
+            val result = botAttempt { chat.bot.room(room.id) }
+            if (result is BotResult.Success) robot = result.value
+        }
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) pickerScope.launch {
+            runCatching { chat.selectedAttachment(uri) }.onSuccess {
+                file = it
+                fileError = null
+            }.onFailure { fileError = "无法读取所选文件" }
+        }
+    }
+    val bySequence = remember(state.messages) { state.messages.associateBy(ChatMessage::sequence) }
+    val confirmedIds = remember(state.messages, state.username) {
+        state.messages.filter { it.sender == state.username }.mapTo(hashSetOf(), ChatMessage::clientId)
+    }
+    val queued = state.outbox.filter { it.room == room.id && it.id !in confirmedIds }
     val list = rememberLazyListState()
-    LaunchedEffect(state.messages.lastOrNull()?.sequence) {
-        if (list.firstVisibleItemIndex <= 1) list.requestScrollToItem(0)
+    val visibleQueue = if (state.focus == null) queued else emptyList()
+    LaunchedEffect(state.focus, state.notificationTarget) {
+        val index = state.messages.asReversed().indexOfFirst { it.sequence == state.focus }
+        if (index >= 0) list.scrollToItem(index)
+    }
+    LaunchedEffect(state.messages.lastOrNull()?.sequence, visibleQueue.lastOrNull()?.id) {
+        if (state.focus == null && list.firstVisibleItemIndex <= 1) list.requestScrollToItem(0)
     }
     val dark = MaterialTheme.colorScheme.surface.red < 0.5f
-    Header(room.title, "返回", { chat.select(null) }, if (room.muted) "取消静音" else "静音", { chat.roomPreference(room) })
-    state.error?.let { Text(it, Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
+    Header(room.title, "返回", { chat.select(null) }, if (room.muted) "取消静音" else "静音", extra = {
+        TextButton(onClick = onSearch) { Text("搜索", color = Color.White) }
+    }) { chat.roomPreference(room) }
+    if (state.connected && robot?.canOperate == true && room.type in setOf("direct", "group", "topic")) {
+        if (robot?.installed == true) {
+            TextButton(onClick = { asking = true }) { Text("引用源码提问") }
+        } else if (room.type != "topic") {
+            TextButton(onClick = {
+                installing = true
+                pickerScope.launch {
+                    try {
+                        when (val result = botAttempt { chat.bot.install(room.id); chat.bot.room(room.id) }) {
+                            is BotResult.Success -> { robot = result.value; botError = null }
+                            is BotResult.Error -> botError = result.message
+                        }
+                    } finally { installing = false }
+                }
+            }, enabled = !installing) { Text("接入 LittleLoop") }
+        }
+    }
+    if (state.focus != null) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("已定位到历史消息", Modifier.weight(1f))
+        TextButton(onClick = { chat.select(room.id) }) { Text("回到最新") }
+    }
+    if (!state.connected) Text("离线 · 消息将在连接恢复后发送", Modifier.padding(8.dp))
+    state.error?.takeUnless { it == "Offline" }?.let { Text(it, Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
+    fileError?.let { Text(it, Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
+    botError?.let { Text(it, Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
     LazyColumn(Modifier.fillMaxWidth().weight(1f).background(if (dark) Color(0xff172330) else Color(0xffe2edda)),
         state = list, reverseLayout = true, contentPadding = PaddingValues(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom)) {
+        items(visibleQueue.asReversed(), key = PendingMessage::id) { message ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Column(Modifier.widthIn(max = 300.dp)
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(14.dp)).padding(10.dp)) {
+                    if (message.text.isNotBlank()) Text(message.text)
+                    message.fileName?.let { Text(it, fontWeight = FontWeight.SemiBold) }
+                    val uploading = state.upload?.takeIf { it.id == message.id }
+                    if (uploading != null) {
+                        Text("上传 ${uploading.percent}%")
+                        LinearProgressIndicator(progress = { uploading.percent / 100f }, modifier = Modifier.width(160.dp))
+                    } else if (message.failure == null) {
+                        Text("待发送", style = MaterialTheme.typography.labelMedium)
+                    } else {
+                        Text("发送失败（${message.failure}）", color = MaterialTheme.colorScheme.error)
+                        Row {
+                            TextButton({ chat.retry(message) }, enabled = !state.busy) { Text("重试") }
+                            TextButton({ chat.discard(message) }, enabled = !state.busy) { Text("移除") }
+                        }
+                    }
+                }
+            }
+        }
         items(state.messages.asReversed(), key = ChatMessage::sequence) { message ->
             val own = message.sender == state.username
             Row(Modifier.fillMaxWidth(), horizontalArrangement = if (own) Arrangement.End else Arrangement.Start) {
                 Column(Modifier.widthIn(max = 300.dp).background(
-                    if (own && dark) Color(0xff215775) else if (own) Color(0xffe2f9cf) else MaterialTheme.colorScheme.surface,
+                    if (message.sequence == state.focus) MaterialTheme.colorScheme.primaryContainer
+                    else if (own && dark) Color(0xff215775) else if (own) Color(0xffe2f9cf) else MaterialTheme.colorScheme.surface,
                     RoundedCornerShape(14.dp)).padding(horizontal = 11.dp, vertical = 7.dp)) {
                     if (!own) Text(message.sender, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-                    Text(if (message.deleted) "消息已删除" else message.text.ifBlank { "附件或消息卡片" })
+                    message.replyTo?.let { sequence ->
+                        val quoted = bySequence[sequence]?.takeUnless(ChatMessage::deleted)?.text
+                        Text(quoted?.ifBlank { null } ?: "引用消息 #$sequence",
+                            maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (message.deleted) Text("消息已删除")
+                    else {
+                        if (message.text.isNotBlank()) Text(message.text)
+                        message.attachment?.let { attachment ->
+                            TextButton(onClick = { preview = message.sequence }) {
+                                Text(attachment.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                        message.card?.let {
+                            TextButton(onClick = { botDetails = message.sequence }) { Text(cardTitle(it.kind)) }
+                        }
+                    }
                     val time = remember(message.sentAt) {
                         runCatching { messageTime.format(Instant.parse(message.sentAt).atZone(ZoneId.systemDefault())) }.getOrDefault("")
                     }
                     if (time.isNotEmpty()) Text(time, Modifier.align(Alignment.End), style = MaterialTheme.typography.labelSmall)
+                    if (room.canPost && !message.deleted) Row {
+                        TextButton(onClick = { replyTo = message.sequence }) { Text("回复") }
+                        if (state.connected && robot?.installed == true && robot?.canOperate == true) {
+                            TextButton(onClick = { scheduleFrom = message.sequence }) { Text("安排任务") }
+                        }
+                    }
                 }
             }
         }
@@ -206,18 +385,50 @@ private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, roo
             TextButton(onClick = chat::older, modifier = Modifier.fillMaxWidth()) { Text("加载更早消息") }
         }
     }
+    if (room.canPost && replyTo != null) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(bySequence[replyTo]?.text?.ifBlank { null } ?: "回复消息 #$replyTo",
+            Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        TextButton(onClick = { replyTo = null }) { Text("取消回复") }
+    }
+    if (room.canPost && file != null) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(file?.name.orEmpty(), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        TextButton(onClick = { file = null }, enabled = !state.busy) { Text("移除附件") }
+    }
     if (room.canPost) Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(draft, { draft = it }, Modifier.weight(1f), placeholder = { Text("消息") },
+        TextButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !state.busy) { Text("附件") }
+        OutlinedTextField(draft, { if (it.length <= 4000) draft = it }, Modifier.weight(1f), placeholder = { Text("消息") },
             shape = RoundedCornerShape(24.dp), maxLines = 4)
         val outgoing = draft
-        TextButton(onClick = { chat.send(outgoing) { if (draft == outgoing) draft = "" } },
-            enabled = draft.isNotBlank() && !state.busy) { Text("发送") }
+        val quoted = replyTo
+        val outgoingFile = file
+        TextButton(onClick = {
+            chat.send(room.id, outgoing, quoted, outgoingFile) {
+                if (draft == outgoing) draft = ""
+                if (replyTo == quoted) replyTo = null
+                if (file == outgoingFile) file = null
+            }
+        },
+            enabled = (draft.isNotBlank() || file != null) && !state.busy) { Text("发送") }
+    }
+    bySequence[preview]?.takeUnless(ChatMessage::deleted)?.let { message ->
+        AttachmentDialog(chat, room.id, message) { preview = null }
+    }
+    bySequence[botDetails]?.takeUnless(ChatMessage::deleted)?.card?.let { card ->
+        BotDetails(chat.bot, card) { botDetails = null }
+    }
+    robot?.providers?.takeIf { it.isNotEmpty() }?.let { providers ->
+        if (asking) BotRequestDialog(chat.bot, room.id, providers, null) { asking = false }
+        bySequence[scheduleFrom]?.takeUnless(ChatMessage::deleted)?.let { message ->
+            BotRequestDialog(chat.bot, room.id, providers, message) { scheduleFrom = null }
+        }
     }
 }
 
 @Composable
 private fun SettingsScreen(chat: ChatRepository, state: ChatState, theme: String, listening: Boolean,
-                           background: (Boolean) -> Unit, logout: () -> Unit) {
+                           cloudEnabled: Boolean, background: (Boolean) -> Unit, cloud: @Composable () -> Unit, logout: () -> Unit) {
     val profile = state.settings.optJSONObject("profile")
     val savedName = profile?.optString("displayName").orEmpty()
     val savedBio = profile?.optString("bio").orEmpty()
@@ -237,8 +448,11 @@ private fun SettingsScreen(chat: ChatRepository, state: ChatState, theme: String
         SettingToggle("私聊通知", notifications?.optBoolean("direct", true) ?: true, !state.busy) { chat.save("notifications", "direct", it) }
         SettingToggle("群聊通知", notifications?.optBoolean("groups", true) ?: true, !state.busy) { chat.save("notifications", "groups", it) }
         SettingToggle("显示消息预览", notifications?.optBoolean("preview", true) ?: true, !state.busy) { chat.save("notifications", "preview", it) }
-        SettingToggle("后台通知（本机）", listening, true, background)
-        Text("后台接收期间，Android 会显示一条常驻连接通知。", style = MaterialTheme.typography.bodySmall)
+        cloud()
+        if (!cloudEnabled) {
+            SettingToggle("后台通知（本机）", listening, true, background)
+            Text("后台接收期间，Android 会显示一条常驻连接通知。", style = MaterialTheme.typography.bodySmall)
+        }
         HorizontalDivider()
         Text("外观（本机）", color = MaterialTheme.colorScheme.primary)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -7,7 +7,7 @@ namespace LittleLoop.Tools;
 public sealed record AgentTurnRecord(string DecisionId, string? TurnId, string Prompt, string Status, string Report, string[] Issues);
 public sealed record AgentHostState(AgentHostPolicy Policy, string? ThreadId, string Status, AgentTurnRecord[] Turns);
 
-public sealed class AgentDelegationHost(string directory)
+public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequest, CancellationToken, Task>? onApproval = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly string root = Path.GetFullPath(directory);
@@ -103,6 +103,7 @@ public sealed class AgentDelegationHost(string directory)
                             string nonce = Guid.NewGuid().ToString("N");
                             var request = new AgentApprovalRequest(nonce, eventName, requestId.Clone(), p.Clone(), "pending"); Write(ApprovalFile, request);
                             Save(state with { Status = "awaiting-approval" });
+                            if (onApproval is not null) await onApproval(request, token);
                             Console.WriteLine($"Agent {decision}: {ApprovalFile}\nagent-decide \"{root}\" {nonce} accept|decline");
                             string answerPath = Path.Combine(root, "answer-" + nonce + ".json");
                             while (!File.Exists(answerPath)) await Task.Delay(500, token);
