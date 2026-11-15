@@ -1,0 +1,11 @@
+{
+  "id": "normalize-document",
+  "description": "将文档规范化并验证最终文件",
+  "output": "normalized.txt",
+  "sources": ["missing.txt"],
+  "content": "LittleLoop 自动规划  \r\n从真实结果调整方案\t\r\n",
+  "normalize": true,
+  "budget": 8,
+  "maxReplans": 2,
+  "allowAlternativeOutput": false
+}

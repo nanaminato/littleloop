@@ -1,0 +1,10 @@
+{
+  "protocol": "chat-completions",
+  "endpoint": "https://api.openai.com/v1/chat/completions",
+  "model": "REPLACE_WITH_YOUR_MODEL",
+  "apiKeyEnvironment": "OPENAI_API_KEY",
+  "timeoutSeconds": 60,
+  "maxOutputTokens": 4096,
+  "maxGoalBudget": 12,
+  "tokenLimitParameter": "max_completion_tokens"
+}

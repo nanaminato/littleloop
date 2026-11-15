@@ -1,0 +1,25 @@
+{
+  "task": {
+    "id": "recall",
+    "goal": "Resolve case recall",
+    "facts": {
+      "case": "b"
+    },
+    "goals": [
+      {
+        "id": "resolve",
+        "outcome": "resolved",
+        "priority": 1,
+        "required": true
+      }
+    ],
+    "options": [],
+    "premises": [],
+    "evidence": [],
+    "budget": 1,
+    "allowedCapabilities": [
+      "case.resolve"
+    ]
+  },
+  "priority": 0
+}

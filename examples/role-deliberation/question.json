@@ -1,0 +1,93 @@
+{
+  "id": "question",
+  "goal": "Resolve a billing dispute",
+  "roleVersion": "careful/1",
+  "maximumRisk": 0.5,
+  "budget": 1,
+  "allowedCapabilities": [
+    "ticket.route"
+  ],
+  "options": [
+    {
+      "id": "fast",
+      "kind": "act",
+      "description": "fast",
+      "value": 1,
+      "risk": 0.1,
+      "reason": "Declared action model",
+      "capability": "ticket.route",
+      "cost": 1,
+      "meaning": {
+        "strategy": "fast",
+        "outcomes": [
+          "resolved"
+        ],
+        "traits": [
+          "fast"
+        ],
+        "premises": []
+      }
+    },
+    {
+      "id": "review",
+      "kind": "act",
+      "description": "review",
+      "value": -1,
+      "risk": 0.1,
+      "reason": "Declared action model",
+      "capability": "ticket.route",
+      "cost": 1,
+      "meaning": {
+        "strategy": "review",
+        "outcomes": [
+          "resolved",
+          "audited"
+        ],
+        "traits": [
+          "careful"
+        ],
+        "premises": []
+      }
+    }
+  ],
+  "facts": {
+    "category": "billing"
+  },
+  "cognition": {
+    "goals": [
+      {
+        "id": "resolve",
+        "outcome": "resolved",
+        "priority": 10,
+        "required": true
+      }
+    ],
+    "preferences": [
+      {
+        "id": "caution",
+        "trait": "careful",
+        "priority": 10,
+        "prefer": true
+      }
+    ],
+    "boundaries": [],
+    "premises": [
+      {
+        "id": "outage",
+        "claim": "service-is-down",
+        "expected": true,
+        "essentialToGoal": true
+      }
+    ],
+    "evidence": [
+      {
+        "id": "monitor",
+        "claim": "service-is-down",
+        "value": false,
+        "confidence": 0.95,
+        "source": "service-monitor"
+      }
+    ],
+    "experiences": []
+  }
+}

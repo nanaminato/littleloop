@@ -1,0 +1,25 @@
+{
+  "id": "refuse",
+  "goal": "Route the ticket",
+  "roleVersion": "analyst/1",
+  "maximumRisk": 0.5,
+  "budget": 1,
+  "allowedCapabilities": [
+    "ticket.route"
+  ],
+  "options": [
+    {
+      "cost": 1,
+      "description": "Route to operations",
+      "reason": "Original route suggestion",
+      "id": "operations",
+      "value": 0.5,
+      "risk": 0.2,
+      "kind": "act",
+      "capability": "ticket.route"
+    }
+  ],
+  "facts": {
+    "goalConflict": "The requested resolution requires falsifying the ticket evidence"
+  }
+}

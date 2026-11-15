@@ -1,0 +1,29 @@
+{
+  "task": {
+    "id": "normalize-2",
+    "goal": "Complete a local text-file task",
+    "facts": {
+      "workflow": "notes"
+    },
+    "goals": [
+      {
+        "id": "result",
+        "outcome": "file.created",
+        "priority": 1,
+        "required": true
+      }
+    ],
+    "options": [],
+    "premises": [],
+    "evidence": [],
+    "budget": 1,
+    "allowedCapabilities": [
+      "text.normalize-lines"
+    ],
+    "toolArguments": {
+      "source": "source-b.txt",
+      "target": "normalized-b.txt"
+    }
+  },
+  "priority": 0
+}

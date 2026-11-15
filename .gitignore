@@ -13,10 +13,12 @@ coverage/
 # Local runtime data
 data/
 logs/
+.littleloop-temp/
 *.db
 *.db-shm
 *.db-wal
 .env
+# Includes project-local model credentials (.env.local)
 .env.*
 !.env.example
 

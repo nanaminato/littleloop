@@ -1,0 +1,28 @@
+{
+  "task": {
+    "id": "read-output",
+    "goal": "Complete a local text-file task",
+    "facts": {
+      "workflow": "inspect-output"
+    },
+    "goals": [
+      {
+        "id": "result",
+        "outcome": "text.read",
+        "priority": 1,
+        "required": true
+      }
+    ],
+    "options": [],
+    "premises": [],
+    "evidence": [],
+    "budget": 1,
+    "allowedCapabilities": [
+      "text.read"
+    ],
+    "toolArguments": {
+      "source": "preserved.txt"
+    }
+  },
+  "priority": 0
+}

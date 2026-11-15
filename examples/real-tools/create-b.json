@@ -1,0 +1,29 @@
+{
+  "task": {
+    "id": "create-b",
+    "goal": "Complete a local text-file task",
+    "facts": {
+      "workflow": "prepare-sample"
+    },
+    "goals": [
+      {
+        "id": "result",
+        "outcome": "text.written",
+        "priority": 1,
+        "required": true
+      }
+    ],
+    "options": [],
+    "premises": [],
+    "evidence": [],
+    "budget": 1,
+    "allowedCapabilities": [
+      "text.create"
+    ],
+    "toolArguments": {
+      "target": "source-b.txt",
+      "content": "another document   \r\nnext line  \r\n"
+    }
+  },
+  "priority": 0
+}

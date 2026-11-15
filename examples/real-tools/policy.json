@@ -1,0 +1,11 @@
+{
+  "root": "../../data/real-tools/workspace",
+  "allowedTools": [
+    "text.read",
+    "text.create",
+    "text.copy",
+    "text.normalize-lines"
+  ],
+  "maxFileBytes": 65536,
+  "timeoutMilliseconds": 10000
+}

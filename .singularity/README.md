@@ -9,9 +9,9 @@ python ../singularity/tools/singularity.py --project . impact IFACE-EVENT --dept
 python ../singularity/tools/singularity.py --project . tree VIEW-SYSTEM
 ```
 
-模型描述如何构建认知系统，不保存运行时认知记忆。当前只建立首条认知循环/事件契约/重放验证链，未宣称覆盖全部模块。
+模型描述如何构建认知系统，不保存运行时认知记忆。当前覆盖初始认知循环/事件契约/重放规划，以及插件、角色审议、执行反馈学习、多任务运行时、真实工作区工具、多步目标规划、自然语言追问和可替换大模型语义适配器的增量实现与验证链，未宣称覆盖全部模块。
 
-从现有文档提取的意图保持 candidate。图中的任务和实验状态仍记录原规划。首阶段模拟工单闭环及运行命令见项目 README。EVIDENCE-DOC 仅说明现有文档包含某项设计，不证明功能已实现。
+从现有文档提取的意图保持 candidate；后续用户明确确认的方向单独记录确认依据。初始任务和实验节点保留原规划，后续实现节点依据实际检查记录状态。运行命令见项目 README 及各增量设计文档。EVIDENCE-DOC 仅说明现有文档包含某项设计，不证明功能已实现。
 
 修改使用 apply 批量事务与 expected revision。新的人类确认必须有明确依据。发现表达困难时，将实际案例反馈到 singularity 模型、查询或编辑器的改进中。
 

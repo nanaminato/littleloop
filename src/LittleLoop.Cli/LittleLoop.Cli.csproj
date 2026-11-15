@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../LittleLoop.Core/LittleLoop.Core.csproj" />
+    <ProjectReference Include="../LittleLoop.Tools/LittleLoop.Tools.csproj" />
   </ItemGroup>
 </Project>

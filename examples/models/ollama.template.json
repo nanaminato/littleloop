@@ -1,0 +1,8 @@
+{
+  "protocol": "ollama",
+  "endpoint": "http://localhost:11434/api/chat",
+  "model": "REPLACE_WITH_YOUR_INSTALLED_MODEL",
+  "timeoutSeconds": 60,
+  "maxOutputTokens": 4096,
+  "maxGoalBudget": 12
+}

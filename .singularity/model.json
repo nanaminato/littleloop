@@ -417,6 +417,773 @@
       "references": [
         "REF-ARCH"
       ]
+    },
+    {
+      "id": "INTENT-OPEN-DECISION",
+      "type": "intent",
+      "title": "插件与开放决策",
+      "body": "2026-11-14 用户原话：littleloop 的插件系统可以实现下，同时核心决策不是简单的决策，比如像人一样面对决策时，可以跳出既定选项，甚至可以拒绝。仅确认能力方向；算法为工程选择。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "references": [
+        "REF-DELIBERATION"
+      ],
+      "authorization_basis": "2026-11-14 本轮用户明确要求插件系统和超出既定选项、拒绝的能力；不扩展为具体算法确认。"
+    },
+    {
+      "id": "MOD-DELIBERATION",
+      "type": "module",
+      "title": "插件与开放决策首版",
+      "body": "已实现版本化接口、显式可信 DLL 加载、候选扩展、拒绝和重审前提、权限预算风险检查、记录重放。尚无学习推理、沙箱、外部动作执行；不代表人类级能力完成。",
+      "actor": "Human",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-DELIBERATION"
+      ],
+      "verification_basis": [
+        "EVIDENCE-DELIBERATION"
+      ]
+    },
+    {
+      "id": "EVIDENCE-DELIBERATION",
+      "type": "evidence",
+      "title": "开放决策本地检查",
+      "body": "2026-11-14 .NET 10 构建零警告错误；检查程序及 CLI 三种新情境、四种阶段一情境运行重放通过。",
+      "actor": "Human",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "tests/LittleLoop.Checks 覆盖新候选、拒绝、重审、权限预算风险、失败回退、输入隔离、无效建议及记录重放。CLI 加载实际 DLL 验证 alternative/reframe/refuse，原四情境重放均通过。"
+      },
+      "references": [
+        "REF-DELIBERATION"
+      ]
+    },
+    {
+      "id": "INTENT-ROLE-DELIBERATION",
+      "type": "intent",
+      "title": "角色、经历与目标参与开放决策",
+      "body": "2026-11-14 用户明确要求：核心决策还是不能只靠规则打分，继续完善下，让它能结合角色的偏好、经历和目标，主动质疑前提、提出新方案，甚至拒绝，并说明原因。该确认不等于确认具体算法，也不证明人类级能力已实现。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "2026-11-14 本轮用户上述明确指令，仅确认角色审议能力方向。"
+    },
+    {
+      "id": "EVIDENCE-ROLE-DELIBERATION",
+      "type": "evidence",
+      "title": "角色审议 v2 本地验证",
+      "body": "2026-11-14 构建检查项目及 CLI 零警告错误；检查程序通过角色差异、目标优先、经历召回及反例、矛盾和缺失证据、拒绝和原因引用、权限预算边界、深拷贝及确定性重放。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet build tests/LittleLoop.Checks -m:1 --disable-build-servers 与 dotnet run --no-build --project tests/LittleLoop.Checks 通过；CLI 对 examples/role-deliberation 五个情境运行与重放通过。"
+      },
+      "references": [
+        "REF-ROLE-DELIBERATION",
+        "REF-ROLE-CHECKS"
+      ]
+    },
+    {
+      "id": "MOD-ROLE-DELIBERATION",
+      "type": "module",
+      "title": "角色审议 v2",
+      "body": "新增结构化目标、偏好、底线、前提、来源证据及经历快照。检索相关成功策略提出新候选、失败经历形成反例；核心推导重审前提、追问、拒绝，行动通过论证后按目标和偏好取舍，不使用 Value 分数。记录原因引用与取舍，支持重放。语义为精确标签，未实现自然语言理解或多步规划。运行时自动经历积累与反馈修正由 MOD-EXECUTION-LEARNING 增量提供，推理器仍消费可重放快照。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ROLE-DELIBERATION"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ROLE-DELIBERATION",
+        "REF-ROLE-CHECKS"
+      ]
+    },
+    {
+      "id": "INTENT-EXECUTION-LEARNING",
+      "type": "intent",
+      "title": "从执行与反馈自动积累和纠正经历",
+      "body": "2026-11-14 用户明确要求：继续完善下，让它能从实际执行结果和反馈中自动积累经历、修正判断，影响后续决策，而不是一直靠手工提供角色和经历数据。确认能力方向，不把具体学习算法或实现验证混同于人类授权。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "本轮用户明确要求执行结果与反馈驱动的自动经历积累、判断修正及后续决策影响。"
+    },
+    {
+      "id": "EVIDENCE-EXECUTION-LEARNING",
+      "type": "evidence",
+      "title": "持久化执行反馈闭环验证",
+      "body": "2026-11-14 检查项目与 CLI 构建零警告错误，全部行为检查通过。CLI 独立进程序列：初始 direct 失败，随后 review 成功，空候选召回 review，反馈纠正后重新选择 direct，旧决策重放通过。示例环境为模拟执行器，不证明真实外部工具或留出任务学习收益。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet run --no-build --project tests/LittleLoop.Checks 通过；learn-init/run/feedback/decide/replay 端到端通过，覆盖幂等、过期反馈、执行关联、pending 恢复、写锁和快照重放。"
+      },
+      "references": [
+        "REF-EXECUTION-LEARNING",
+        "REF-LEARNING-CHECKS"
+      ]
+    },
+    {
+      "id": "MOD-EXECUTION-LEARNING",
+      "type": "module",
+      "title": "持久化执行与反馈经历宿主",
+      "body": "LearningSession 自动组装角色及匹配经历快照，先持久化决策，再接收执行器回执；比较实际结果与目标，自动形成经历和预测差异，最新关联反馈修正经历解释。JSON 原子替换、写锁、修订号、回执幂等、反馈链和原快照重放已实现。默认角色免配置；提供模拟执行器和外部回执接口，真实本地文件工具已由 MOD-WORKSPACE-TOOLS 增量接入；不自动修改性格/底线，不代表完整阶段三训练。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-EXECUTION-LEARNING"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-EXECUTION-LEARNING",
+        "REF-LEARNING-CHECKS"
+      ]
+    },
+    {
+      "id": "INTENT-SINGLE-CORE-MULTITASK",
+      "type": "intent",
+      "title": "一个角色一个认知核心处理多个任务",
+      "body": "2026-11-14 用户讨论单核心多任务的资源优势，随后对一个角色、一个认知核心、多任务上下文、多个执行器方案明确回应：对你先进行持续实现，作为一个目标，先逐步推进。确认架构方向和持续实现授权，不等于确认具体调度公式或性能收益。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "本轮用户明确认可前一轮单角色串行认知、多任务上下文、并发执行器方案并要求作为目标持续实现。"
+    },
+    {
+      "id": "EVIDENCE-MULTITASK",
+      "type": "evidence",
+      "title": "多任务运行时本地验证",
+      "body": "2026-11-14 .NET 10 检查项目及 CLI 构建零警告错误，全部原有及新增检查通过。受控执行器验证两任务并发时第三任务可继续思考；版本更新后旧结果和反馈不能覆盖新任务；预算、老化、公平性、单驱动租约、持续消息、恢复和共享经历通过。CLI 三任务完成，实测审计峰值在途数为2；第四个空候选任务通过召回完成，四条记录均重放成功。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet run --no-build --project tests/LittleLoop.Checks 全部通过；examples/multitask 经 tasks-enable/add/run、共享经历追加与 learn-replay 端到端验证。没有真实外部工具或内存性能对照实验。"
+      },
+      "references": [
+        "REF-MULTITASK-DESIGN",
+        "REF-MULTITASK-CHECKS",
+        "REF-MULTITASK-CORE",
+        "REF-MULTITASK-DRIVER"
+      ]
+    },
+    {
+      "id": "MOD-MULTITASK",
+      "type": "module",
+      "title": "单核心多任务调度与并发执行运行时",
+      "body": "已实现 WorkItem 独立输入版本/状态，带优先级、截止时间及等待老化的串行认知，分离计划与派发，角色级和任务级累计预算预留，并发执行上限，迟到结果原位归档与新版本保护。MultiTaskRuntime 串行消息入口支持持续运行、任务修改、反馈、未知结果核实与预算增量；持久化事务及现有经历学习整合。同步可信插件仍可能阻塞核心；JSON 日志未做大规模索引；外部工具沙箱与普遍多步规划未实现。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-MULTITASK"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-MULTITASK-DESIGN",
+        "REF-MULTITASK-CHECKS",
+        "REF-MULTITASK-CORE",
+        "REF-MULTITASK-DRIVER"
+      ]
+    },
+    {
+      "id": "ACCEPT-TASK-VERSION",
+      "type": "acceptance",
+      "title": "任务版本与迟到结果隔离",
+      "body": "已验证逻辑任务更新到版本 N+1 后，版本 N 的回执与反馈仅更新原执行档案和相应经历解释，不覆盖当前 WorkItem。范围为本次任务运行时，不替代所有未来后台模块的版本验证。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-MULTITASK"
+      ],
+      "attributes": {
+        "criterion": "执行中更新任务版本，再交付旧版本结果和反馈，断言新任务版本、当前决策关联和状态不被旧结果覆盖。"
+      },
+      "references": [
+        "REF-MULTITASK-CHECKS"
+      ]
+    },
+    {
+      "id": "INTENT-REAL-TOOL-LEARNING",
+      "type": "intent",
+      "title": "实际工具完成任务并从真实结果学习",
+      "body": "2026-11-14 用户明确要求继续推进下一个阶段，把实际工具执行接进来，让它能真正完成任务，并根据执行结果和反馈积累经历，不要一直停留在模拟环境。首批选择本地文本文件工具是工程落地范围，不代表用户逐项确认工具协议或通用代理能力已完成。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "本轮用户明确要求实际工具执行、真实任务结果和反馈驱动的经历积累。"
+    },
+    {
+      "id": "EVIDENCE-REAL-TOOLS",
+      "type": "evidence",
+      "title": "真实文件执行与反馈闭环验证",
+      "body": "2026-11-14 检查项目及 CLI 构建零警告错误；所有既有和真实文件检查通过，包括符号链接边界、设备名、禁止覆盖、跨文件绑定、参数相关失败、反馈改变工具、并发同目标、任务版本和重放。CLI 真实执行创建两个源文件、规范化两个文件、反馈后复制保留格式、实际读回，共六次工具调用；第二次规范化选择 recall，反馈后选择 text.copy，六条决策重放未改动输出。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet run --no-build --project tests/LittleLoop.Checks 全部通过；examples/real-tools 命令链在 data/real-tools-demo-be9a2fa5 生成可查看文件，输出通过逐字节和 SHA-256 检查。工具执行来源 workspace-tools/1，无模拟结果映射。"
+      },
+      "references": [
+        "REF-WORKSPACE-TOOLS",
+        "REF-WORKSPACE-EXECUTOR",
+        "REF-REAL-TOOL-CHECKS"
+      ]
+    },
+    {
+      "id": "MOD-WORKSPACE-TOOLS",
+      "type": "module",
+      "title": "实际工作区文本工具执行器",
+      "body": "独立 LittleLoop.Tools 提供 text.read/create/copy/normalize-lines 目录、自动候选插件和真实异步文件执行器。工具方案保存参数绑定，本次参数随任务快照保存，经历召回不会复用旧文件路径；实际回执记录字节数、SHA-256、输出内容及副作用。执行校验宿主工具许可、目录范围、最低成本风险和当前任务版本；新文件不覆盖发布并读回验证。进程内状态门协调执行校验与原子保存。已接入多任务与反馈学习，不是 OS 沙箱，不含任意 shell/网络/通用多步规划。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-REAL-TOOLS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-WORKSPACE-TOOLS",
+        "REF-WORKSPACE-EXECUTOR",
+        "REF-REAL-TOOL-CHECKS"
+      ]
+    },
+    {
+      "id": "INTENT-GOAL-PLANNING",
+      "type": "intent",
+      "title": "目标自动分解、组合工具与结果驱动调整",
+      "body": "2026-11-14 用户明确要求：继续推进，让它能把一个目标拆成多个步骤，自动组合工具完成任务，遇到失败能根据实际结果调整方案，而不是每一步都需要手工指定。文本领域与有界符号搜索是工程落地选择，非用户逐项确认。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested goal decomposition, automatic tool composition, and replanning from actual failures on 2026-11-14. Engineering choices and verification are AI-authored.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-GOAL-PLANNING",
+      "type": "module",
+      "title": "持久化多步目标规划与真实工具编排",
+      "body": "已实现结构化文本目标的有界广度优先搜索，自动组合读、创建、复制、规范化、验证操作。单步经既有角色审议与真实执行器，回执驱动事实推进和经历积累。缺失或无效来源切换备用资源，目标允许才另存；预算、重规划次数、权限、未知执行和产物哈希限制继续行动。原子保存方案历史与子任务，支持多目标共享核心和对账后恢复。范围不包括任意自然语言理解、自动发明算子或通用业务语义验证。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-GOAL-PLANNING"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-GOAL-DESIGN",
+        "REF-GOAL-CORE",
+        "REF-GOAL-TOOLS",
+        "REF-GOAL-CHECKS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-GOAL-PLANNING",
+      "type": "evidence",
+      "title": "多步真实文件目标及失败恢复验证",
+      "body": "2026-11-14 CLI 与检查项目构建零警告错误，全部既有与新增检查通过。覆盖来源失败重规划、内容三步组合、冲突保护与允许另存、预算/权限/次数限制、多目标、外部改动哈希检测、未知执行不重复、对账恢复、完成后重启。真实 CLI 示例在 data/goal-demo-0c6b97f2 完成：四次实际调用、一次真实失败、两版方案、规范化产物已读回验证。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet run --no-build --project tests/LittleLoop.Checks 全部通过；goals-add/goals-run 实际完成 examples/goals/normalize.json，无模拟结果映射。"
+      },
+      "references": [
+        "REF-GOAL-DESIGN",
+        "REF-GOAL-CORE",
+        "REF-GOAL-TOOLS",
+        "REF-GOAL-CHECKS"
+      ]
+    },
+    {
+      "id": "INTENT-LANGUAGE-GOALS",
+      "type": "intent",
+      "title": "自然语言目标、约束提取与主动追问",
+      "body": "2026-11-14 用户明确要求：继续推进，让它能理解自然语言描述的目标，自己提取约束、拆分步骤并选择工具，信息不足时主动追问，不再需要手工填写结构化目标。首批文本领域、本地语法和交互 CLI 为 AI 工程选择，不等同于用户确认全部实现细节或开放领域能力已完成。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested natural-language goals, constraint extraction, automatic planning/tool selection and clarification for missing information on 2026-11-14.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-LANGUAGE-GOALS",
+      "type": "module",
+      "title": "有限领域自然语言目标与持久化澄清",
+      "body": "document-language/1 从中英文文本提取来源、输出、规范化或保留格式、预算、重规划次数和允许另存约束，保存原话证据。缺失、冲突、未知附加要求主动追问；回答绑定已保存的问题。信息齐全后对话与目标在同一 expected revision 事务中提交，复用既有规划器、角色审议、真实工具与经历库。goal-chat 自动执行，goal-say 支持逐次入队。当前是有限文本领域的确定性语法，不包括通用口语理解、外部模型调用、语言规则自动学习或对已执行目标的自然语言修改。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-LANGUAGE-GOALS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-LANGUAGE-DESIGN",
+        "REF-LANGUAGE-CORE",
+        "REF-LANGUAGE-TOOLS",
+        "REF-LANGUAGE-CLI",
+        "REF-LANGUAGE-CHECKS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-LANGUAGE-GOALS",
+      "type": "evidence",
+      "title": "自然语言到真实工具链及追问验证",
+      "body": "2026-11-14 CLI 与检查项目构建零警告错误，194 条 PASS 检查全部通过。覆盖完整中英文请求、否定、四轮持久化澄清、解释重放、引用文本隔离、未知要求、部分变换、同路径、数值冲突与版本冲突、重复提交，以及真实执行与备用内容恢复。CLI 在 data/language-demo-a8e1e63e 完成四轮对话到读取、规范化、验证三步真实文件任务，用户自然语言提取预算为六次。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet run --no-build --project tests/LittleLoop.Checks: All checks passed, 194 PASS entries; goal-chat completed conversation-demo with 4 turns and 3 tool steps."
+      },
+      "references": [
+        "REF-LANGUAGE-DESIGN",
+        "REF-LANGUAGE-CORE",
+        "REF-LANGUAGE-TOOLS",
+        "REF-LANGUAGE-CLI",
+        "REF-LANGUAGE-CHECKS"
+      ]
+    },
+    {
+      "id": "INTENT-MODEL-SEMANTICS",
+      "type": "intent",
+      "title": "可替换大模型理解与多协议扩展",
+      "body": "2026-11-14 用户明确要求接入可替换大模型语义理解，让自由目标描述保留约束校验、主动追问和实际执行反馈闭环；随后指定 DeepSeek 服务用于实际验证，并要求保留 OpenAI 接口以便后续支持多种接口。配置模型、HTTP 参数、审计结构和首批工具领域是 AI 工程选择；此模型不保存凭证。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested replaceable LLM semantic understanding, constraint checks, clarification and execution feedback; selected DeepSeek for live integration and requested retaining OpenAI interfaces for future multi-protocol support.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-MODEL-SEMANTICS",
+      "type": "module",
+      "title": "可替换模型语义与宿主校验",
+      "body": "新增 IAsyncGoalInterpreter 与 ISemanticModelClient；Chat Completions 兼容 DeepSeek/OpenAI，Ollama 使用独立协议分支。自由语言候选按白名单、结构、枚举、路径、预算和原文证据检查，未知与冲突追问；旧约束保留，新增解释经原子 revision 提交。API 有超时、请求输入/响应字节/token 上限，无自动重试/重定向/降级执行。失败保存为追问；角色决策与工作区权限仍独立。记录模型来源、上下文摘要与响应支持离线重放。模型仅解释文本领域目标，不提供任意业务工具、不训练语言模型、不声称证据引用能够证明语义绝无遗漏。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-MODEL-SEMANTICS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-MODEL-SEMANTICS-DESIGN",
+        "REF-MODEL-CLIENT",
+        "REF-MODEL-INTERPRETER",
+        "REF-MODEL-CHECKS",
+        "REF-MODEL-DEEPSEEK"
+      ]
+    },
+    {
+      "id": "EVIDENCE-MODEL-SEMANTICS",
+      "type": "evidence",
+      "title": "DeepSeek 实际服务与故障边界验证",
+      "body": "2026-11-14 CLI 与检查项目构建零警告错误，全部 218 条 PASS 检查通过。DeepSeek deepseek-flash 实际完成自由描述规范化、主动追问后保留格式复制、源文件缺失后备用来源恢复三组 CLI 任务；共十次实际工具调用，最终文件逐字节匹配，三段语义历史离线重放通过。原始沙箱网络失败保留，获准联网后重试成功。离线 HTTP handler 验证两种协议、错误/截断/超时/预算/取消/状态冲突/凭证过滤，并验证实际反馈可否决后续模型计划。OpenAI 和 Ollama 未做真实服务调用；HTTP handler 不构成通用模型语义准确率证明。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet run --no-build --project tests/LittleLoop.Checks: 218 PASS, All checks passed. data/model-demo-9a9397d3 contains 3 completed goals with 3/3/4 tool steps and 0/0/1 replans; all saved semantic dialogues replayed offline, output byte checks passed. No credentials written to project artifacts."
+      },
+      "references": [
+        "REF-MODEL-SEMANTICS-DESIGN",
+        "REF-MODEL-CLIENT",
+        "REF-MODEL-INTERPRETER",
+        "REF-MODEL-CHECKS",
+        "REF-MODEL-DEEPSEEK"
+      ]
+    },
+    {
+      "id": "INTENT-MODEL-PLANNING",
+      "type": "intent",
+      "title": "模型参与执行规划并持久化本地凭证",
+      "body": "2026-11-14 用户明确要求：让大模型参与复杂任务拆解和方案调整，执行中遇到新信息或失败时重新规划，同时保留核心自己的判断、约束校验和拒绝能力；还要求项目启动时直接使用密钥且不被 Git 追踪。当前注册文本操作、规划预算、具体本地配置格式是工程选择，不代表通用复杂任务能力已经完成。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested model-assisted task decomposition and replanning from new execution information/failure while retaining core judgment, validation and refusal, plus persistent project-local credentials excluded from Git.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-MODEL-PLANNING",
+      "type": "module",
+      "title": "执行中模型规划与核心裁决",
+      "body": "IGoalPlanningAdvisor 在初始拆解及每次实际回执后提出完整剩余操作链，可使用已授权备用来源并使读取事实失效，支持 ask/refuse。核心独立验证注册算子、依赖、所有目标要求、权限和剩余预算；每步仍经过角色审议。规划上下文包含有界实际回执与文件片段；未知执行保持对账，服务失败不降级执行。PlanningReview 追加审计、模型次数限制、expected revision 提交与持久化回答已实现。LocalModelSecrets 自动从进程环境或项目 .env.local 读取指定凭证，忽略文件不进入 Git。范围仍是注册文本操作，不包含任意业务工具或通用层级规划。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-MODEL-PLANNING"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-MODEL-PLANNING-DESIGN",
+        "REF-MODEL-PLANNING-ADVISOR",
+        "REF-MODEL-PLANNING-CHECKS",
+        "REF-LOCAL-MODEL-SECRETS",
+        "REF-LOCAL-SECRET-EXAMPLE"
+      ]
+    },
+    {
+      "id": "EVIDENCE-MODEL-PLANNING",
+      "type": "evidence",
+      "title": "实际模型重规划与凭证启动验证",
+      "body": "2026-11-14 CLI 和检查项目构建零警告错误，238 条 PASS 全部通过。实际 DeepSeek 目标 live-planning-v2 经四次规划审议与四次真实工具调用完成，一次缺失源失败后调整计划并验证产物；data/planning-demo-8a275d03 保存实际审议和回执。首个试验因可选空字段兼容被核心阻塞且未执行工具，保留记录；修正并新增回归后完成。另验证新观察驱动换源、角色否决、无效计划拒绝、追问恢复、次数限制、revision 冲突和审计追加。无进程密钥环境变量，从项目外目录启动仍能读本地凭证；完成状态未改变，无重做。git check-ignore 与 git ls-files 确认本地凭证忽略且未追踪。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "dotnet run --no-build --project tests/LittleLoop.Checks: 238 PASS / All checks passed. Real DeepSeek planning reviews accepted 4 times, tool steps 4, failure replans 1, final UTF-8 bytes verified. External-directory startup succeeded using local ignored credentials, completed state file hash unchanged. No credential values stored in project model."
+      },
+      "references": [
+        "REF-MODEL-PLANNING-DESIGN",
+        "REF-MODEL-PLANNING-ADVISOR",
+        "REF-MODEL-PLANNING-CHECKS",
+        "REF-LOCAL-MODEL-SECRETS",
+        "REF-LOCAL-SECRET-EXAMPLE"
+      ]
+    },
+    {
+      "id": "INTENT-DEVELOPMENT",
+      "type": "intent",
+      "title": "Real development task execution",
+      "body": "User requests project search, code modification, commands and tests, autonomous adjustment from failures, retaining permission boundaries, core judgment and experience accumulation.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "User explicitly requested these development capabilities and boundaries on 2026-11-14."
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {},
+      "references": [
+        "REF-DEVELOPMENT-DESIGN",
+        "REF-DEVELOPMENT-RUNNER",
+        "REF-DEVELOPMENT-EXECUTOR",
+        "REF-DEVELOPMENT-CHECKS"
+      ],
+      "id": "MOD-DEVELOPMENT",
+      "type": "module",
+      "title": "Model-guided real development tools",
+      "body": "One action per model review; real search/read/hash-guarded patch/fixed host command execution. Core role judgment and persistent feedback episodes retained. Required tests must pass final scoped snapshot. Known test failures replan; unknown effects require reconciliation. Fixed commands are not an OS sandbox.",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-DEVELOPMENT"
+      ]
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {
+        "observation": "Actual Python processes, persisted stdout/stderr/exit codes and final snapshot proof; controlled model tests cover failed patch recovery, role refusal, stale edits, authorization rejection, timeout and credential environment scrubbing."
+      },
+      "references": [
+        "REF-DEVELOPMENT-DESIGN",
+        "REF-DEVELOPMENT-RUNNER",
+        "REF-DEVELOPMENT-EXECUTOR",
+        "REF-DEVELOPMENT-CHECKS"
+      ],
+      "id": "EVIDENCE-DEVELOPMENT",
+      "type": "evidence",
+      "title": "Real development verification",
+      "body": "2026-11-14: CLI and checks build successfully; all 253 checks pass. Real DeepSeek run data/development-demo completed with 6 tool actions and 1 failed test followed by repair and passing test. Protected tests unchanged. Local credential file remains ignored and untracked.",
+      "verification": "unverified"
+    },
+    {
+      "id": "INTENT-REPOSITORY-DEVELOPMENT",
+      "type": "intent",
+      "title": "Multi-file development in real projects",
+      "body": "User explicitly requests understanding project structure, locating problems, modifying multiple files, running relevant tests and replanning from failures while retaining permission boundaries, core judgment and accumulated experience; beyond the addition fixture.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "User explicitly requested multi-file real project development and retained safety/core/experience boundaries on 2026-11-14."
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {},
+      "references": [
+        "REF-REPOSITORY-DESIGN",
+        "REF-REPOSITORY-INSPECTION",
+        "REF-REPOSITORY-CHECKS",
+        "REF-REPOSITORY-ACCEPTANCE",
+        "REF-REPOSITORY-PREPARE"
+      ],
+      "id": "MOD-REPOSITORY-DEVELOPMENT",
+      "type": "module",
+      "title": "Multi-file repository development",
+      "body": "Paginated project structure and declared project references, subtree search, numbered source ranges with full hashes, persistent modified-file context and command diagnostics. Sequential multi-file patches retain role decisions and actual-result learning. Host test descriptions and related paths guide order; all designated tests remain mandatory. Protected verifier baseline and final scoped snapshot proof. SDK home/cache use project-local temporary directories, fixed system install directory allowlist; commands are not OS sandboxed. Reviewed model-produced dev-map CLI changes are integrated.",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-REPOSITORY-DEVELOPMENT"
+      ]
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {
+        "observation": "data/repository-demo-v2/state.json records all model reviews, real process stdout/stderr/exit codes, changes and final completed result. data/repository-demo preserves unsuccessful SDK setup attempt. Main regression output data/repository-checks.log contains 261 PASS. No source credentials copied into test project."
+      },
+      "references": [
+        "REF-REPOSITORY-DESIGN",
+        "REF-REPOSITORY-INSPECTION",
+        "REF-REPOSITORY-CHECKS",
+        "REF-REPOSITORY-ACCEPTANCE",
+        "REF-REPOSITORY-PREPARE"
+      ],
+      "id": "EVIDENCE-REPOSITORY-DEVELOPMENT",
+      "type": "evidence",
+      "title": "Real LittleLoop multi-file task evidence",
+      "body": "2026-11-14: 261 main regression checks passed; 8 CLI acceptance assertions passed against integrated code. DeepSeek used 20 real tools to modify DevelopmentCommand.cs and Program.cs in a source copy, recovered from missing-feature assertion, exact patch mismatch and C# compilation error, then passed all 8 protected acceptance checks with matching final snapshots. Test source byte-identical. First SDK environment failure and core refusal retained separately. Builds zero warnings/errors.",
+      "verification": "unverified"
+    },
+    {
+      "id": "INTENT-PROJECT-DISCOVERY",
+      "type": "intent",
+      "title": "Project path and natural-language goal with explicit expansion requests",
+      "body": "User requests direct real project path and natural-language development goal, automatic project/build/test discovery without enumerating files or commands, reasoned permission expansion requests, retained core judgment, replanning and experience accumulation.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "User explicitly requested automatic project discovery and reasoned permission applications while preserving core judgment, recovery and memory on 2026-11-14."
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {},
+      "references": [
+        "REF-DISCOVERY-DESIGN",
+        "REF-DISCOVERY-DISCOVERY",
+        "REF-DISCOVERY-HOST",
+        "REF-DISCOVERY-CLI",
+        "REF-DISCOVERY-GRANTS",
+        "REF-DISCOVERY-CHECKS"
+      ],
+      "id": "MOD-PROJECT-DISCOVERY",
+      "type": "module",
+      "title": "Project discovery and host permission workflow",
+      "body": "Read-only path discovery proposes bounded source scope and fixed .NET/unittest build/test commands. Initial snapshot-bound host approval precedes model upload or execution. Restore commands remain ungranted candidates. Model permission requests pause; ordinary answers cannot grant. Trusted host transitions active policy hash with append-only decisions, preserving goal/budgets/reviews/episodes; current grants visible to planner. Node/unknown tests/external references ask for clarification. Zero unittest count is not success. Commands remain outside OS sandbox guarantees.",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-PROJECT-DISCOVERY"
+      ]
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {
+        "observation": "data/discovery-demo/session-v3/learning.json retains permission request, approved old/new hashes, model reviews, 8 actual tool receipts, 2 failures and final proof; job.json holds discovered evidence and grant versions. session and session-v2 retain earlier attempts. data/discovery-checks.log contains 280 PASS. Credentials remain ignored/untracked; no values recorded."
+      },
+      "references": [
+        "REF-DISCOVERY-DESIGN",
+        "REF-DISCOVERY-DISCOVERY",
+        "REF-DISCOVERY-HOST",
+        "REF-DISCOVERY-CLI",
+        "REF-DISCOVERY-GRANTS",
+        "REF-DISCOVERY-CHECKS"
+      ],
+      "id": "EVIDENCE-PROJECT-DISCOVERY",
+      "type": "evidence",
+      "title": "Automatic discovery, real restore approval and recovery evidence",
+      "body": "2026-11-14: 280 main checks and 11 integrated CLI acceptance assertions passed; builds zero warnings/errors. Real DeepSeek session-v3 discovered five .NET commands without supplied policy. Missing assets caused test failure, model requested exact discovered restore, test host explicitly approved; same session executed restore and corrected argument validation from real test failure, completed after 8 tool actions and 2 known failures. Five independent project assertions passed; protected verifier unchanged. Earlier format/approval-context failures retained, adapters corrected, bounded host retry preserves original audit and budget.",
+      "verification": "unverified"
+    },
+    {
+      "id": "INTENT-RELAXKONOS-GUIDANCE",
+      "type": "intent",
+      "title": "Try guiding RelaxKonOS development",
+      "body": "User requested trying LittleLoop as a development guide for RelaxKonOS and asked whether it can control Codex/other agents. User separately explicitly approved sending the bounded selected Markdown documents to configured DeepSeek for this read-only report. No external agent session or operational deployment authorized by this record.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "User asked to try guiding RelaxKonOS; then explicitly approved this one bounded document transfer to configured DeepSeek after the automatic review rejection."
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {},
+      "references": [
+        "REF-GUIDANCE-DESIGN",
+        "REF-GUIDANCE-CORE",
+        "REF-GUIDANCE-CLI"
+      ],
+      "id": "MOD-PROJECT-GUIDANCE",
+      "type": "module",
+      "title": "Bounded read-only project guidance",
+      "body": "dev-guide gathers up to ten root/linked Markdown sources with hashes and bounded excerpts, calls configured model, saves evidence and advisory draft outside target. No command execution, agent messaging, session control or authorization adapter. Full RelaxKonOS discovery hit the existing file limit; advisory route succeeded without modifying target.",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-PROJECT-GUIDANCE"
+      ]
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {
+        "observation": "data/guidance-checks.log; data/relaxkonos-guidance/advice.json; data/relaxkonos-guidance/review.json. Initial automatic review rejected transfer; subsequent explicit user grant preceded successful retry."
+      },
+      "references": [
+        "REF-GUIDANCE-DESIGN",
+        "REF-GUIDANCE-CORE",
+        "REF-GUIDANCE-CLI"
+      ],
+      "id": "EVIDENCE-PROJECT-GUIDANCE",
+      "type": "evidence",
+      "title": "RelaxKonOS guidance experiment",
+      "body": "281 main checks passed and CLI build succeeded. After explicit user approval of external transfer, LittleLoop produced real DeepSeek guidance from 8 documents in data/relaxkonos-guidance/advice.json. Host review narrowed work to acceptance matrix/preflight and corrected Android document ownership. No tests or deployments executed in RelaxKonOS, no agent sessions created or messages sent. Codex app-server help available locally; protocol not connected.",
+      "verification": "unverified"
+    },
+    {
+      "id": "INTENT-CODEX-AGENT",
+      "type": "intent",
+      "title": "Delegate via Codex App Server with policy-driven authorization",
+      "body": "User explicitly requests creating/resuming agent sessions, sending tasks, observing results and adjusting subsequent work, autonomous permission handling or waiting/user routing according to user instructions, retained core judgment and experience, and an actual RelaxKonOS acceptance-matrix run. This does not authorize production deployment or unbounded privilege expansion.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "User explicitly requested Codex App Server integration and an actual RelaxKonOS acceptance-matrix delegation on 2026-11-14, including autonomous or user-directed authorization handling."
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {},
+      "references": [
+        "REF-CODEX-AGENT-DESIGN",
+        "REF-CODEX-AGENT-CLIENT",
+        "REF-CODEX-AGENT-HOST",
+        "REF-CODEX-AGENT-APPROVAL",
+        "REF-CODEX-AGENT-CLI",
+        "REF-CODEX-AGENT-CHECKS",
+        "REF-CODEX-DEVELOPMENT-DESIGN",
+        "REF-CODEX-DEVELOPMENT-BRIDGE"
+      ],
+      "id": "MOD-CODEX-AGENT",
+      "type": "module",
+      "title": "Codex sessions with matrix and bounded development workflows",
+      "body": "Persistent App Server transport supports matrix planning and dynamic host-owned project tools. Development tools use core scheduling, fixed file and command grants, observed hashes, protected test baselines, final-snapshot verification, call-ID deduplication and wait/user/decline authorization. Tool result feedback is scoped by source snapshot. Native desktop provisioning remains unavailable; managed host bridge supplies file and test execution. No arbitrary shell, automatic privilege expansion or production deployment.",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CODEX-AGENT",
+        "EVIDENCE-CODEX-DEVELOPMENT"
+      ]
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "attributes": {
+        "observation": "data/codex-relaxkonos/session/{agent.json,learning.json,events.jsonl,context-3.json}; data/codex-relaxkonos/matrix.md and matrix.json; data/agent-checks.log has 297 PASS. Device installation/update/uninstall was not executed. Native standalone Codex shell provisioning unavailable; final review used explicitly sourced host documentation."
+      },
+      "references": [
+        "REF-CODEX-AGENT-DESIGN",
+        "REF-CODEX-AGENT-CLIENT",
+        "REF-CODEX-AGENT-HOST",
+        "REF-CODEX-AGENT-APPROVAL",
+        "REF-CODEX-AGENT-CLI",
+        "REF-CODEX-AGENT-CHECKS"
+      ],
+      "id": "EVIDENCE-CODEX-AGENT",
+      "type": "evidence",
+      "title": "Real RelaxKonOS session creation, repair and resume",
+      "body": "2026-11-14: 297 main checks pass; CLI and checks build with zero warnings/errors. Real App Server thread 01a1da9f-f689-7193-a27f-a90dd0ff5773 completed 3 turns: first lacked evidence paths after native file tooling provisioning failure, host negative feedback triggered automatic correction, then a new process resumed same thread and reviewed host-supplied hashed document snapshots. Final matrix contains six blocked device scenarios. Learning records 3 episodes with feedback false/true/true. Zero fileChange events and zero live approval requests. Approval accept/wait/user/decline, stale nonce, role refusal and unknown-response guards tested via protocol simulator, not claimed live approvals.",
+      "verification": "unverified"
+    },
+    {
+      "id": "INTENT-CODEX-DEVELOPMENT",
+      "type": "intent",
+      "title": "Delegate bounded real code development through standalone Codex",
+      "body": "User requests working file tools, real project code edits and tests, result-driven task adjustment, authorization handling and retained core judgment and experience. Select and complete a bounded RelaxKonOS development task. No production deployment or unlimited privileges authorized.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "Explicit user request for bounded RelaxKonOS coding and tests on 2026-11-14"
+    },
+    {
+      "id": "EVIDENCE-CODEX-DEVELOPMENT",
+      "type": "evidence",
+      "title": "RelaxKonOS actual app ID repair and 19 passing regression cases",
+      "body": "2026-11-14: 308 LittleLoop checks pass. Real Codex thread 01a1dab6-45ed-7a71-bc00-c96bab08902f reproduced trailing-newline acceptance, patched strict regex end anchor, and reran the fixed test command successfully in one turn. Host validated protected inputs and final snapshot. Hash-guarded delivery copied the one-line source change and two regression project files to D:/RelaxKon/RelaxKonOS; real-directory test rerun passed 19 cases. Earlier bridge failures retained. Wait/decline authorization and duplicate calls covered by protocol tests; no live interactive approval or deployment claimed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/relaxkonos-development/final; data/relaxkonos-development/delivery.json; data/agent-checks.txt (308 PASS)"
+      },
+      "references": [
+        "REF-CODEX-DEVELOPMENT-DESIGN",
+        "REF-CODEX-DEVELOPMENT-BRIDGE",
+        "REF-CODEX-AGENT-CHECKS"
+      ]
     }
   ],
   "relations": [
@@ -611,6 +1378,312 @@
       "type": "references",
       "source": "QUESTION-EVENT",
       "target": "IFACE-EVENT"
+    },
+    {
+      "id": "REL-DELIBERATION-CONTAINS",
+      "type": "contains",
+      "source": "SYS-LITTLELOOP",
+      "target": "MOD-DELIBERATION"
+    },
+    {
+      "id": "REL-DELIBERATION-IMPLEMENTS",
+      "type": "implements",
+      "source": "MOD-DELIBERATION",
+      "target": "INTENT-OPEN-DECISION"
+    },
+    {
+      "id": "REL-DELIBERATION-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-DELIBERATION",
+      "target": "MOD-DELIBERATION"
+    },
+    {
+      "id": "REL-ROLE-CONTAINS",
+      "type": "contains",
+      "source": "MOD-DELIBERATION",
+      "target": "MOD-ROLE-DELIBERATION"
+    },
+    {
+      "id": "REL-ROLE-IMPLEMENTS",
+      "type": "implements",
+      "source": "MOD-ROLE-DELIBERATION",
+      "target": "INTENT-ROLE-DELIBERATION"
+    },
+    {
+      "id": "REL-ROLE-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ROLE-DELIBERATION",
+      "target": "MOD-ROLE-DELIBERATION"
+    },
+    {
+      "id": "REL-LEARNING-CONTAINS",
+      "type": "contains",
+      "source": "SYS-LITTLELOOP",
+      "target": "MOD-EXECUTION-LEARNING"
+    },
+    {
+      "id": "REL-LEARNING-DEPENDS",
+      "type": "depends_on",
+      "source": "MOD-EXECUTION-LEARNING",
+      "target": "MOD-ROLE-DELIBERATION"
+    },
+    {
+      "id": "REL-LEARNING-IMPLEMENTS",
+      "type": "implements",
+      "source": "MOD-EXECUTION-LEARNING",
+      "target": "INTENT-EXECUTION-LEARNING"
+    },
+    {
+      "id": "REL-LEARNING-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-EXECUTION-LEARNING",
+      "target": "MOD-EXECUTION-LEARNING"
+    },
+    {
+      "id": "REL-MULTITASK-CONTAINS",
+      "type": "contains",
+      "source": "SYS-LITTLELOOP",
+      "target": "MOD-MULTITASK"
+    },
+    {
+      "id": "REL-MULTITASK-INTENT",
+      "type": "implements",
+      "source": "MOD-MULTITASK",
+      "target": "INTENT-SINGLE-CORE-MULTITASK"
+    },
+    {
+      "id": "REL-MULTITASK-LEARNING",
+      "type": "depends_on",
+      "source": "MOD-MULTITASK",
+      "target": "MOD-EXECUTION-LEARNING"
+    },
+    {
+      "id": "REL-MULTITASK-SERIAL",
+      "type": "implements",
+      "source": "MOD-MULTITASK",
+      "target": "DEC-SERIAL"
+    },
+    {
+      "id": "REL-MULTITASK-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-MULTITASK",
+      "target": "MOD-MULTITASK"
+    },
+    {
+      "id": "REL-MULTITASK-VERSION",
+      "type": "verifies",
+      "source": "ACCEPT-TASK-VERSION",
+      "target": "REQ-VERSION"
+    },
+    {
+      "id": "REL-REAL-TOOLS-CONTAINS",
+      "type": "contains",
+      "source": "MOD-ACTION",
+      "target": "MOD-WORKSPACE-TOOLS"
+    },
+    {
+      "id": "REL-REAL-TOOLS-INTENT",
+      "type": "implements",
+      "source": "MOD-WORKSPACE-TOOLS",
+      "target": "INTENT-REAL-TOOL-LEARNING"
+    },
+    {
+      "id": "REL-REAL-TOOLS-RUNTIME",
+      "type": "depends_on",
+      "source": "MOD-WORKSPACE-TOOLS",
+      "target": "MOD-MULTITASK"
+    },
+    {
+      "id": "REL-REAL-TOOLS-LEARNING",
+      "type": "depends_on",
+      "source": "MOD-WORKSPACE-TOOLS",
+      "target": "MOD-EXECUTION-LEARNING"
+    },
+    {
+      "id": "REL-REAL-TOOLS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-REAL-TOOLS",
+      "target": "MOD-WORKSPACE-TOOLS"
+    },
+    {
+      "id": "REL-GOAL-INTENT",
+      "type": "implements",
+      "source": "MOD-GOAL-PLANNING",
+      "target": "INTENT-GOAL-PLANNING"
+    },
+    {
+      "id": "REL-GOAL-TOOLS",
+      "type": "depends_on",
+      "source": "MOD-GOAL-PLANNING",
+      "target": "MOD-WORKSPACE-TOOLS"
+    },
+    {
+      "id": "REL-GOAL-RUNTIME",
+      "type": "depends_on",
+      "source": "MOD-GOAL-PLANNING",
+      "target": "MOD-MULTITASK"
+    },
+    {
+      "id": "REL-GOAL-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-GOAL-PLANNING",
+      "target": "MOD-GOAL-PLANNING"
+    },
+    {
+      "id": "REL-LANGUAGE-INTENT",
+      "type": "implements",
+      "source": "MOD-LANGUAGE-GOALS",
+      "target": "INTENT-LANGUAGE-GOALS"
+    },
+    {
+      "id": "REL-LANGUAGE-PLANNING",
+      "type": "depends_on",
+      "source": "MOD-LANGUAGE-GOALS",
+      "target": "MOD-GOAL-PLANNING"
+    },
+    {
+      "id": "REL-LANGUAGE-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-LANGUAGE-GOALS",
+      "target": "MOD-LANGUAGE-GOALS"
+    },
+    {
+      "id": "REL-MODEL-SEMANTICS-INTENT",
+      "type": "implements",
+      "source": "MOD-MODEL-SEMANTICS",
+      "target": "INTENT-MODEL-SEMANTICS"
+    },
+    {
+      "id": "REL-MODEL-SEMANTICS-LANGUAGE",
+      "type": "depends_on",
+      "source": "MOD-MODEL-SEMANTICS",
+      "target": "MOD-LANGUAGE-GOALS"
+    },
+    {
+      "id": "REL-MODEL-SEMANTICS-PLANNING",
+      "type": "depends_on",
+      "source": "MOD-MODEL-SEMANTICS",
+      "target": "MOD-GOAL-PLANNING"
+    },
+    {
+      "id": "REL-MODEL-SEMANTICS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-MODEL-SEMANTICS",
+      "target": "MOD-MODEL-SEMANTICS"
+    },
+    {
+      "id": "REL-MODEL-PLANNING-INTENT",
+      "type": "implements",
+      "source": "MOD-MODEL-PLANNING",
+      "target": "INTENT-MODEL-PLANNING"
+    },
+    {
+      "id": "REL-MODEL-PLANNING-CLIENT",
+      "type": "depends_on",
+      "source": "MOD-MODEL-PLANNING",
+      "target": "MOD-MODEL-SEMANTICS"
+    },
+    {
+      "id": "REL-MODEL-PLANNING-CORE",
+      "type": "depends_on",
+      "source": "MOD-MODEL-PLANNING",
+      "target": "MOD-GOAL-PLANNING"
+    },
+    {
+      "id": "REL-MODEL-PLANNING-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-MODEL-PLANNING",
+      "target": "MOD-MODEL-PLANNING"
+    },
+    {
+      "id": "REL-REPOSITORY-INTENT",
+      "type": "implements",
+      "source": "MOD-REPOSITORY-DEVELOPMENT",
+      "target": "INTENT-REPOSITORY-DEVELOPMENT"
+    },
+    {
+      "id": "REL-REPOSITORY-CORE",
+      "type": "depends_on",
+      "source": "MOD-REPOSITORY-DEVELOPMENT",
+      "target": "MOD-DEVELOPMENT"
+    },
+    {
+      "id": "REL-REPOSITORY-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-REPOSITORY-DEVELOPMENT",
+      "target": "MOD-REPOSITORY-DEVELOPMENT"
+    },
+    {
+      "id": "REL-DEVELOPMENT-INTENT",
+      "type": "implements",
+      "source": "MOD-DEVELOPMENT",
+      "target": "INTENT-DEVELOPMENT"
+    },
+    {
+      "id": "REL-DEVELOPMENT-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-DEVELOPMENT",
+      "target": "MOD-DEVELOPMENT"
+    },
+    {
+      "id": "REL-DISCOVERY-INTENT",
+      "type": "implements",
+      "source": "MOD-PROJECT-DISCOVERY",
+      "target": "INTENT-PROJECT-DISCOVERY"
+    },
+    {
+      "id": "REL-DISCOVERY-REPOSITORY",
+      "type": "depends_on",
+      "source": "MOD-PROJECT-DISCOVERY",
+      "target": "MOD-REPOSITORY-DEVELOPMENT"
+    },
+    {
+      "id": "REL-DISCOVERY-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-PROJECT-DISCOVERY",
+      "target": "MOD-PROJECT-DISCOVERY"
+    },
+    {
+      "id": "REL-GUIDANCE-INTENT",
+      "type": "implements",
+      "source": "MOD-PROJECT-GUIDANCE",
+      "target": "INTENT-RELAXKONOS-GUIDANCE"
+    },
+    {
+      "id": "REL-GUIDANCE-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-PROJECT-GUIDANCE",
+      "target": "MOD-PROJECT-GUIDANCE"
+    },
+    {
+      "id": "REL-CODEX-AGENT-INTENT",
+      "type": "implements",
+      "source": "MOD-CODEX-AGENT",
+      "target": "INTENT-CODEX-AGENT"
+    },
+    {
+      "id": "REL-CODEX-AGENT-GUIDANCE",
+      "type": "depends_on",
+      "source": "MOD-CODEX-AGENT",
+      "target": "MOD-PROJECT-GUIDANCE"
+    },
+    {
+      "id": "REL-CODEX-AGENT-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CODEX-AGENT",
+      "target": "MOD-CODEX-AGENT"
+    },
+    {
+      "id": "REL-CODEX-DEVELOPMENT-INTENT",
+      "type": "implements",
+      "source": "MOD-CODEX-AGENT",
+      "target": "INTENT-CODEX-DEVELOPMENT"
+    },
+    {
+      "id": "REL-CODEX-DEVELOPMENT-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CODEX-DEVELOPMENT",
+      "target": "MOD-CODEX-AGENT"
     }
   ],
   "references": [
@@ -640,6 +1713,405 @@
       "kind": "project_file",
       "target": "docs/05-development-roadmap.md",
       "purpose": "首期闭环、重放与验收方向",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DELIBERATION",
+      "kind": "project_file",
+      "target": "docs/07-plugins-deliberation.md",
+      "purpose": "实现边界、明确用户意图及验证命令",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ROLE-DELIBERATION",
+      "kind": "project_file",
+      "target": "docs/08-role-deliberation.md",
+      "purpose": "角色审议 v2 契约、边界、运行和验证说明",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ROLE-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/RoleChecks.cs",
+      "purpose": "角色差异、经历、前提和拒绝的可执行验证",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-EXECUTION-LEARNING",
+      "kind": "project_file",
+      "target": "docs/09-execution-learning.md",
+      "purpose": "自动经历闭环、持久化、运行命令与能力边界",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LEARNING-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/LearningChecks.cs",
+      "purpose": "真实调用执行器后的学习与反馈机制验证",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MULTITASK-DESIGN",
+      "kind": "project_file",
+      "target": "docs/10-multitask-runtime.md",
+      "purpose": "单核心多任务契约、运行方式、验证与限制",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MULTITASK-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/SchedulingChecks.cs",
+      "purpose": "受控并发、预算、迟到版本及恢复验证",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MULTITASK-CORE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/TaskScheduling.cs",
+      "purpose": "持久化任务状态、调度、预算和版本事务",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MULTITASK-DRIVER",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/MultiTaskRuntime.cs",
+      "purpose": "串行消息驱动与异步执行器并发",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-WORKSPACE-TOOLS",
+      "kind": "project_file",
+      "target": "docs/11-workspace-tools.md",
+      "purpose": "真实工具契约、示例、授权边界和验证",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-WORKSPACE-EXECUTOR",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/WorkspaceToolExecutor.cs",
+      "purpose": "真实文件读写、结果验证和权限检查实现",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-REAL-TOOL-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/RealToolChecks.cs",
+      "purpose": "真实文件副作用、反馈和跨任务经历复用检查",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-GOAL-DESIGN",
+      "kind": "project_file",
+      "target": "docs/12-goal-planning.md",
+      "purpose": "多步目标契约、真实失败重规划和范围",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-GOAL-CORE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/GoalPlanning.cs",
+      "purpose": "目标持久化、预算和计划依赖校验",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-GOAL-TOOLS",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/DocumentGoals.cs",
+      "purpose": "符号搜索、工具编排和回执推进",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-GOAL-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/GoalChecks.cs",
+      "purpose": "实际文件与恢复验证",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LANGUAGE-DESIGN",
+      "kind": "project_file",
+      "target": "docs/13-language-goals.md",
+      "purpose": "自然语言入口、追问、使用方式和范围",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LANGUAGE-CORE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/GoalDialogue.cs",
+      "purpose": "理解契约与对话目标原子提交",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LANGUAGE-TOOLS",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/NaturalLanguageGoals.cs",
+      "purpose": "文本领域解释、约束提取和目标编译",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LANGUAGE-CLI",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Cli/LanguageCommand.cs",
+      "purpose": "交互对话与逐次话语入口",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LANGUAGE-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/LanguageChecks.cs",
+      "purpose": "语言、追问、真实执行和恢复检查",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-SEMANTICS-DESIGN",
+      "kind": "project_file",
+      "target": "docs/14-model-semantics.md",
+      "purpose": "多协议语义适配器、校验、实测范围与运行配置",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-CLIENT",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/SemanticModelClient.cs",
+      "purpose": "有界 HTTP 调用及 Chat Completions/Ollama 协议",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-INTERPRETER",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/ModelGoalInterpreter.cs",
+      "purpose": "异步模型解释、独立约束校验和离线重放",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/ModelLanguageChecks.cs",
+      "purpose": "错误响应、真实文件闭环、反馈、重放和边界验证",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-DEEPSEEK",
+      "kind": "project_file",
+      "target": "examples/models/deepseek.json",
+      "purpose": "不含密钥的实际 DeepSeek 配置",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-PLANNING-DESIGN",
+      "kind": "project_file",
+      "target": "docs/15-model-planning.md",
+      "purpose": "执行中模型规划、核心审议与本地凭证配置",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-PLANNING-ADVISOR",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/ModelPlanningAdvisor.cs",
+      "purpose": "模型建议及独立算子依赖权限预算校验",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-MODEL-PLANNING-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/PlanningModelChecks.cs",
+      "purpose": "新观察、失败调整、拒绝、追问、次数限制与凭证检查",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LOCAL-MODEL-SECRETS",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/LocalModelSecrets.cs",
+      "purpose": "项目凭证后备读取与根目录发现",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LOCAL-SECRET-EXAMPLE",
+      "kind": "project_file",
+      "target": ".env.example",
+      "purpose": "不含真实凭证的配置示例",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DEVELOPMENT-DESIGN",
+      "kind": "project_file",
+      "target": "docs/16-development-tools.md",
+      "purpose": "Development implementation and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DEVELOPMENT-RUNNER",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/DevelopmentRunner.cs",
+      "purpose": "Development implementation and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DEVELOPMENT-EXECUTOR",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/DevelopmentExecutor.cs",
+      "purpose": "Development implementation and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DEVELOPMENT-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/DevelopmentChecks.cs",
+      "purpose": "Development implementation and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-REPOSITORY-DESIGN",
+      "kind": "project_file",
+      "target": "docs/17-repository-development.md",
+      "purpose": "Real repository development implementation and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-REPOSITORY-INSPECTION",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/ProjectInspection.cs",
+      "purpose": "Real repository development implementation and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-REPOSITORY-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/DevelopmentChecks.cs",
+      "purpose": "Real repository development implementation and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-REPOSITORY-ACCEPTANCE",
+      "kind": "project_file",
+      "target": "examples/development/RepositoryChecks.cs",
+      "purpose": "Real repository development implementation and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-REPOSITORY-PREPARE",
+      "kind": "project_file",
+      "target": "examples/development/prepare-repository.ps1",
+      "purpose": "Real repository development implementation and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DISCOVERY-DESIGN",
+      "kind": "project_file",
+      "target": "docs/18-project-discovery.md",
+      "purpose": "Automatic discovery, permission transitions and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DISCOVERY-DISCOVERY",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/ProjectDiscovery.cs",
+      "purpose": "Automatic discovery, permission transitions and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DISCOVERY-HOST",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/ProjectDevelopmentJob.cs",
+      "purpose": "Automatic discovery, permission transitions and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DISCOVERY-CLI",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Cli/ProjectDevelopmentCommand.cs",
+      "purpose": "Automatic discovery, permission transitions and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DISCOVERY-GRANTS",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/DevelopmentState.cs",
+      "purpose": "Automatic discovery, permission transitions and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-DISCOVERY-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/ProjectDiscoveryChecks.cs",
+      "purpose": "Automatic discovery, permission transitions and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-GUIDANCE-DESIGN",
+      "kind": "project_file",
+      "target": "docs/19-agent-guidance.md",
+      "purpose": "Read-only advisory implementation and boundary",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-GUIDANCE-CORE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/ProjectGuidance.cs",
+      "purpose": "Read-only advisory implementation and boundary",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-GUIDANCE-CLI",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Cli/GuidanceCommand.cs",
+      "purpose": "Read-only advisory implementation and boundary",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-AGENT-DESIGN",
+      "kind": "project_file",
+      "target": "docs/20-codex-agent.md",
+      "purpose": "Codex session transport, approval policy and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-AGENT-CLIENT",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/CodexAppServerClient.cs",
+      "purpose": "Codex session transport, approval policy and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-AGENT-HOST",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/AgentDelegationHost.cs",
+      "purpose": "Codex session transport, approval policy and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-AGENT-APPROVAL",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/AgentApproval.cs",
+      "purpose": "Codex session transport, approval policy and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-AGENT-CLI",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Cli/AgentCommand.cs",
+      "purpose": "Codex session transport, approval policy and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-AGENT-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/AgentChecks.cs",
+      "purpose": "Codex session transport, approval policy and validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-DEVELOPMENT-DESIGN",
+      "kind": "project_file",
+      "target": "docs/21-codex-development.md",
+      "purpose": "Bounded Codex development bridge and actual execution evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-DEVELOPMENT-BRIDGE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Tools/AgentDevelopmentBridge.cs",
+      "purpose": "Bounded Codex development bridge and actual execution evidence",
       "tracking": "live"
     }
   ],

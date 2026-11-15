@@ -1,0 +1,44 @@
+{
+  "task": {
+    "id": "a",
+    "goal": "Resolve case a",
+    "facts": {
+      "case": "a"
+    },
+    "goals": [
+      {
+        "id": "resolve",
+        "outcome": "resolved",
+        "priority": 1,
+        "required": true
+      }
+    ],
+    "options": [
+      {
+        "id": "resolve",
+        "kind": "act",
+        "description": "Resolve the case",
+        "value": 0,
+        "risk": 0.1,
+        "reason": "Available resolution procedure",
+        "capability": "case.resolve",
+        "cost": 1,
+        "meaning": {
+          "strategy": "resolve",
+          "outcomes": [
+            "resolved"
+          ],
+          "traits": [],
+          "premises": []
+        }
+      }
+    ],
+    "premises": [],
+    "evidence": [],
+    "budget": 1,
+    "allowedCapabilities": [
+      "case.resolve"
+    ]
+  },
+  "priority": 30
+}

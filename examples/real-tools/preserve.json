@@ -1,0 +1,30 @@
+{
+  "task": {
+    "id": "preserve",
+    "goal": "Complete a local text-file task",
+    "facts": {
+      "workflow": "notes"
+    },
+    "goals": [
+      {
+        "id": "result",
+        "outcome": "file.created",
+        "priority": 1,
+        "required": true
+      }
+    ],
+    "options": [],
+    "premises": [],
+    "evidence": [],
+    "budget": 1,
+    "allowedCapabilities": [
+      "text.normalize-lines",
+      "text.copy"
+    ],
+    "toolArguments": {
+      "source": "source-a.txt",
+      "target": "preserved.txt"
+    }
+  },
+  "priority": 0
+}

@@ -1,0 +1,30 @@
+{
+  "task": {
+    "id": "ticket-3",
+    "goal": "Resolve a billing dispute",
+    "facts": {
+      "category": "billing"
+    },
+    "goals": [
+      {
+        "id": "resolve",
+        "outcome": "resolved",
+        "priority": 10,
+        "required": true
+      }
+    ],
+    "options": [],
+    "premises": [],
+    "evidence": [],
+    "budget": 1,
+    "allowedCapabilities": [
+      "ticket.route"
+    ]
+  },
+  "outcomesByStrategy": {
+    "direct": [],
+    "review": [
+      "resolved"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "review-ticket-1",
+  "decisionId": "ticket-1",
+  "supersedes": null,
+  "succeeded": true,
+  "actualOutcomes": [
+    "resolved"
+  ],
+  "source": "operator-review",
+  "reason": "Delayed resolution confirmation corrects the initial execution report."
+}

@@ -1,0 +1,16 @@
+{
+  "protocol": "chat-completions",
+  "endpoint": "https://api.deepseek.com/chat/completions",
+  "model": "deepseek-flash",
+  "apiKeyEnvironment": "DEEPSEEK_API_KEY",
+  "timeoutSeconds": 60,
+  "maxOutputTokens": 4096,
+  "maxResponseBytes": 131072,
+  "maxInputCharacters": 32768,
+  "maxGoalBudget": 12,
+  "tokenLimitParameter": "max_tokens",
+  "reasoningEffort": "none",
+  "enablePlanning": true,
+  "maxPlanningCalls": 8,
+  "maxObservationCharacters": 2048
+}

@@ -1,0 +1,34 @@
+{
+  "a": {
+    "delayMilliseconds": 400,
+    "outcomesByStrategy": {
+      "resolve": [
+        "resolved"
+      ]
+    }
+  },
+  "b": {
+    "delayMilliseconds": 100,
+    "outcomesByStrategy": {
+      "resolve": [
+        "resolved"
+      ]
+    }
+  },
+  "c": {
+    "delayMilliseconds": 100,
+    "outcomesByStrategy": {
+      "resolve": [
+        "resolved"
+      ]
+    }
+  },
+  "recall": {
+    "delayMilliseconds": 0,
+    "outcomesByStrategy": {
+      "resolve": [
+        "resolved"
+      ]
+    }
+  }
+}

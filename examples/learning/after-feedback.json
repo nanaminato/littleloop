@@ -1,0 +1,42 @@
+{
+  "id": "ticket-4",
+  "goal": "Resolve a billing dispute",
+  "facts": {
+    "category": "billing"
+  },
+  "goals": [
+    {
+      "id": "resolve",
+      "outcome": "resolved",
+      "priority": 10,
+      "required": true
+    }
+  ],
+  "options": [
+    {
+      "id": "direct",
+      "kind": "act",
+      "description": "Direct routing",
+      "value": 0,
+      "risk": 0.05,
+      "reason": "Available action",
+      "capability": "ticket.route",
+      "cost": 1,
+      "meaning": {
+        "strategy": "direct",
+        "outcomes": [
+          "resolved",
+          "archived"
+        ],
+        "traits": [],
+        "premises": []
+      }
+    }
+  ],
+  "premises": [],
+  "evidence": [],
+  "budget": 1,
+  "allowedCapabilities": [
+    "ticket.route"
+  ]
+}

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../examples/development/RepositoryChecks.cs" Link="Program.cs" />
+    <ProjectReference Include="../../src/LittleLoop.Cli/LittleLoop.Cli.csproj" />
+  </ItemGroup>
+</Project>

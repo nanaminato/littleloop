@@ -1,0 +1,4 @@
+{
+  "maxConcurrentExecutions": 2,
+  "totalActionBudget": 20
+}

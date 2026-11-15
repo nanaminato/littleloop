@@ -1,0 +1,12 @@
+{
+  "id": "review-normalization",
+  "decisionId": "task:normalize-1/v1/turn2",
+  "supersedes": null,
+  "succeeded": false,
+  "actualOutcomes": [
+    "file.created",
+    "text.normalized"
+  ],
+  "source": "document-reviewer",
+  "reason": "Trailing whitespace is meaningful for this document class. Preserve the original layout instead."
+}
