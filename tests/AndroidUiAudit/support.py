@@ -3,7 +3,7 @@ import json, os, re, subprocess, time, urllib.request, urllib.error, http.cookie
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-OUT = Path('data/android-ui-audit')
+OUT = Path(os.environ.get('ANDROID_AUDIT_OUT', 'data/android-ui-audit'))
 OUT.mkdir(parents=True, exist_ok=True)
 BASE = os.environ.get('ANDROID_AUDIT_BASE', 'http://127.0.0.1:5193')
 SERIAL = os.environ.get('ANDROID_SERIAL', 'emulator-5558')
@@ -63,7 +63,9 @@ def click(text=None, desc=None, root=None):
     tap(find(root,text=text,desc=desc))
 def back(): adb('shell','input','keyevent',4)
 def enter(node, value):
-    tap(node); adb('shell','input','keycombination',113,29); adb('shell','input','text',value.replace(' ','%s'))
+    tap(node); adb('shell','input','keycombination',113,29)
+    if value: adb('shell','input','text',value.replace(' ','%s'))
+    else: adb('shell','input','keyevent',67)
 def scroll(root=None, up=False):
     root=root or ui()
     area=next((n for n in nodes(root) if n.get('scrollable')=='true'),None)
@@ -96,7 +98,12 @@ def launch(room=None):
     args=['shell','am','start','-W','-n','dev.littleloop.chat/.MainActivity']
     if room:args+=['--es','room',room]
     adb(*args)
-    return wait(desc='Chat actions') if room else ui()
+    if room: return wait(desc='Chat actions')
+    # Activity launch may return before Compose replaces the launcher window.
+    for _ in range(12):
+        root = ui()
+        if any(n.get('package') == 'dev.littleloop.chat' for n in nodes(root)): return root
+    raise AssertionError('Application window did not appear')
 
 def size(width,height,density=320,font='1.0'):
     adb('shell','wm','size',f'{width}x{height}');adb('shell','wm','density',density)

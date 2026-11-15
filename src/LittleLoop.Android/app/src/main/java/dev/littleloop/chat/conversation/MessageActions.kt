@@ -64,15 +64,9 @@ internal fun MessageOperationDialog(chat: ChatRepository, state: ChatState, room
     var draft by rememberSaveable(message.sequence) { mutableStateOf(message.text) }
     var target by rememberSaveable { mutableStateOf<String?>(null) }
     val id = rememberSaveable(room.id, message.sequence, operation.name, target) { UUID.randomUUID().toString() }
-    val own = message.sender == state.username
-    val allowed = when (operation) {
-        MessageOperation.Edit -> if (room.type == "channel") room.channelRights and 2 != 0 else own
-        MessageOperation.Delete -> if (room.type == "channel") room.channelRights and 4 != 0 else own || room.canModerate
-        MessageOperation.Pin -> if (room.type == "channel") room.channelRights and 8 != 0 else room.canPost
-        else -> true
-    }
-    val online = state.connected && !state.busy && !message.deleted && allowed
-    val targets = state.rooms.filter { it.canPost && it.type !in setOf("saved", "legacy") && !it.archived }
+    val permissions = room.messagePermissions(message, state.username)
+    val online = state.connected && !state.busy && permissions.allows(operation)
+    val targets = state.rooms.filter(Room::canForwardTo)
     val label = when (operation) {
         MessageOperation.Edit -> stringResource(R.string.message_edit)
         MessageOperation.Delete -> stringResource(R.string.message_delete)

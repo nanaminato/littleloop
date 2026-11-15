@@ -144,7 +144,7 @@ internal fun ChatApp(
                 }
             }
             room != null -> ConversationScreen(
-                chat, state, room, theme, openBack,
+                chat, state, room, openBack,
                 onTopics = { showTopics = true },
                 onMembers = { showMembers = true },
                 onSearch = { searchRoom = room.id; searching = true },

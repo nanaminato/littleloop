@@ -99,4 +99,7 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 [Android 消息长按菜单](docs/37-android-message-actions.md)支持编辑、删除、转发、消息置顶和个人收藏。
 
 [Android 群话题和频道](docs/38-android-topics-channels.md)复用同一套历史、未读、订阅和广播通知。
+
+[Android 会话与频道管理重构](docs/44-android-conversation-refactor.md)说明组件、业务状态和共享权限的边界及回归验证。
+
 [好友申请和群成员管理](docs/39-chat-friends-and-group-members.md)覆盖网页版和 Android，群成员变更会同步到话题。

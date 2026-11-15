@@ -93,7 +93,7 @@ internal fun ChannelComments(chat: ChatRepository, state: ChatState, channel: Ro
                 Text(if (post.deleted) stringResource(R.string.conv_deleted) else post.text, maxLines = 3)
                 if (error) Text(stringResource(R.string.channel_comments_unavailable))
                 else if (offline) Text(stringResource(R.string.conv_offline))
-                if (!post.deleted && channel.channelRights and 64 != 0) {
+                if (!post.deleted && channel.hasRight(ChannelRight.Discussion)) {
                     val open = thread?.closed != false
                     TextButton(enabled = !changing, onClick = {
                         changing = true
@@ -164,18 +164,19 @@ internal fun ChannelComments(chat: ChatRepository, state: ChatState, channel: Ro
                                     style = MaterialTheme.typography.bodySmall)
                             }
                             Text(if (comment.deleted) stringResource(R.string.conv_deleted) else comment.text)
+                            val permissions = state.rooms.firstOrNull { it.id == discussion.group }
+                                ?.messagePermissions(comment, state.username)
                             if (!comment.deleted) {
                                 comment.attachment?.let { file ->
                                     TextButton(onClick = { preview = comment }) { Text(file.name) }
                                 }
-                                if (discussion.canComment) TextButton(onClick = { reply = comment }) {
+                                if (discussion.canComment && permissions?.reply == true) TextButton(onClick = { reply = comment }) {
                                     Text(stringResource(R.string.action_reply))
                                 }
-                                if (comment.card == null && comment.sender == state.username) {
+                                if (permissions?.edit == true) {
                                     TextButton(onClick = { editing = comment }) { Text(stringResource(R.string.action_edit)) }
                                 }
-                                if (comment.card == null && (comment.sender == state.username ||
-                                        state.rooms.any { it.id == discussion.group && it.canModerate })) {
+                                if (permissions?.delete == true) {
                                     TextButton(onClick = { deleting = comment }) { Text(stringResource(R.string.action_delete)) }
                                 }
                             }

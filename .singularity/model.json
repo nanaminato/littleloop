@@ -2033,6 +2033,51 @@
       "references": [
         "REF-ANDROID-CHAT-UI-AUDIT"
       ]
+    },
+    {
+      "id": "INTENT-ANDROID-CONVERSATION-REFACTOR",
+      "type": "intent",
+      "title": "Separate Android conversation components and business state without changing features",
+      "body": "User explicitly requested refactoring Android conversation and channel management components/state, centralizing permissions, preserving behavior, and existing-test plus emulator regression on 2026-11-15.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested refactoring Android conversation and channel management components/state, centralizing permissions, preserving behavior, and existing-test plus emulator regression on 2026-11-15.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-CONVERSATION-REFACTOR",
+      "type": "module",
+      "title": "Android conversation and channel management components, state holders and shared permissions",
+      "body": "Conversation route composes header, timeline, message bubbles, composer and existing dialogs. Room-scoped state holder owns state saving, bot/attachment loading and discussion polling. Channel controller owns forms, serialized requests and live grants. Message menus, confirmations and comments share permission rules; full channel grants do not imply ownership. Repository and sync contracts remain unchanged.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-CONVERSATION-REFACTOR"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-CONVERSATION-REFACTOR"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-CONVERSATION-REFACTOR",
+      "type": "evidence",
+      "title": "Android refactor JVM and emulator regression",
+      "body": "Build and 9 JVM tests passed; lint 0 errors and 39 warnings. 76 conversation-role-size cases, 13 state/channel controller actions, 14 message/offline actions, 6 comment states, 4 discussion join checks, native attachment byte equality. 16 bot and 4 legacy checks use synthetic rendering only, with no real bot execution or historical import.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/android-refactor contains screenshots, XML and regression-summary.json with final APK SHA-256. The stable save-state key adjustment was followed by a new build/JVM run and final APK state/controller, attachment/comment and bot regression. Prior 64 peripheral UI states, physical phones and push delivery were not rerun. See docs/44 for scope and environment interruptions that were retried."
+      },
+      "references": [
+        "REF-ANDROID-CONVERSATION-REFACTOR"
+      ]
     }
   ],
   "relations": [
@@ -2875,6 +2920,24 @@
       "type": "supports",
       "source": "EVIDENCE-ANDROID-CHAT-UI-AUDIT",
       "target": "MOD-ANDROID-CHAT-UI-AUDIT"
+    },
+    {
+      "id": "REL-ANDROID-REFACTOR-IMPLEMENTS",
+      "type": "implements",
+      "source": "MOD-ANDROID-CONVERSATION-REFACTOR",
+      "target": "INTENT-ANDROID-CONVERSATION-REFACTOR"
+    },
+    {
+      "id": "REL-ANDROID-REFACTOR-DEPENDS",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-CONVERSATION-REFACTOR",
+      "target": "MOD-ANDROID-CHAT"
+    },
+    {
+      "id": "REL-ANDROID-REFACTOR-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-CONVERSATION-REFACTOR",
+      "target": "MOD-ANDROID-CONVERSATION-REFACTOR"
     }
   ],
   "references": [
@@ -3443,6 +3506,13 @@
       "kind": "project_file",
       "target": "docs/43-android-chat-ui-audit.md",
       "purpose": "Native Android audit scope, repairs, actual emulator evidence and limits",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-CONVERSATION-REFACTOR",
+      "kind": "project_file",
+      "target": "docs/44-android-conversation-refactor.md",
+      "purpose": "Component/state boundaries and actual Android refactor regression evidence",
       "tracking": "live"
     }
   ],
