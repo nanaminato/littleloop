@@ -64,11 +64,9 @@ export class ChatStore {
   readonly bot = signal({ enabled: false, canOperate: false, canApprove: false, providers: [] as string[] });
   readonly roomProviders = signal<string[]>([]);
   readonly directory = signal<Channel[] | null>(null);
-  readonly topicForm = signal(false);
-  readonly channelForm = signal(false);
+  readonly topicDialog = signal(false);
+  readonly channelDialog = signal(false);
   provider = '';
-  topicTitle = '';
-  channelTitle = '';
   readonly botInstalled = signal(false);
   readonly sources = signal<string[] | null>(null);
   readonly taskAnchor = signal<ChatMessage | null>(null);
@@ -223,7 +221,8 @@ export class ChatStore {
     this.detailsOpen.set(false);
     this.inRoomSearch.set(false);
     this.selected.set(room);
-    this.topicForm.set(false);
+    this.topicDialog.set(false);
+    this.channelDialog.set(false);
     this.resetBotForms();
     this.loadedRoom = '';
     this.loadedRevision = -1;
@@ -424,24 +423,41 @@ export class ChatStore {
     });
   }
 
-  async createChannel() {
+  async createChannel(title: string) {
+    if (!title.trim()) return;
     await this.action(async () => {
-      const channel = await this.api<{ id: string }>('/channels', { title: this.channelTitle });
-      this.channelTitle = '';
-      this.channelForm.set(false);
+      const channel = await this.api<{ id: string }>('/channels', { title: title.trim() });
+      this.channelDialog.set(false);
       if (this.directory() !== null) await this.refreshChannels();
       this.select(channel.id);
     });
   }
 
-  async createTopic() {
+  async createTopic(title: string) {
+    if (!title.trim()) return;
     const parent = this.selected();
     await this.action(async () => {
-      const topic = await this.api<{ id: string }>('/rooms/' + parent + '/topics', { title: this.topicTitle });
-      this.topicTitle = '';
-      this.topicForm.set(false);
+      const topic = await this.api<{ id: string }>('/rooms/' + parent + '/topics', { title: title.trim() });
+      this.topicDialog.set(false);
       this.select(topic.id);
     });
+  }
+
+  openCreateChannel() {
+    this.error.set('');
+    this.topicDialog.set(false);
+    this.channelDialog.set(true);
+  }
+
+  openCreateTopic() {
+    this.error.set('');
+    this.channelDialog.set(false);
+    this.topicDialog.set(true);
+  }
+
+  closeCreateDialogs() {
+    this.channelDialog.set(false);
+    this.topicDialog.set(false);
   }
 
   async directBot(provider: string) {
@@ -723,6 +739,8 @@ export class ChatStore {
     this.friendUsername = '';
     this.settingsOpen.set(false);
     this.detailsOpen.set(false);
+    this.channelDialog.set(false);
+    this.topicDialog.set(false);
     this.folder.set('');
     this.accountPrefs.set(accountDefaults);
     this.drafts.clear();

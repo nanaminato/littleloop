@@ -19,7 +19,7 @@
           <button type="button" class="quiet" (click)="store.preference(room, 'archived')">{{ room.archived ? store.t('取消归档') : store.t('归档会话') }}</button>
           <button type="button" class="quiet" (click)="store.preference(room, 'muted')">{{ room.muted ? store.t('取消静音') : store.t('静音会话') }}</button>
           @if (room.type === 'group') {
-            <button type="button" class="quiet" (click)="store.topicForm.set(!store.topicForm())">{{ store.t('新建话题') }}</button>
+            <button type="button" class="quiet" (click)="store.openCreateTopic()">{{ store.t('新建话题') }}</button>
           }
           @if (room.parentId) { <button type="button" class="quiet" (click)="store.select(room.parentId)">{{ store.t('返回群聊') }}</button> }
           @if (store.bot().canOperate && (room.type === 'group' || room.type === 'topic')) {
@@ -56,14 +56,6 @@
           } @empty { <p>{{ store.t('没有匹配的消息。') }}</p> }
         </div>
       }
-    }
-
-    @if (store.topicForm()) {
-      <form class="inline-panel" (ngSubmit)="store.createTopic()">
-        <label for="topic-title">{{ store.t('话题名称') }}</label>
-        <input id="topic-title" name="topicTitle" [(ngModel)]="store.topicTitle" maxlength="100" required>
-        <button class="primary" [disabled]="store.busy()">{{ store.t('创建话题') }}</button>
-      </form>
     }
 
     @if (store.sources(); as paths) {

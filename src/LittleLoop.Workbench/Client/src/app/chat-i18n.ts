@@ -295,7 +295,14 @@ const english: Record<string, string> = {
   '暂无共享媒体': 'No shared media yet',
   '自动': 'Auto',
   '删除后，此消息将在会话中显示为已删除。': 'The message will stay in the chat, marked as deleted.',
-
+  '订阅者接收广播，只有发布者可以发消息。': 'Subscribers receive broadcasts; only the publisher can post.',
+  '在 {room} 中创建话题。': 'Create a topic in {room}.',
+  '话题用于在群内展开一条独立讨论。': 'Topics keep one focused discussion inside the group.',
+  '例如：产品公告': 'For example: Product announcements',
+  '例如：发布讨论': 'For example: Release discussion',
+  '名称将显示在会话列表和频道目录中。': 'The name appears in the chat list and channel directory.',
+  '名称将显示在群话题列表中。': "The name appears in the group's topic list.",
+  '正在创建…': 'Creating…',
   // Settings
   '返回设置上级': 'Back to settings',
   '关闭设置': 'Close settings',

@@ -1,7 +1,7 @@
 <div class="chat-shell" [attr.data-theme]="store.devicePrefs().theme" [attr.data-accent]="store.devicePrefs().accent"
   [attr.data-wall]="store.devicePrefs().background" [attr.data-scale]="store.devicePrefs().scale"
   [class.no-motion]="!store.devicePrefs().animations" (pointerdown)="store.initAudio()">
-  @if (store.error()) { <p class="error" role="alert">{{ store.error() }}</p> }
+  @if (store.error() && !store.channelDialog() && !store.topicDialog()) { <p class="error" role="alert">{{ store.error() }}</p> }
   @if (store.notice(); as notification) {
     <div class="notice" role="status">
       <button type="button" class="notice-body" (click)="store.select(notification.id)">
@@ -42,6 +42,8 @@
           (clearPreviews)="store.manuallyLoaded.set(store.emptyPreviewSet)" (logout)="store.logout()" />
       </div>
     }
+    @if (store.channelDialog()) { <chat-create-space kind="channel" /> }
+    @if (store.topicDialog() && store.currentRoom()) { <chat-create-space kind="topic" /> }
     <span class="sr-only" role="status">{{ store.t(store.connection()) }}</span>
   }
 </div>

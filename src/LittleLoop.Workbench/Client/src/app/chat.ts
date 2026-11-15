@@ -1,5 +1,6 @@
 import { Component, HostListener, inject } from '@angular/core';
 import { ChatAuth } from './chat-auth';
+import { ChatCreateSpace } from './chat-create-space';
 import { ChatDrawer } from './chat-drawer';
 import { ChatFriends } from './chat-friends';
 import { ChatInfo } from './chat-info';
@@ -10,7 +11,7 @@ import { ChatThread } from './chat-thread';
 
 @Component({
   selector: 'app-root',
-  imports: [ChatAuth, ChatDrawer, ChatFriends, ChatInfo, ChatSettings, ChatSidebar, ChatThread],
+  imports: [ChatAuth, ChatCreateSpace, ChatDrawer, ChatFriends, ChatInfo, ChatSettings, ChatSidebar, ChatThread],
   templateUrl: './chat.html',
   styleUrl: './chat.css',
 })

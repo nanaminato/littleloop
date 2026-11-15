@@ -28,7 +28,7 @@
     <button type="button" class="drawer-item" (click)="store.select(''); store.drawer.set(false); store.showChannels()">
       <span class="item-icon" aria-hidden="true">◎</span><span>{{ store.t('浏览频道') }}</span>
     </button>
-    <button type="button" class="drawer-item" (click)="store.select(''); store.drawer.set(false); store.channelForm.set(!store.channelForm())">
+    <button type="button" class="drawer-item" (click)="store.select(''); store.drawer.set(false); store.openCreateChannel()">
       <span class="item-icon" aria-hidden="true">＋</span><span>{{ store.t('新建频道') }}</span>
     </button>
     <button type="button" class="drawer-item" (click)="store.openFriends()">

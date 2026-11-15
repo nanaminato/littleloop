@@ -59,15 +59,6 @@
     </section>
   }
 
-  @if (store.channelForm()) {
-    <form class="channel-create" (ngSubmit)="store.createChannel()">
-      <div class="section-head"><strong>{{ store.t('创建频道') }}</strong><button type="button" class="quiet" (click)="store.channelForm.set(false)">{{ store.t('取消') }}</button></div>
-      <label for="channel-title">{{ store.t('频道名称') }}</label>
-      <input id="channel-title" name="channelTitle" [(ngModel)]="store.channelTitle" maxlength="100" required>
-      <button class="primary" [disabled]="store.busy() || !store.channelTitle.trim()">{{ store.t('创建频道') }}</button>
-    </form>
-  }
-
   <div class="room-list">
     @for (room of store.visibleRooms(); track room.id) {
       <button class="room" [class.selected]="room.id === store.selected()" (click)="store.select(room.id)"

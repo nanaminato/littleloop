@@ -1,0 +1,30 @@
+<div class="modal-layer">
+  <button type="button" class="modal-backdrop" [attr.aria-label]="store.t('关闭')" (click)="close()"></button>
+  <section #dialog class="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-space-title"
+    aria-describedby="create-space-description">
+    <header class="modal-head">
+      <span class="modal-icon" aria-hidden="true">{{ icon() }}</span>
+      <div class="modal-copy">
+        <h2 id="create-space-title">{{ heading() }}</h2>
+        <p id="create-space-description">{{ description() }}</p>
+      </div>
+      <button type="button" class="icon modal-close" [attr.aria-label]="store.t('关闭')" [disabled]="store.busy()" (click)="close()">×</button>
+    </header>
+    <form class="modal-form" (ngSubmit)="submit()">
+      <label for="create-space-name">{{ fieldLabel() }}</label>
+      <input #titleInput id="create-space-name" name="title" [(ngModel)]="title" [placeholder]="placeholder()"
+        maxlength="100" autocomplete="off" required [disabled]="store.busy()">
+      <div class="modal-meta">
+        <span>{{ metaNote() }}</span>
+        <span class="counter">{{ title.length }}/100</span>
+      </div>
+      @if (store.error()) { <p class="modal-error" role="alert">{{ store.error() }}</p> }
+      <footer class="modal-actions">
+        <button type="button" class="quiet" [disabled]="store.busy()" (click)="close()">{{ store.t('取消') }}</button>
+        <button type="submit" class="primary" [disabled]="!canSubmit()">
+          {{ store.busy() ? store.t('正在创建…') : submitLabel() }}
+        </button>
+      </footer>
+    </form>
+  </section>
+</div>
