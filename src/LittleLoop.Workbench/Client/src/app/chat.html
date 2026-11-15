@@ -184,6 +184,9 @@
             <button type="button" class="quiet" (click)="taskAnchor.set(null)">{{ t('取消安排') }}</button>
           </form>
         }
+        @if (currentRoom()?.pinnedMessage; as sequence) {
+          <button class="quiet" type="button" (click)="jump(sequence)">{{ lang('已置顶消息', 'Pinned message') }} #{{ sequence }}</button>
+        }
         <div class="timeline" aria-live="polite">
           @if (more()) { <button type="button" class="quiet" (click)="older()">{{ t('加载更早消息') }}</button> }
           @for (message of messages(); track message.sequence; let index = $index) {
@@ -216,6 +219,11 @@
                   @if (currentRoom()?.canPost) { <button type="button" class="quiet reply" (click)="reply.set(message)">{{ lang('回复','Reply') }}</button> }
                   @if (message.text) { <button type="button" class="quiet reply" (click)="copyMessage(message.text)">{{ lang('复制','Copy') }}</button> }
                   <button type="button" class="quiet reply" (click)="beginForward(message)">{{ t('转发') }}</button>
+                  @if (currentRoom()?.canPost) {
+                    <button type="button" class="quiet reply" (click)="pinMessage(message)">
+                      {{ currentRoom()?.pinnedMessage === message.sequence ? lang('取消置顶消息', 'Unpin message') : lang('置顶消息', 'Pin message') }}
+                    </button>
+                  }
                   @if (bot().canOperate && botInstalled() && message.card?.kind !== 'task') {
                     <button type="button" class="quiet reply" (click)="beginTask(message)">{{ t('安排开发任务') }}</button>
                   }
@@ -285,7 +293,24 @@
           @for (topic of rooms(); track topic.id) { @if (topic.parentId === room.id) { <button type="button" class="wide quiet" (click)="select(topic.id)">{{ topic.title }}</button> } }
         }
         <h3>{{ room.type === 'channel' ? lang('发布者','Publisher') : lang('成员','Members') }}</h3>
-        @for (member of detailMembers(); track member.name) { <div class="member"><span class="avatar">{{ initial(member.displayName) }}</span><span>{{ member.displayName }} <small>@{{ member.name }}</small></span></div> }
+        @if (currentRoom()?.canManage) {
+          <form class="inline-form" (ngSubmit)="changeMember('invite')">
+            <input name="memberUsername" [(ngModel)]="memberUsername" [attr.aria-label]="lang('成员用户名','Member username')" [placeholder]="lang('成员用户名','Member username')" required maxlength="32">
+            <button type="submit" [disabled]="busy() || !memberUsername.trim()">{{ lang('邀请成员','Invite member') }}</button>
+          </form>
+        }
+        @for (member of detailMembers(); track member.name) {
+          <div class="member">
+            <span class="avatar">{{ initial(member.displayName) }}</span>
+            <span>{{ member.displayName }} <small>@{{ member.name }}</small>
+              @if (member.owner) { <small>{{ lang('群主','Owner') }}</small> }
+            </span>
+            @if (currentRoom()?.canManage && !member.owner && !member.robot) {
+              <button type="button" class="quiet" [disabled]="busy()" (click)="changeMember('remove', member.name)">{{ lang('移除','Remove') }}</button>
+              <button type="button" class="quiet" [disabled]="busy()" (click)="changeMember('transfer', member.name)">{{ lang('转让群主','Transfer ownership') }}</button>
+            }
+          </div>
+        }
         <h3>{{ lang('当前加载的共享媒体','Shared media in loaded history') }}</h3>
         @for (message of messages(); track message.sequence) {
           @if (message.attachment; as file) { <a class="wide" [href]="attachmentUrl(message) + '?download=true'">{{ file.name }}</a> }
@@ -308,9 +333,41 @@
       }
       <button type="button" class="wide quiet" (click)="select('');drawer.set(false);showChannels()">{{ lang('浏览频道','Browse channels') }}</button>
       <button type="button" class="wide quiet" (click)="select('');drawer.set(false);channelForm.set(!channelForm())">{{ lang('新建频道','New channel') }}</button>
+      <button type="button" class="wide quiet" (click)="openFriends()">{{ lang('好友','Friends') }}</button>
       <button type="button" class="wide quiet" (click)="openSettings()">{{ lang('设置','Settings') }}</button>
       <small class="connection" role="status">{{ t(connection()) }}</small>
     </aside>
+  }
+  @if (friendsOpen()) {
+    <div class="settings-overlay">
+      <button type="button" class="backdrop" [attr.aria-label]="lang('关闭好友','Close friends')" (click)="friendsOpen.set(false)"></button>
+      <aside class="details-panel friends-panel" [attr.aria-label]="lang('好友','Friends')">
+        <div class="panel-top"><strong>{{ lang('好友','Friends') }}</strong><button type="button" class="icon" [attr.aria-label]="lang('关闭好友列表','Close friend list')" (click)="friendsOpen.set(false)">×</button></div>
+        <form class="inline-form" (ngSubmit)="requestFriend()">
+          <input name="friendUsername" [(ngModel)]="friendUsername" [attr.aria-label]="lang('好友用户名','Friend username')" [placeholder]="lang('好友用户名','Friend username')" maxlength="32" required>
+          <button type="submit" [disabled]="busy() || !friendUsername.trim()">{{ lang('添加好友','Add friend') }}</button>
+        </form>
+        @if (error()) { <p role="alert">{{ error() }}</p> }
+        @for (friend of friends(); track friend.id) {
+          <div class="member">
+            <span class="avatar">{{ initial(friend.displayName) }}</span>
+            <span>{{ friend.displayName }} <small>@{{ friend.username }}</small></span>
+            @switch (friend.state) {
+              @case ('incoming') {
+                <button class="quiet" type="button" [disabled]="busy()" (click)="respondFriend(friend, true)">{{ lang('接受','Accept') }}</button>
+                <button class="quiet" type="button" [disabled]="busy()" (click)="respondFriend(friend, false)">{{ lang('拒绝','Decline') }}</button>
+              }
+              @case ('outgoing') { <small>{{ lang('等待对方接受','Request sent') }}</small> }
+              @case ('friend') {
+                <button class="quiet" type="button" [disabled]="busy()" (click)="directFriend(friend)">{{ lang('发起私聊','Start private chat') }}</button>
+              }
+            }
+          </div>
+        } @empty {
+          <p>{{ lang('暂无好友或申请','No friends or requests yet') }}</p>
+        }
+      </aside>
+    </div>
   }
   @if (settingsOpen()) {
     <div class="settings-overlay">

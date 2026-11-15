@@ -37,6 +37,12 @@ data class ChatState(
     val focus: Long? = null,
     val notificationTarget: String? = null,
     val openWork: String? = null,
+    val timelineRevision: Long? = null,
+    val channels: List<ChatChannel> = emptyList(),
+    val channelsLoaded: Boolean = false,
+    val friends: List<ChatFriend> = emptyList(),
+    val members: List<ChatMember> = emptyList(),
+    val membersRoom: String? = null,
 )
 
 data class UploadProgress(val id: String, val percent: Int)
@@ -63,6 +69,10 @@ class ChatRepository(context: Context) {
         private set
     val theme = MutableStateFlow(local.getString("theme", "system") ?: "system")
     val state = MutableStateFlow(ChatState(resuming = api.session != null))
+    private var directoryOpen = false
+    private var friendsOpen = false
+    private var memberRoom: String? = null
+    private var timelineVisible = true
 
     init {
         scope.launch {
@@ -124,7 +134,7 @@ class ChatRepository(context: Context) {
 
     fun select(room: String?) {
         if (state.value.selected == room && state.value.focus == null) return
-        state.update { it.copy(selected = room, messages = emptyList(), error = null, focus = null, openWork = null) }
+        state.update { it.copy(selected = room, messages = emptyList(), error = null, focus = null, openWork = null, timelineRevision = null) }
         scope.launch {
             serial.withLock {
                 val key = api.session?.outboxKey
@@ -176,6 +186,15 @@ class ChatRepository(context: Context) {
 
     fun workLinkOpened() { state.update { it.copy(openWork = null) } }
 
+    fun openPinned(room: Room) {
+        val sequence = room.pinnedMessage ?: return
+        scope.launch {
+            try {
+                if (!jump(room.id, sequence)) state.update { it.copy(error = "置顶消息不可访问") }
+            } catch (e: IOException) { failed(e) }
+        }
+    }
+
     fun notificationLinkOpened(id: String) {
         state.update { if (it.notificationTarget == id) it.copy(notificationTarget = null) else it }
     }
@@ -198,7 +217,7 @@ class ChatRepository(context: Context) {
         }
         val original = history.firstOrNull { it.sequence == target && !it.deleted }
         if (api.session !== session || original == null || (work != null && original.card?.taskId != work)) return@withLock false
-        state.update { it.copy(selected = roomId, messages = history, focus = target, error = null, openWork = work,
+        state.update { it.copy(selected = roomId, messages = history, focus = target, error = null, openWork = work, timelineRevision = null,
             notificationTarget = if (owner == null) it.notificationTarget else UUID.randomUUID().toString()) }
         true
     }
@@ -206,9 +225,56 @@ class ChatRepository(context: Context) {
     fun create(type: String, title: String, usernames: String, accepted: () -> Unit) = action {
         val members = usernames.split(',', '，', ' ').map(String::trim).filter(String::isNotEmpty)
         val result = JSONObject(api.request("/rooms", json("type" to type, "title" to title.trim(), "members" to JSONArray(members))))
-        state.update { it.copy(selected = result.getString("id"), messages = emptyList(), focus = null) }
+        state.update { it.copy(selected = result.getString("id"), messages = emptyList(), focus = null, timelineRevision = null) }
         accepted()
         load(force = true)
+    }
+
+    fun browseSocial(friends: Boolean, group: String?) {
+        friendsOpen = friends
+        memberRoom = group
+        if (friends || group != null) scope.launch { refresh() }
+    }
+
+    fun requestFriend(username: String, accepted: () -> Unit) = action {
+        api.request("/friends", json("username" to username.trim()))
+        accepted()
+        load()
+    }
+
+    fun respondFriend(friend: ChatFriend, accepted: Boolean) = action {
+        api.request("/friends/${friend.id}/respond", json("accepted" to accepted))
+        load()
+    }
+
+    fun changeMember(room: String, username: String, operation: String, accepted: () -> Unit = {}) = action {
+        api.request("/rooms/$room/members", json("username" to username.trim(), "operation" to operation))
+        accepted()
+        load()
+    }
+
+    fun browseChannels(open: Boolean) {
+        directoryOpen = open
+        if (open) scope.launch { refresh() }
+    }
+
+    fun showingTimeline(visible: Boolean) {
+        if (timelineVisible == visible) return
+        timelineVisible = visible
+        if (visible && foreground) scope.launch { refresh() }
+    }
+
+    fun createSpace(parent: String?, title: String, accepted: () -> Unit) = action {
+        val path = if (parent == null) "/channels" else "/rooms/$parent/topics"
+        val id = JSONObject(api.request(path, json("title" to title.trim()))).getString("id")
+        state.update { it.copy(selected = id, messages = emptyList(), focus = null, timelineRevision = null, openWork = null) }
+        accepted()
+        load()
+    }
+
+    fun subscribe(channel: ChatChannel) = action {
+        api.request("/channels/${channel.id}/subscription", json("subscribed" to !channel.subscribed))
+        load()
     }
 
     fun send(room: String, text: String, replyTo: Long?, file: SelectedAttachment?, accepted: () -> Unit) = action {
@@ -280,6 +346,36 @@ class ChatRepository(context: Context) {
 
     fun roomPreference(room: Room) = action {
         api.request("/rooms/${room.id}/preference", json("key" to "muted", "value" to !room.muted))
+        load()
+    }
+
+    fun openSaved() = action {
+        val id = JSONObject(api.request("/saved", JSONObject())).getString("id")
+        state.update { it.copy(selected = id, messages = emptyList(), focus = null, timelineRevision = null, openWork = null) }
+        load()
+    }
+
+    fun editMessage(room: String, sequence: Long, text: String, done: () -> Unit) = action {
+        api.request("/rooms/$room/messages/$sequence/edit", json("text" to text))
+        done()
+        load()
+    }
+
+    fun deleteMessage(room: String, sequence: Long, done: () -> Unit) = action {
+        api.request("/rooms/$room/messages/$sequence/delete", JSONObject())
+        done()
+        load()
+    }
+
+    fun pinMessage(room: Room, sequence: Long) = action {
+        api.request("/rooms/${room.id}/messages/$sequence/pin", json("value" to (room.pinnedMessage != sequence)))
+        load()
+    }
+
+    fun forwardMessage(room: String, sequence: Long, target: String?, request: String, done: () -> Unit) = action {
+        val destination = target ?: JSONObject(api.request("/saved", JSONObject())).getString("id")
+        api.request("/rooms/$destination/forward", json("roomId" to room, "sequence" to sequence, "clientId" to request))
+        done()
         load()
     }
 
@@ -355,11 +451,43 @@ class ChatRepository(context: Context) {
         val settings = JSONObject(api.request("/settings"))
         val rawRooms = JSONArray(api.request("/rooms"))
         val rooms = decodeRooms(rawRooms)
+        val group = memberRoom?.takeIf { id -> rooms.any { it.id == id } }
+        val members = group?.let { id ->
+            try {
+                JSONArray(api.request("/rooms/$id/members")).items {
+                    ChatMember(it.getString("name"), it.getString("displayName"), it.getBoolean("robot"), it.optBoolean("owner"))
+                }
+            } catch (error: ChatRequestException) {
+                if (error.status != 404) throw error
+                emptyList()
+            }
+        }
+        val friends = if (friendsOpen) JSONArray(api.request("/friends")).items {
+            ChatFriend(it.getString("id"), it.getString("username"), it.getString("displayName"), it.getString("state"))
+        } else null
+        val directory = if (directoryOpen) JSONArray(api.request("/channels")).items {
+            ChatChannel(it.getString("id"), it.getString("title"), it.getBoolean("subscribed"), it.getBoolean("owner"))
+        } else null
         val key = api.session?.outboxKey ?: return
+        val revoked = state.value.rooms.map(Room::id).toSet() - rooms.map(Room::id).toSet()
+        if (revoked.isNotEmpty()) outbox.forgetRooms(key, revoked)
         outbox.saveSnapshot(key, "workspace", json("settings" to settings, "rooms" to rawRooms).toString())
         val view = state.value
         val room = rooms.firstOrNull { it.id == view.selected }
         var history = if (room == null) emptyList() else view.messages
+        if (room != null && foreground && history.isNotEmpty() && view.timelineRevision != room.revision) {
+            val first = history.first().sequence
+            val last = history.last().sequence
+            var cursor = first - 1
+            val updated = mutableListOf<ChatMessage>()
+            while (cursor < last) {
+                val batch = messages("/rooms/${room.id}/messages?after=$cursor")
+                if (batch.isEmpty()) break
+                updated.addAll(batch.takeWhile { it.sequence <= last })
+                cursor = batch.last().sequence
+            }
+            history = updated
+        }
         if (room != null && foreground && view.focus == null) {
             if (history.isEmpty()) {
                 val recent = messages("/rooms/${room.id}/messages")
@@ -384,10 +512,11 @@ class ChatRepository(context: Context) {
                 "text" to message.text, "deleted" to message.deleted, "sentAt" to message.sentAt, "replyTo" to message.replyTo,
                 "attachment" to message.attachment?.json(),
                 "card" to message.card?.json(),
+                "edited" to message.edited, "forwardedFrom" to message.forwardedFrom,
             ))
             outbox.saveSnapshot(key, room.id, cached.toString())
             val seen = history.lastOrNull()?.sequence ?: 0
-            if (seen > room.read && state.value.selected == room.id && foreground)
+            if (seen > room.read && state.value.selected == room.id && foreground && timelineVisible)
                 api.request("/rooms/${room.id}/read", json("sequence" to seen))
         }
         val queued = outbox.entries(key)
@@ -400,6 +529,10 @@ class ChatRepository(context: Context) {
             }
             it.copy(username = settings.optString("username"), settings = settings, rooms = rooms,
                 selected = selected, messages = timeline, focus = it.focus.takeIf { selected != null }, resuming = false,
+                timelineRevision = if (selected == view.selected && it.focus == view.focus && foreground) room?.revision else it.timelineRevision,
+                friends = friends ?: it.friends,
+                members = members.orEmpty(), membersRoom = group,
+                channels = directory ?: it.channels, channelsLoaded = directory != null || it.channelsLoaded,
                 connected = true, outbox = queued, error = if (it.error == "Offline") null else it.error)
         }
     }
@@ -407,7 +540,8 @@ class ChatRepository(context: Context) {
     private fun decodeRooms(rooms: JSONArray) = rooms.items {
         Room(it.getString("id"), it.getString("title"), it.getString("type"), it.getLong("latest"),
             it.getLong("unread"), it.getLong("read"), it.getBoolean("muted"), it.getBoolean("archived"),
-            it.getBoolean("canPost"), it.optString("preview"))
+            it.getBoolean("canPost"), it.optString("preview"), it.optLong("revision"),
+            it.optLong("pinnedMessage").takeIf { sequence -> sequence > 0 }, it.stringOrNull("parentId"), it.optBoolean("canManage"))
     }
 
     private suspend fun messages(path: String) = decodeMessages(api.request(path))
@@ -417,7 +551,8 @@ class ChatRepository(context: Context) {
     private fun decodeMessage(it: JSONObject) =
         ChatMessage(it.getLong("sequence"), it.getString("clientId"), it.getString("sender"), it.optString("text"),
             it.getBoolean("deleted"), it.optString("sentAt"), it.optLong("replyTo").takeIf { sequence -> sequence > 0 },
-            it.optJSONObject("attachment")?.attachment(), it.optJSONObject("card")?.let(BotCard::decode))
+            it.optJSONObject("attachment")?.attachment(), it.optJSONObject("card")?.let(BotCard::decode),
+            it.optBoolean("edited"), it.stringOrNull("forwardedFrom"))
 
     private fun attach() {
         if (foreground || listening) realtime.connect()

@@ -1802,6 +1802,141 @@
       "body": "Real Chrome, MySQL, Firebase HTTP v1 and Android 17. Actual FCM delivered a direct message while the app was backgrounded, and a group message after adb am kill confirmed the process was absent. Both notification taps opened the original message. A live approval notification opened the pending task card. A muted message produced no native notification. Repeated message submission yielded one device queue record. Nonapprover resolution and decision returned 404 and 403. Replayed approval returned 409.",
       "delivery": "implemented",
       "title": "Real Firebase gateway delivery and Android process reclaim"
+    },
+    {
+      "id": "INTENT-ANDROID-MESSAGE-ACTIONS",
+      "type": "intent",
+      "title": "Android long-press message actions",
+      "body": "Add Telegram-style long-press edit, delete, forward, message pin and personal saved messages with shared web APIs. Validate live synchronization and forbid regular members from editing or deleting other senders' messages.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for Android message actions and cross-client permission verification",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-MESSAGE-ACTIONS",
+      "type": "module",
+      "title": "Android long-press message actions and shared pinning",
+      "body": "Long-press menus reuse edit, delete, forward and saved messages. Android and the web share one pinned message per room and clear it atomically when deleted. Android refreshes loaded message windows on history revision changes.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-MESSAGE-ACTIONS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-MESSAGE-ACTIONS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-MESSAGE-ACTIONS",
+      "type": "evidence",
+      "title": "Android and Chrome live message actions and permission checks",
+      "body": "Chrome, Android 17 and real MySQL verified bidirectional edits and deletions, forwarding provenance, private saved messages, pin and unpin synchronization, automatic unpin on delete, and regular-member edit/delete rejection with 404. Android Gradle build, lint, .NET and Angular builds passed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android-actions/result.json and screenshots"
+      },
+      "references": [
+        "REF-ANDROID-MESSAGE-ACTIONS"
+      ]
+    },
+    {
+      "id": "INTENT-ANDROID-CHAT-SPACES",
+      "type": "intent",
+      "title": "Android group topics and channel broadcasts",
+      "body": "Expose topic creation, isolated history and unread counts, channel subscription and authorized broadcasts. Verify messages, read receipts, notifications and permissions in the emulator and web client.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit request for Android group topics and channel broadcasts and real cross-client verification",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-CHAT-SPACES",
+      "type": "module",
+      "title": "Android topic navigation and channel broadcasts",
+      "body": "Create and browse group topics with independent unread state and history. Discover, subscribe to and publish authorized broadcasts in channels using existing web APIs and notification contracts.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-CHAT-SPACES"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-CHAT-SPACES"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-CHAT-SPACES",
+      "type": "evidence",
+      "title": "Android topic isolation, channel privileges, and real FCM",
+      "body": "Android 17 emulator, Chrome, real MySQL and real FCM. Android and Chrome each created topics, verified isolated histories, unread/read sync and matching topic notifications. Android subscribed to a web-owned channel and received an FCM broadcast, while Chrome also showed its in-app notification. Android owner broadcast reached the open Chrome subscriber. Nonmember topic access 404, subscriber posting 403 and nonsubscriber channel history 404. Android build and lint passed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android-spaces/result.json, Android FCM records, and screenshots"
+      },
+      "references": [
+        "REF-ANDROID-CHAT-SPACES"
+      ]
+    },
+    {
+      "id": "INTENT-CHAT-SOCIAL",
+      "type": "intent",
+      "title": "Web and Android friends and group membership",
+      "body": "Support username-based friend requests and private chat from the friend list. Allow new group owners to invite or remove members and transfer ownership. Verify live synchronization, owner permissions and revocation of group and topic access.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "authorization_basis": "Explicit user request for friends, group membership and web/emulator verification"
+    },
+    {
+      "id": "MOD-CHAT-SOCIAL",
+      "type": "module",
+      "title": "Friends and group membership management",
+      "body": "Persist friend requests and group ownership in MySQL. Expose social actions in Web and Android, refresh through SignalR, revoke parent and topic memberships together and retain authored messages.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-CHAT-SOCIAL"
+      ],
+      "verification_basis": [
+        "EVIDENCE-CHAT-SOCIAL"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-SOCIAL",
+      "type": "evidence",
+      "title": "Chrome and Android social workflow on MySQL",
+      "body": "Android requested a friendship, Chrome accepted, and both clients opened private chat. Android declined another request and Chrome cleared it. Chrome invited a member and transferred ownership, Android received both changes and removed the selected member. Regular members and the former owner received 403. The removed member lost access to parent and topic, while authorized accounts retained the authored history. Build and Android lint passed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-social/result.json and first-pass/friend-direct.ok"
+      },
+      "references": [
+        "REF-CHAT-SOCIAL"
+      ]
     }
   ],
   "relations": [
@@ -2548,6 +2683,66 @@
       "type": "supports",
       "target": "MOD-ANDROID-FCM",
       "id": "REL-ANDROID-FCM-LIVE-EVIDENCE"
+    },
+    {
+      "id": "REL-ANDROID-MESSAGE-ACTIONS-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-MESSAGE-ACTIONS",
+      "target": "INTENT-ANDROID-MESSAGE-ACTIONS"
+    },
+    {
+      "id": "REL-ANDROID-MESSAGE-ACTIONS-CHAT",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-MESSAGE-ACTIONS",
+      "target": "MOD-CHAT-PHASE-B"
+    },
+    {
+      "id": "REL-ANDROID-MESSAGE-ACTIONS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-MESSAGE-ACTIONS",
+      "target": "MOD-ANDROID-MESSAGE-ACTIONS"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SPACES-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-CHAT-SPACES",
+      "target": "INTENT-ANDROID-CHAT-SPACES"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SPACES-BASE",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-CHAT-SPACES",
+      "target": "MOD-CHAT-PHASE-D"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SPACES-FCM",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-CHAT-SPACES",
+      "target": "MOD-ANDROID-FCM"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SPACES-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-CHAT-SPACES",
+      "target": "MOD-ANDROID-CHAT-SPACES"
+    },
+    {
+      "id": "REL-CHAT-SOCIAL-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-SOCIAL",
+      "target": "INTENT-CHAT-SOCIAL"
+    },
+    {
+      "id": "REL-CHAT-SOCIAL-SPACES",
+      "type": "depends_on",
+      "source": "MOD-CHAT-SOCIAL",
+      "target": "MOD-ANDROID-CHAT-SPACES"
+    },
+    {
+      "id": "REL-CHAT-SOCIAL-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-SOCIAL",
+      "target": "MOD-CHAT-SOCIAL"
     }
   ],
   "references": [
@@ -3081,6 +3276,27 @@
       "kind": "project_file",
       "target": "docs/36-android-fcm.md",
       "purpose": "Firebase configuration, native push design and scoped local verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-MESSAGE-ACTIONS",
+      "kind": "project_file",
+      "target": "docs/37-android-message-actions.md",
+      "purpose": "Android message actions, shared pinning and cross-client verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-CHAT-SPACES",
+      "kind": "project_file",
+      "target": "docs/38-android-topics-channels.md",
+      "purpose": "Android topics and channels with live Chrome, MySQL and FCM verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-SOCIAL",
+      "kind": "project_file",
+      "target": "docs/39-chat-friends-and-group-members.md",
+      "purpose": "Friends, group management, permission semantics and cross-client verification",
       "tracking": "live"
     }
   ],

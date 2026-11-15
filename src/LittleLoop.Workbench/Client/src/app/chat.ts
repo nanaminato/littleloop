@@ -5,8 +5,9 @@ import { ChatBotCard, MessageCard } from './chat-bot-card';
 import { apiMessage, translate } from './chat-language';
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
 
-interface Room { id: string; type: 'direct' | 'group' | 'saved' | 'legacy' | 'channel' | 'topic'; title: string; latest: number; read: number; unread: number; revision: number; pinned: boolean; archived: boolean; muted: boolean; parentId?: string; canPost: boolean; preview: string; lastSent?: string; avatarName?: string; avatarVersion?: string; previewDeleted: boolean }
-interface Member { name: string; displayName: string; robot: boolean }
+interface Room { id: string; type: 'direct' | 'group' | 'saved' | 'legacy' | 'channel' | 'topic'; title: string; latest: number; read: number; unread: number; revision: number; pinned: boolean; archived: boolean; muted: boolean; parentId?: string; canPost: boolean; canManage: boolean; preview: string; lastSent?: string; avatarName?: string; avatarVersion?: string; previewDeleted: boolean; pinnedMessage?: number | null }
+interface Member { name: string; displayName: string; robot: boolean; owner: boolean }
+interface Friend { id: string; username: string; displayName: string; state: 'friend' | 'incoming' | 'outgoing' }
 interface Channel { id: string; title: string; subscribed: boolean; owner: boolean }
 interface Attachment { id: string; name: string; mime: string; size: number }
 interface ChatMessage { roomId: string; sequence: number; clientId: string; sender: string; text: string; replyTo: number | null; attachment: Attachment | null; edited: boolean; deleted: boolean; forwardedFrom: string | null; card?: MessageCard; sentAt?: string }
@@ -23,6 +24,10 @@ export class Chat {
   readonly drawer = signal(false);
   readonly settingsOpen = signal(false);
   readonly detailsOpen = signal(false);
+  readonly friendsOpen = signal(false);
+  readonly friends = signal<Friend[]>([]);
+  friendUsername = '';
+  memberUsername = '';
   readonly detailMembers = signal<Member[]>([]);
   readonly inRoomSearch = signal(false);
   readonly folder = signal('');
@@ -129,6 +134,7 @@ export class Chat {
       this.requestSync();
     });
     hub.on('readChanged', () => this.requestSync());
+    hub.on('socialChanged', () => this.requestSync());
     hub.on('settingsChanged', () => void this.refreshAccount());
     hub.on('identityChanged', (id: string) => {
       if (this.selected() === id) this.loadedRevision = -1;
@@ -261,6 +267,24 @@ export class Chat {
         this.playNotice();
       }
       this.rooms.set(rooms);
+      const accessible = new Set(rooms.map(room => room.id));
+      const hits = this.searchResults();
+      if (hits?.some(hit => !accessible.has(hit.roomId))) {
+        this.searchResults.set(hits.filter(hit => accessible.has(hit.roomId)));
+      }
+      const selected = this.selected();
+      if (selected && !accessible.has(selected) && previous.some(room => room.id === selected)) {
+        this.select('');
+        this.drafts.delete(selected);
+        this.scrolls.delete(selected);
+      }
+      const oldNotice = this.notice();
+      if (oldNotice && !accessible.has(oldNotice.id)) this.notice.set(null);
+      if (this.friendsOpen()) {
+        const friends = await this.api<Friend[]>('/friends');
+        if (this.hub !== hub) continue;
+        this.friends.set(friends);
+      }
       if (this.linkRoom && rooms.some(item => item.id === this.linkRoom)) {
         const target = this.linkRoom;
         this.linkRoom = null;
@@ -269,14 +293,9 @@ export class Chat {
       if (incoming.size > 0 && this.searchResults() !== null) await this.runSearch(this.searchTerm);
       const room = this.selected();
       const summary = rooms.find(r => r.id === room);
-      if (!summary) {
-        if (previous.some(item => item.id === room)) {
-          if (this.notice()?.id === room) this.notice.set(null);
-          this.select('');
-        }
-        continue;
-      }
+      if (!summary) continue;
       const version = this.historyVersion;
+      if (this.detailsOpen()) await this.refreshMembers(room);
       if (this.bot().enabled) {
         const info = await this.api<{ installed: boolean; providers: string[] }>('/bot/rooms/' + room);
         if (version !== this.historyVersion) continue;
@@ -530,7 +549,10 @@ export class Chat {
     if (!term.trim()) { this.searchResults.set(null); return; }
     const room = this.inRoomSearch() ? this.selected() : '';
     const hits = await this.api<ChatMessage[]>('/search?q=' + encodeURIComponent(term.trim()) + (room ? '&room=' + room : ''));
-    if (term === this.searchTerm && this.user()) this.searchResults.set(hits);
+    if (term === this.searchTerm && this.user()) {
+      const accessible = new Set(this.rooms().map(item => item.id));
+      this.searchResults.set(hits.filter(hit => accessible.has(hit.roomId)));
+    }
   }
 
   roomTitle(id: string) {
@@ -570,6 +592,13 @@ export class Chat {
 
   private messagePath(message: ChatMessage) {
     return '/rooms/' + message.roomId + '/messages/' + message.sequence;
+  }
+
+  async pinMessage(message: ChatMessage) {
+    await this.action(async () => {
+      await this.api(this.messagePath(message) + '/pin', { value: this.currentRoom()?.pinnedMessage !== message.sequence });
+      this.requestSync();
+    });
   }
 
   async saved() {
@@ -666,6 +695,9 @@ export class Chat {
 
   private clearAccount() {
     this.drawer.set(false);
+    this.friendsOpen.set(false);
+    this.friends.set([]);
+    this.friendUsername = '';
     this.settingsOpen.set(false);
     this.detailsOpen.set(false);
     this.folder.set('');
@@ -699,16 +731,57 @@ export class Chat {
     void this.refreshAccount();
   }
 
-  async openDetails() {
-    const room = this.selected();
-    if (!room) return;
+  openFriends() {
+    this.drawer.set(false);
+    this.friendsOpen.set(true);
+    this.requestSync();
+  }
+
+  async requestFriend() {
+    await this.action(async () => {
+      await this.api('/friends', { username: this.friendUsername.trim() });
+      this.friendUsername = '';
+      this.requestSync();
+    });
+  }
+
+  async respondFriend(friend: Friend, accepted: boolean) {
+    await this.action(async () => {
+      await this.api('/friends/' + friend.id + '/respond', { accepted });
+      this.requestSync();
+    });
+  }
+
+  async directFriend(friend: Friend) {
+    await this.action(async () => {
+      const result = await this.api<{id: string}>('/rooms', { type: 'direct', title: '', members: [friend.username] });
+      this.friendsOpen.set(false);
+      this.select(result.id);
+    });
+  }
+
+  async changeMember(operation: 'invite' | 'remove' | 'transfer', username = this.memberUsername) {
+    const room = this.currentRoom();
+    if (!room?.canManage) return;
+    await this.action(async () => {
+      await this.api('/rooms/' + room.id + '/members', { operation, username: username.trim() });
+      if (operation === 'invite') this.memberUsername = '';
+      this.requestSync();
+    });
+  }
+
+  private async refreshMembers(room: string) {
+    const items = await this.api<Member[]>('/rooms/' + room + '/members');
+    if (this.selected() === room && this.detailsOpen()) this.detailMembers.set(items);
+  }
+
+  openDetails() {
+    if (!this.selected()) return;
     if (this.detailsOpen()) { this.detailsOpen.set(false); return; }
     this.detailMembers.set([]);
+    this.memberUsername = '';
     this.detailsOpen.set(true);
-    await this.action(async () => {
-      const items = await this.api<Member[]>('/rooms/' + room + '/members');
-      if (this.selected() === room) this.detailMembers.set(items);
-    });
+    this.requestSync();
   }
 
   avatarUrl(name: string, version: string) { return '/api/chat/avatars/' + encodeURIComponent(name) + '?v=' + version; }
@@ -774,6 +847,7 @@ export class Chat {
   @HostListener('document:keydown.escape')
   escape() {
     if (this.settingsOpen()) this.settingsOpen.set(false);
+    else if (this.friendsOpen()) this.friendsOpen.set(false);
     else if (this.detailsOpen()) this.detailsOpen.set(false);
     else if (this.drawer()) this.drawer.set(false);
     else if (this.inRoomSearch()) this.toggleSearch(false);

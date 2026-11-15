@@ -113,3 +113,11 @@ chat-settings { position:relative; z-index:10; max-height:calc(100% - 36px); bor
   .conversation-header { padding:5px 7px; gap:5px; }.timeline { padding:9px; }.timeline article { max-width:94%; }
   button, .bubble-footer .icon { min-height:44px; }
 }
+
+
+.friends-panel { position:relative; inset:auto; z-index:10; width:min(100%, 480px); max-height:85%; border-radius:12px; }
+.friends-panel .panel-top strong { margin-right:auto; }
+.friends-panel p { padding:0 14px; }
+.inline-form { display:flex; flex-wrap:wrap; gap:8px; padding:10px 13px; }
+.inline-form input { flex:1; min-width:105px; }
+.member > span:nth-child(2) { flex:1; min-width:0; }

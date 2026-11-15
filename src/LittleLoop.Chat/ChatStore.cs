@@ -3,7 +3,7 @@ using MySqlConnector;
 sealed record Account(string Id, string Name, string Password);
 sealed record Room(string Id, string Type, string Title, long Latest, long Read, long Unread, long Revision,
     bool Pinned, bool Archived, bool Muted, string? ParentId, bool CanPost, string Preview, DateTime? LastSent,
-    string? AvatarName, string? AvatarVersion, bool PreviewDeleted);
+    string? AvatarName, string? AvatarVersion, bool PreviewDeleted, long? PinnedMessage, bool CanManage);
 sealed record Attachment(string Id, string Name, string Mime, long Size);
 sealed record ChatMessage(string RoomId, long Sequence, string ClientId, string Sender, string Text, long? ReplyTo,
     Attachment? Attachment, bool Edited, bool Deleted, string? ForwardedFrom, MessageCard? Card, DateTime? SentAt);
@@ -41,7 +41,8 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
                 room_id CHAR(36) NOT NULL, seq BIGINT NOT NULL, sender_id CHAR(36) NOT NULL,
                 client_id CHAR(36) NOT NULL, body TEXT NOT NULL, reply_to BIGINT NULL,
                 PRIMARY KEY(room_id,seq), UNIQUE(room_id,sender_id,client_id),
-                FOREIGN KEY(room_id,sender_id) REFERENCES chat_members(room_id,user_id),
+                CONSTRAINT fk_chat_message_room FOREIGN KEY(room_id) REFERENCES chat_rooms(id),
+                CONSTRAINT fk_chat_message_sender FOREIGN KEY(sender_id) REFERENCES chat_accounts(id),
                 FOREIGN KEY(room_id,reply_to) REFERENCES chat_messages(room_id,seq)
             ) CHARACTER SET utf8mb4;
             """, db);
@@ -55,9 +56,9 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         return await Find(db, name);
     }
 
-    private static async Task<Account?> Find(MySqlConnection db, string name)
+    private static async Task<Account?> Find(MySqlConnection db, string name, MySqlTransaction? tx = null)
     {
-        await using var cmd = Command(db, null, "SELECT id,name,password FROM chat_accounts WHERE name=@name", ("name", name));
+        await using var cmd = Command(db, tx, "SELECT id,name,password FROM chat_accounts WHERE name=@name", ("name", name));
         await using var reader = await cmd.ExecuteReaderAsync();
         return await reader.ReadAsync() ? new(reader.GetString(0), reader.GetString(1), reader.GetString(2)) : null;
     }
@@ -101,9 +102,10 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         string id = Guid.NewGuid().ToString();
         await using var tx = await db.BeginTransactionAsync();
         await using (var insert = Command(db, tx, """
-            INSERT INTO chat_rooms(id,type,title,direct_key) VALUES(@id,@type,@title,@key)
+            INSERT INTO chat_rooms(id,type,title,direct_key,owner_id) VALUES(@id,@type,@title,@key,@owner)
             ON DUPLICATE KEY UPDATE id=id
-            """, ("id", id), ("type", request.Type), ("title", request.Title ?? ""), ("key", directKey)))
+            """, ("id", id), ("type", request.Type), ("title", request.Title ?? ""), ("key", directKey),
+            ("owner", request.Type == "group" ? user.Id : null)))
             await insert.ExecuteNonQueryAsync();
         if (directKey is not null)
         {
@@ -130,7 +132,8 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
               (SELECT COUNT(*) FROM chat_messages msg WHERE msg.room_id=r.id AND msg.seq>m.read_to AND msg.sender_id<>@user AND NOT msg.deleted),
               r.revision,m.pinned,m.archived,m.muted,r.parent_id,(r.type<>'channel' OR r.owner_id=@user),
               CASE WHEN last.deleted THEN '消息已删除' ELSE COALESCE(NULLIF(LEFT(last.body,140),''),f.name,'') END,last.sent_at,
-              peer.name,picture.version,COALESCE(last.deleted,FALSE)
+              peer.name,picture.version,COALESCE(last.deleted,FALSE),r.pinned_message,
+              COALESCE(r.type='group' AND r.owner_id=@user,FALSE)
             FROM chat_members m JOIN chat_rooms r ON r.id=m.room_id
             LEFT JOIN chat_members p ON r.type='direct' AND p.room_id=r.id AND p.user_id<>m.user_id
             LEFT JOIN chat_accounts peer ON peer.id=p.user_id
@@ -146,7 +149,8 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
             rooms.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetInt64(4), reader.GetInt64(5),
                 reader.GetInt64(6), reader.GetBoolean(7), reader.GetBoolean(8), reader.GetBoolean(9),
                 reader.IsDBNull(10) ? null : reader.GetString(10), reader.GetBoolean(11), reader.GetString(12), ReadTimestamp(reader, 13),
-                reader.IsDBNull(14) ? null : reader.GetString(14), reader.IsDBNull(15) ? null : reader.GetString(15), reader.GetBoolean(16)));
+                reader.IsDBNull(14) ? null : reader.GetString(14), reader.IsDBNull(15) ? null : reader.GetString(15), reader.GetBoolean(16),
+                reader.IsDBNull(17) ? null : reader.GetInt64(17), reader.GetBoolean(18)));
         return rooms.ToArray();
     }
 
@@ -154,10 +158,14 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
     {
         await using var db = await Open();
         if (!await IsMember(db, null, room, user)) return null;
-        string sql = MessageSelect + " WHERE msg.room_id=@room";
+        string sql = MessageSelect + """
+             WHERE msg.room_id=@room AND EXISTS(
+                 SELECT 1 FROM chat_members access WHERE access.room_id=msg.room_id AND access.user_id=@user)
+            """;
+
         sql += after.HasValue ? " AND msg.seq>@cursor ORDER BY msg.seq ASC LIMIT 50"
             : " AND msg.seq<@cursor ORDER BY msg.seq DESC LIMIT 50";
-        await using var cmd = Command(db, null, sql, ("room", room), ("cursor", after ?? before ?? long.MaxValue));
+        await using var cmd = Command(db, null, sql, ("room", room), ("user", user), ("cursor", after ?? before ?? long.MaxValue));
         await using var reader = await cmd.ExecuteReaderAsync();
         var items = new List<ChatMessage>();
         while (await reader.ReadAsync()) items.Add(Message(reader, room));
@@ -169,17 +177,18 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
-        if (!await IsMember(db, tx, room, user)) return null;
         await using var clock = Command(db, tx, "SELECT latest,type,owner_id FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
         long latest;
-        string roomType;
+        string roomType, owner;
         await using (var reader = await clock.ExecuteReaderAsync())
         {
             if (!await reader.ReadAsync()) return null;
             roomType = reader.GetString(1);
-            if (roomType == "channel" && reader.GetString(2) != user) throw new ChannelWriteDeniedException();
+            owner = reader.IsDBNull(2) ? "" : reader.GetString(2);
             latest = reader.GetInt64(0);
         }
+        if (!await IsMember(db, tx, room, user)) return null;
+        if (roomType == "channel" && owner != user) throw new ChannelWriteDeniedException();
         string requestKey = RequestKey(input, forward, card, job?.Input);
         // A locking read observes a competing sender's committed retry even under repeatable read.
         await using (var lookup = Command(db, tx, MessageSelect + """

@@ -35,10 +35,12 @@ data class Session(val base: HttpUrl, val cookie: String) {
     }
 }
 data class Room(val id: String, val title: String, val type: String, val latest: Long, val unread: Long,
-                val read: Long, val muted: Boolean, val archived: Boolean, val canPost: Boolean, val preview: String)
+                val read: Long, val muted: Boolean, val archived: Boolean, val canPost: Boolean, val preview: String,
+                val revision: Long, val pinnedMessage: Long?, val parentId: String?, val canManage: Boolean = false)
+data class ChatChannel(val id: String, val title: String, val subscribed: Boolean, val owner: Boolean)
 data class ChatMessage(val sequence: Long, val clientId: String, val sender: String, val text: String,
                        val deleted: Boolean, val sentAt: String, val replyTo: Long?, val attachment: ChatAttachment?,
-                       val card: BotCard?)
+                       val card: BotCard?, val edited: Boolean, val forwardedFrom: String?)
 data class ChatAttachment(val id: String, val name: String, val mime: String, val size: Long) {
     val image get() = mime in setOf("image/png", "image/jpeg", "image/webp", "image/gif")
     fun json() = json("id" to id, "name" to name, "mime" to mime, "size" to size)

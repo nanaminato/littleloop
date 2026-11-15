@@ -95,3 +95,8 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 [Android LittleLoop 机器人](docs/35-android-bot-cards.md)支持源码问答、从消息安排开发任务、审批和查看执行证据。
 
 [Android FCM 云推送](docs/36-android-fcm.md)说明 Firebase 配置、会话与待审批通知，以及如何验收后台送达。
+
+[Android 消息长按菜单](docs/37-android-message-actions.md)支持编辑、删除、转发、消息置顶和个人收藏。
+
+[Android 群话题和频道](docs/38-android-topics-channels.md)复用同一套历史、未读、订阅和广播通知。
+[好友申请和群成员管理](docs/39-chat-friends-and-group-members.md)覆盖网页版和 Android，群成员变更会同步到话题。

@@ -113,6 +113,17 @@ internal class ChatLocalStore(context: Context) : SQLiteOpenHelper(context, "cha
             "session = ? AND id = ?", arrayOf(session, id))
     }
 
+    suspend fun forgetRooms(session: String, rooms: Set<String>) = withContext(Dispatchers.IO) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (room in rooms) db.delete("snapshots", "session = ? AND name = ?", arrayOf(session, room))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     suspend fun snapshot(session: String, name: String): String? = withContext(Dispatchers.IO) {
         readableDatabase.rawQuery("SELECT payload FROM snapshots WHERE session = ? AND name = ?",
             arrayOf(session, name)).use { row -> if (row.moveToFirst()) row.getString(0) else null }

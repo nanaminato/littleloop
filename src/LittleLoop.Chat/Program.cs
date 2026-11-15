@@ -182,6 +182,7 @@ ChatSettingsEndpoints.Map(secured, store);
 IdentityEndpoints.Map(secured, store);
 ChatPush.Map(secured, store, pushIdentity);
 ChatFcm.Map(secured, store, app.Services.GetService<ChatBot>(), fcmProject);
+ChatSocialEndpoints.Map(secured, store);
 ChatBotEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
 await app.RunAsync();
 

@@ -66,6 +66,20 @@ static class ChatFeatureEndpoints
         api.MapPost("/rooms/{room:guid}/messages/{seq:long}/delete",
             (Guid room, long seq, ClaimsPrincipal user, IHubContext<ChatHub> hub) => Change(store, hub, user, room, seq, null));
 
+        api.MapPost("/rooms/{room:guid}/messages/{seq:long}/pin",
+            async (Guid room, long seq, MessagePin input, ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
+            {
+                if (seq <= 0) return Results.BadRequest();
+                try
+                {
+                    var recipients = await store.SetPinnedMessage(Id(user), room.ToString(), seq, input.Value);
+                    if (recipients is null) return Results.NotFound();
+                    if (recipients.Length > 0) await Notify(hub, recipients, room.ToString());
+                    return Results.NoContent();
+                }
+                catch (ChannelWriteDeniedException) { return Results.StatusCode(403); }
+            });
+
         api.MapPost("/rooms/{room:guid}/forward", async (Guid room, ForwardMessage input, ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
         {
             if (input.ClientId == Guid.Empty || input.Sequence <= 0) return Results.BadRequest();

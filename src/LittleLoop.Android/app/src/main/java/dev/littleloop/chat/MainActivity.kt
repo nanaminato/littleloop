@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -119,17 +120,50 @@ private fun ChatScreen(chat: ChatRepository, state: ChatState, theme: String) {
     var query by rememberSaveable { mutableStateOf("") }
     var searching by rememberSaveable { mutableStateOf(false) }
     var searchRoom by rememberSaveable { mutableStateOf<String?>(null) }
+    var showChannels by rememberSaveable { mutableStateOf(false) }
+    var showFriends by rememberSaveable { mutableStateOf(false) }
+    var showMembers by rememberSaveable { mutableStateOf(false) }
+    var showTopics by rememberSaveable { mutableStateOf(false) }
+    var createSpace by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(state.notificationTarget) {
         state.notificationTarget?.let { id ->
             searching = false
             settings = false
             create = false
+            showChannels = false
+            showTopics = false
+            showFriends = false
+            showMembers = false
+            createSpace = false
             chat.notificationLinkOpened(id)
         }
     }
     val room = state.rooms.firstOrNull { it.id == state.selected }
-    BackHandler(settings || searching || room != null) {
-        if (searching) searching = false else if (settings) settings = false else chat.select(null)
+    val parent = state.rooms.firstOrNull { it.id == room?.parentId }
+    val openBack = { chat.select(parent?.id) }
+    val browsing = showChannels && state.username.isNotEmpty()
+    DisposableEffect(chat, browsing) {
+        chat.browseChannels(browsing)
+        onDispose { chat.browseChannels(false) }
+    }
+    val memberRoom = room?.id.takeIf { showMembers && room?.type == "group" }
+    LaunchedEffect(showFriends, memberRoom, state.username) {
+        chat.browseSocial(showFriends && state.username.isNotEmpty(), memberRoom)
+        if (memberRoom == null) showMembers = false
+    }
+    LaunchedEffect(room?.id, showChannels, showTopics, settings, searching, showFriends, showMembers) {
+        chat.showingTimeline(room != null && !showChannels && !showTopics && !settings && !searching && !showFriends && !showMembers)
+    }
+    BackHandler(settings || searching || showChannels || showTopics || showFriends || showMembers || room != null) {
+        when {
+            searching -> searching = false
+            settings -> settings = false
+            showFriends -> showFriends = false
+            showMembers -> showMembers = false
+            showChannels -> showChannels = false
+            showTopics -> showTopics = false
+            else -> openBack()
+        }
     }
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
@@ -164,21 +198,53 @@ private fun ChatScreen(chat: ChatRepository, state: ChatState, theme: String) {
                         chat.logout()
                     })
                 }
+                showFriends -> {
+                    Header("好友", "返回", { showFriends = false })
+                    FriendsPanel(chat, state) { showFriends = false }
+                }
+                showMembers && room?.type == "group" -> {
+                    Header("群成员", "返回", { showMembers = false })
+                    GroupMembersPanel(chat, state, room)
+                }
+                showChannels -> {
+                    Header("频道目录", "返回", { showChannels = false }, "新建频道") { createSpace = true }
+                    ChannelDirectory(state, subscribe = chat::subscribe) {
+                        chat.select(it)
+                        showChannels = false
+                    }
+                }
+                showTopics && room?.type == "group" -> {
+                    Header("群话题", "返回", { showTopics = false }, "新建话题") { createSpace = true }
+                    val topics = state.rooms.filter { it.parentId == room.id && it.type == "topic" && !it.archived }
+                    Text(room.title, Modifier.padding(12.dp), style = MaterialTheme.typography.titleMedium)
+                    if (topics.isEmpty()) Text("暂无话题", Modifier.padding(12.dp))
+                    LazyColumn(Modifier.weight(1f)) {
+                        items(topics, key = Room::id) { topic ->
+                            RoomRow(topic) { chat.select(topic.id); showTopics = false }
+                        }
+                    }
+                }
                 room != null -> key(room.id) {
-                    Conversation(chat, state, room) { searchRoom = room.id; searching = true }
+                    Conversation(chat, state, room, openBack, { showTopics = true }, { showMembers = true }) { searchRoom = room.id; searching = true }
                 }
                 else -> {
-                    Header("LittleLoop", "设置", { settings = true }, "新会话") { create = true }
+                    Header("LittleLoop", "设置", { settings = true }, "新会话", extra = {
+                        TextButton(onClick = chat::openSaved, enabled = !state.busy) { Text("收藏", color = Color.White) }
+                    }) { create = true }
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(query, { query = it }, Modifier.weight(1f),
                             singleLine = true, placeholder = { Text("搜索会话") }, shape = RoundedCornerShape(24.dp))
                         TextButton(onClick = { searchRoom = null; searching = true }) { Text("搜索消息") }
+                        TextButton(onClick = { showFriends = true }) { Text("好友") }
+                        TextButton(onClick = { showChannels = true }) { Text("频道") }
                     }
                     if (!state.connected) Text("正在重新连接", Modifier.padding(horizontal = 16.dp))
                     state.error?.let { Text(it, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error) }
                     LazyColumn(Modifier.weight(1f)) {
-                        items(state.rooms.filter { !it.archived && it.title.contains(query, ignoreCase = true) }, key = Room::id) {
+                        items(state.rooms.filter {
+                            !it.archived && (it.type != "topic" || query.isNotBlank()) && it.title.contains(query, ignoreCase = true)
+                        }, key = Room::id) {
                             RoomRow(it) { chat.select(it.id) }
                         }
                     }
@@ -188,6 +254,12 @@ private fun ChatScreen(chat: ChatRepository, state: ChatState, theme: String) {
     }
     if (create && state.username.isNotEmpty()) CreateRoom(state.busy, state.error, { create = false }) { type, title, members ->
         chat.create(type, title, members) { create = false }
+    }
+    if (createSpace && (showChannels || showTopics && room?.type == "group")) {
+        val parentId = room?.id.takeIf { showTopics && !showChannels }
+        CreateChatSpace(parentId != null, state, { createSpace = false }) { title ->
+            chat.createSpace(parentId, title) { createSpace = false; showChannels = false; showTopics = false }
+        }
     }
 }
 
@@ -232,7 +304,7 @@ private fun RoomRow(room: Room, open: () -> Unit) {
             contentAlignment = Alignment.Center) { Text(room.title.take(1), color = Color.White, style = MaterialTheme.typography.titleLarge) }
         Column(Modifier.weight(1f)) {
             Text(room.title, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(room.preview.ifBlank { if (room.type == "direct") "私聊" else "群聊" }, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(room.preview.ifBlank { roomTypeLabel(room.type) }, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (room.unread > 0) Badge { Text(room.unread.toString()) }
@@ -241,7 +313,8 @@ private fun RoomRow(room: Room, open: () -> Unit) {
 }
 
 @Composable
-private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, room: Room, onSearch: () -> Unit) {
+private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, room: Room, onBack: () -> Unit,
+                                     onTopics: () -> Unit, onMembers: () -> Unit, onSearch: () -> Unit) {
     var draft by rememberSaveable(room.id) { mutableStateOf("") }
     var replyTo by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
     var file by remember(room.id) { mutableStateOf<SelectedAttachment?>(null) }
@@ -275,6 +348,9 @@ private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, roo
         }
     }
     val bySequence = remember(state.messages) { state.messages.associateBy(ChatMessage::sequence) }
+    var menu by remember(room.id) { mutableStateOf<Long?>(null) }
+    var messageOperation by remember(room.id) { mutableStateOf<Pair<Long, MessageOperation>?>(null) }
+    var operationResult by remember(room.id) { mutableStateOf<String?>(null) }
     val confirmedIds = remember(state.messages, state.username) {
         state.messages.filter { it.sender == state.username }.mapTo(hashSetOf(), ChatMessage::clientId)
     }
@@ -289,9 +365,16 @@ private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, roo
         if (state.focus == null && list.firstVisibleItemIndex <= 1) list.requestScrollToItem(0)
     }
     val dark = MaterialTheme.colorScheme.surface.red < 0.5f
-    Header(room.title, "返回", { chat.select(null) }, if (room.muted) "取消静音" else "静音", extra = {
+    Header(room.title, "返回", onBack, if (room.muted) "取消静音" else "静音", extra = {
         TextButton(onClick = onSearch) { Text("搜索", color = Color.White) }
     }) { chat.roomPreference(room) }
+    if (room.type == "group") {
+        val unread = state.rooms.filter { it.type == "topic" && it.parentId == room.id }.sumOf(Room::unread)
+        Row {
+            TextButton(onClick = onTopics) { Text(if (unread == 0L) "群话题" else "群话题 · $unread 条未读") }
+            TextButton(onClick = onMembers) { Text("群成员") }
+        }
+    }
     if (state.connected && robot?.canOperate == true && room.type in setOf("direct", "group", "topic")) {
         if (robot?.installed == true) {
             TextButton(onClick = { asking = true }) { Text("引用源码提问") }
@@ -314,10 +397,16 @@ private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, roo
         Text("已定位到历史消息", Modifier.weight(1f))
         TextButton(onClick = { chat.select(room.id) }) { Text("回到最新") }
     }
+    room.pinnedMessage?.let { sequence ->
+        TextButton(onClick = { chat.openPinned(room) }, modifier = Modifier.fillMaxWidth()) {
+            Text("已置顶消息 #$sequence")
+        }
+    }
     if (!state.connected) Text("离线 · 消息将在连接恢复后发送", Modifier.padding(8.dp))
     state.error?.takeUnless { it == "Offline" }?.let { Text(it, Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
     fileError?.let { Text(it, Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
     botError?.let { Text(it, Modifier.padding(8.dp), color = MaterialTheme.colorScheme.error) }
+    operationResult?.let { Text(it, Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
     LazyColumn(Modifier.fillMaxWidth().weight(1f).background(if (dark) Color(0xff172330) else Color(0xffe2edda)),
         state = list, reverseLayout = true, contentPadding = PaddingValues(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom)) {
@@ -349,8 +438,12 @@ private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, roo
                 Column(Modifier.widthIn(max = 300.dp).background(
                     if (message.sequence == state.focus) MaterialTheme.colorScheme.primaryContainer
                     else if (own && dark) Color(0xff215775) else if (own) Color(0xffe2f9cf) else MaterialTheme.colorScheme.surface,
-                    RoundedCornerShape(14.dp)).padding(horizontal = 11.dp, vertical = 7.dp)) {
+                    RoundedCornerShape(14.dp)).combinedClickable(
+                    enabled = !message.deleted, onClick = {}, onLongClickLabel = "消息操作",
+                    onLongClick = { menu = message.sequence; operationResult = null },
+                ).padding(horizontal = 11.dp, vertical = 7.dp)) {
                     if (!own) Text(message.sender, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                    message.forwardedFrom?.let { Text("转发自 $it", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall) }
                     message.replyTo?.let { sequence ->
                         val quoted = bySequence[sequence]?.takeUnless(ChatMessage::deleted)?.text
                         Text(quoted?.ifBlank { null } ?: "引用消息 #$sequence",
@@ -372,10 +465,19 @@ private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, roo
                         runCatching { messageTime.format(Instant.parse(message.sentAt).atZone(ZoneId.systemDefault())) }.getOrDefault("")
                     }
                     if (time.isNotEmpty()) Text(time, Modifier.align(Alignment.End), style = MaterialTheme.typography.labelSmall)
+                    if (message.edited && !message.deleted) Text("已编辑", style = MaterialTheme.typography.labelSmall)
                     if (room.canPost && !message.deleted) Row {
                         TextButton(onClick = { replyTo = message.sequence }) { Text("回复") }
                         if (state.connected && robot?.installed == true && robot?.canOperate == true) {
                             TextButton(onClick = { scheduleFrom = message.sequence }) { Text("安排任务") }
+                        }
+                    }
+                    if (menu == message.sequence && !message.deleted) {
+                        MessageMenu(own && message.card == null, room.canPost, room.pinnedMessage == message.sequence,
+                            enabled = state.connected && !state.busy, dismiss = { menu = null }) { operation ->
+                            menu = null
+                            if (operation == MessageOperation.Pin) chat.pinMessage(room, message.sequence)
+                            else messageOperation = message.sequence to operation
                         }
                     }
                 }
@@ -412,8 +514,18 @@ private fun ColumnScope.Conversation(chat: ChatRepository, state: ChatState, roo
         },
             enabled = (draft.isNotBlank() || file != null) && !state.busy) { Text("发送") }
     }
+    if (room.type == "channel" && !room.canPost)
+        Text("此频道仅发布者可发消息。", Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
     bySequence[preview]?.takeUnless(ChatMessage::deleted)?.let { message ->
         AttachmentDialog(chat, room.id, message) { preview = null }
+    }
+    messageOperation?.let { (sequence, operation) ->
+        bySequence[sequence]?.let { message ->
+            MessageOperationDialog(chat, state, room, message, operation, dismiss = { messageOperation = null }) { result ->
+                messageOperation = null
+                operationResult = result
+            }
+        }
     }
     bySequence[botDetails]?.takeUnless(ChatMessage::deleted)?.card?.let { card ->
         BotDetails(chat.bot, card) { botDetails = null }
@@ -447,6 +559,7 @@ private fun SettingsScreen(chat: ChatRepository, state: ChatState, theme: String
         Text("通知", color = MaterialTheme.colorScheme.primary)
         SettingToggle("私聊通知", notifications?.optBoolean("direct", true) ?: true, !state.busy) { chat.save("notifications", "direct", it) }
         SettingToggle("群聊通知", notifications?.optBoolean("groups", true) ?: true, !state.busy) { chat.save("notifications", "groups", it) }
+        SettingToggle("频道通知", notifications?.optBoolean("channels", true) ?: true, !state.busy) { chat.save("notifications", "channels", it) }
         SettingToggle("显示消息预览", notifications?.optBoolean("preview", true) ?: true, !state.busy) { chat.save("notifications", "preview", it) }
         cloud()
         if (!cloudEnabled) {

@@ -53,6 +53,9 @@ internal fun ColumnScope.MessageSearch(chat: ChatRepository, rooms: List<Room>, 
         }
     }
 
+    val roomTitles = remember(rooms) { rooms.associate { it.id to it.title } }
+    val visibleHits = hits.filter { it.room in roomTitles }
+
     OutlinedTextField(query, { if (it.length <= 100) query = it },
         Modifier.fillMaxWidth().padding(12.dp), singleLine = true, enabled = !jumping,
         label = { Text(if (room == null) "搜索全部消息" else "搜索本会话") })
@@ -62,12 +65,12 @@ internal fun ColumnScope.MessageSearch(chat: ChatRepository, rooms: List<Room>, 
     }
     if (loading || jumping) LinearProgressIndicator(Modifier.fillMaxWidth())
     error?.let { Text(it, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error) }
-    if (term.isNotEmpty() && !loading && error == null && hits.isEmpty())
+    if (term.isNotEmpty() && !loading && error == null && visibleHits.isEmpty())
         Text("未找到消息", Modifier.padding(12.dp))
     LazyColumn(Modifier.weight(1f)) {
-        items(hits, key = { "${it.room}:${it.message.sequence}" }) { hit ->
+        items(visibleHits, key = { "${it.room}:${it.message.sequence}" }) { hit ->
             val message = hit.message
-            val title = rooms.firstOrNull { it.id == hit.room }?.title
+            val title = roomTitles[hit.room]
             Column(Modifier.fillMaxWidth().clickable(enabled = !jumping) {
                 keyboard?.hide()
                 jumping = true

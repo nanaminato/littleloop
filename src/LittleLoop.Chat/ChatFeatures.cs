@@ -5,6 +5,7 @@ using MySqlConnector;
 sealed record ForwardMessage(Guid RoomId, long Sequence, Guid ClientId);
 sealed record EditMessage(string Text);
 sealed record RoomPreference(string Key, bool Value);
+sealed record MessagePin(bool Value);
 sealed record StoredFile(string Name, string Mime, byte[] Content);
 
 sealed partial class ChatStore
@@ -31,6 +32,7 @@ sealed partial class ChatStore
             await create.ExecuteNonQueryAsync();
 
             await AddColumn("chat_rooms", "revision", "BIGINT NOT NULL DEFAULT 0");
+            await AddColumn("chat_rooms", "pinned_message", "BIGINT NULL");
             await AddColumn("chat_rooms", "last_activity", "DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)");
             await AddColumn("chat_members", "pinned", "BOOLEAN NOT NULL DEFAULT FALSE");
             await AddColumn("chat_members", "archived", "BOOLEAN NOT NULL DEFAULT FALSE");
@@ -48,6 +50,7 @@ sealed partial class ChatStore
             await AddColumn("chat_messages", "sent_at", "DATETIME(6) NULL");
             await UpgradeSettings(db);
             await UpgradeIdentity(db);
+            await UpgradeSocial(db);
             await UpgradePush(db);
         }
         finally
@@ -115,7 +118,7 @@ sealed partial class ChatStore
         string room = forward.RoomId.ToString();
         await using var cmd = Command(db, tx, MessageSelect + """
              JOIN chat_members m ON m.room_id=msg.room_id AND m.user_id=@user
-             WHERE msg.room_id=@room AND msg.seq=@seq AND NOT msg.deleted
+             WHERE msg.room_id=@room AND msg.seq=@seq AND NOT msg.deleted FOR SHARE
             """, ("room", room), ("user", user), ("seq", forward.Sequence));
         await using var reader = await cmd.ExecuteReaderAsync();
         return await reader.ReadAsync() ? Message(reader, room) : null;
@@ -148,9 +151,10 @@ sealed partial class ChatStore
         await using var tx = await db.BeginTransactionAsync();
         await using var clock = Command(db, tx, "SELECT revision FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
         if (await clock.ExecuteScalarAsync() is null) return null;
+        if (!await IsMember(db, tx, room, user)) return null;
         await using var find = Command(db, tx, """
             SELECT body,attachment_id,deleted,client_id,reply_to,request_key FROM chat_messages
-            WHERE room_id=@room AND seq=@seq AND sender_id=@user AND card IS NULL
+            WHERE room_id=@room AND seq=@seq AND sender_id=@user AND card IS NULL FOR UPDATE
             """, ("room", room), ("seq", seq), ("user", user));
         string previous, requestKey;
         bool hasAttachment, deleted;
@@ -171,16 +175,57 @@ sealed partial class ChatStore
         await using (var update = Command(db, tx, """
             INSERT INTO chat_message_versions(room_id,seq,body) VALUES(@room,@seq,@previous);
             UPDATE chat_messages SET body=@body,edited=@edited,deleted=@deleted,request_key=@request WHERE room_id=@room AND seq=@seq;
-            UPDATE chat_rooms SET revision=revision+1 WHERE id=@room;
+            UPDATE chat_rooms SET revision=revision+1,
+                pinned_message=IF(@deleted AND pinned_message=@seq,NULL,pinned_message) WHERE id=@room;
             """, ("room", room), ("seq", seq), ("previous", previous), ("body", text ?? ""),
             ("edited", text is not null), ("deleted", text is null), ("request", requestKey)))
             await update.ExecuteNonQueryAsync();
 
-        await using var members = Command(db, tx, "SELECT user_id FROM chat_members WHERE room_id=@room", ("room", room));
-        var recipients = new List<string>();
-        await using (var reader = await members.ExecuteReaderAsync())
-            while (await reader.ReadAsync()) recipients.Add(reader.GetString(0));
+        var recipients = await MessageRecipients(db, tx, room);
         await tx.CommitAsync();
+        return recipients;
+    }
+
+    public async Task<string[]?> SetPinnedMessage(string user, string room, long seq, bool pinned)
+    {
+        await using var db = await Open();
+        await using var tx = await db.BeginTransactionAsync();
+        await using var access = Command(db, tx, """
+            SELECT type,owner_id,pinned_message FROM chat_rooms WHERE id=@room FOR UPDATE
+            """, ("room", room));
+        long? current;
+        bool restricted;
+        await using (var reader = await access.ExecuteReaderAsync())
+        {
+            if (!await reader.ReadAsync()) return null;
+            restricted = reader.GetString(0) == "channel" && (reader.IsDBNull(1) || reader.GetString(1) != user);
+            current = reader.IsDBNull(2) ? null : reader.GetInt64(2);
+        }
+        if (!await IsMember(db, tx, room, user)) return null;
+        if (restricted) throw new ChannelWriteDeniedException();
+        if (pinned)
+        {
+            await using var target = Command(db, tx, """
+                SELECT 1 FROM chat_messages WHERE room_id=@room AND seq=@seq AND NOT deleted FOR UPDATE
+                """, ("room", room), ("seq", seq));
+            if (await target.ExecuteScalarAsync() is null) return null;
+            if (current == seq) return [];
+        }
+        else if (current != seq) return [];
+        await using var update = Command(db, tx, "UPDATE chat_rooms SET pinned_message=@pin WHERE id=@room",
+            ("pin", pinned ? seq : (long?)null), ("room", room));
+        await update.ExecuteNonQueryAsync();
+        var recipients = await MessageRecipients(db, tx, room);
+        await tx.CommitAsync();
+        return recipients;
+    }
+
+    private static async Task<string[]> MessageRecipients(MySqlConnection db, MySqlTransaction tx, string room)
+    {
+        await using var members = Command(db, tx, "SELECT user_id FROM chat_members WHERE room_id=@room", ("room", room));
+        await using var reader = await members.ExecuteReaderAsync();
+        var recipients = new List<string>();
+        while (await reader.ReadAsync()) recipients.Add(reader.GetString(0));
         return recipients.ToArray();
     }
 
