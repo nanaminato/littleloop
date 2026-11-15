@@ -35,6 +35,7 @@ data class ChatState(
     val outbox: List<PendingMessage> = emptyList(),
     val upload: UploadProgress? = null,
     val focus: Long? = null,
+    val openComments: Long? = null,
     val notificationTarget: String? = null,
     val openWork: String? = null,
     val timelineRevision: Long? = null,
@@ -184,13 +185,28 @@ class ChatRepository(context: Context) {
 
     suspend fun jump(hit: SearchHit): Boolean = jump(hit.room, hit.message.sequence)
 
-    fun openNotification(room: String, sequence: Long, work: String?, owner: String) {
+    fun openNotification(room: String, sequence: Long, work: String?, owner: String, comments: Boolean = false) {
         scope.launch {
             if (!push.acceptsLink(owner)) return@launch
-            val opened = runCatching { jump(room, sequence, work, owner) }.getOrDefault(false)
+            val opened = runCatching { jump(room, sequence, work, owner, comments) }.getOrDefault(false)
             if (!opened && push.acceptsLink(owner)) state.update { it.copy(error = strings.getString(R.string.error_message_unavailable)) }
         }
     }
+
+    fun openDiscussionLink(room: String, sequence: Long) {
+        scope.launch {
+            try {
+                val session = api.session ?: return@launch
+                val visible = state.value.rooms.firstOrNull { it.id == room }
+                    ?: decodeRooms(JSONArray(api.request("/rooms", expected = session))).firstOrNull { it.id == room }
+                if (api.session !== session || visible?.type != "channel") return@launch
+                if (!jump(room, sequence, comments = true))
+                    state.update { it.copy(error = strings.getString(R.string.error_message_unavailable)) }
+            } catch (failure: IOException) { failed(failure) }
+        }
+    }
+
+    fun commentLinkOpened() { state.update { it.copy(openComments = null) } }
 
     fun workLinkOpened() { state.update { it.copy(openWork = null) } }
 
@@ -207,7 +223,7 @@ class ChatRepository(context: Context) {
         state.update { if (it.notificationTarget == id) it.copy(notificationTarget = null) else it }
     }
 
-    private suspend fun jump(roomId: String, target: Long, work: String? = null, owner: String? = null): Boolean = serial.withLock {
+    private suspend fun jump(roomId: String, target: Long, work: String? = null, owner: String? = null, comments: Boolean = false): Boolean = serial.withLock {
         val session = api.session ?: return@withLock false
         if (owner != null && !push.acceptsLink(owner)) return@withLock false
         if (target <= 0 || target == Long.MAX_VALUE) return@withLock false
@@ -225,7 +241,7 @@ class ChatRepository(context: Context) {
         }
         val original = history.firstOrNull { it.sequence == target && !it.deleted }
         if (api.session !== session || original == null || (work != null && original.card?.taskId != work)) return@withLock false
-        state.update { it.copy(selected = roomId, messages = history, focus = target, error = null, openWork = work, timelineRevision = null,
+        state.update { it.copy(selected = roomId, messages = history, focus = target, error = null, openWork = work, openComments = target.takeIf { comments }, timelineRevision = null,
             notificationTarget = if (owner == null) it.notificationTarget else UUID.randomUUID().toString()) }
         true
     }
@@ -283,6 +299,88 @@ class ChatRepository(context: Context) {
     fun subscribe(channel: ChatChannel) = action {
         api.request("/channels/${channel.id}/subscription", json("subscribed" to !channel.subscribed))
         load()
+    }
+
+    internal suspend fun requestDiscussionMembership(channel: String) {
+        api.request("/channels/$channel/discussion/join", JSONObject())
+    }
+
+    internal suspend fun discussionJoinRequests(group: String): List<String> {
+        val requests = JSONArray(api.request("/rooms/$group/discussion-requests"))
+        return List(requests.length()) { requests.getString(it) }
+    }
+
+    internal suspend fun channelAudit(room: String, before: Long?): List<ChannelAuditEntry> {
+        val cursor = before?.let { "?before=$it" }.orEmpty()
+        return JSONArray(api.request("/channels/$room/audit$cursor")).items {
+            ChannelAuditEntry(it.getLong("id"), it.getString("actor"), it.getString("action"),
+                it.getString("detail"), it.optString("createdAt"))
+        }
+    }
+
+    internal suspend fun channelSettings(room: String, username: String): ChannelSettings {
+        val grants = JSONArray(api.request("/channels/$room/admins")).items {
+            ChannelGrant(it.getString("name"), it.getInt("rights"))
+        }
+        val group = JSONObject(api.request("/channels/$room/discussion")).stringOrNull("groupId")
+        val owner = JSONArray(api.request("/rooms/$room/members")).items {
+            it.optBoolean("owner") && it.optString("name") == username
+        }.any { it }
+        return ChannelSettings(owner, group, grants)
+    }
+
+    internal suspend fun removeChannelSubscriber(room: String, name: String) {
+        api.request("/channels/$room/subscribers/${Uri.encode(name)}", method = "DELETE")
+    }
+
+    internal suspend fun transferChannelOwnership(room: String, username: String) {
+        api.request("/channels/$room/ownership", json("username" to username), method = "PUT")
+    }
+
+    internal suspend fun deleteChannel(room: String) {
+        api.request("/channels/$room", method = "DELETE")
+    }
+
+    internal suspend fun updateChannelProfile(room: String, title: String, signPosts: Boolean) {
+        api.request("/channels/$room/profile", json("title" to title, "signPosts" to signPosts), method = "PUT")
+    }
+
+    internal suspend fun setChannelGrant(room: String, name: String, rights: Int) {
+        api.request("/channels/$room/admins/${Uri.encode(name)}", json("rights" to rights), method = "PUT")
+    }
+
+    internal suspend fun linkDiscussion(room: String, group: String?) {
+        api.request("/channels/$room/discussion",
+            JSONObject().put("groupId", group ?: JSONObject.NULL), method = "PUT")
+    }
+
+    internal suspend fun setPostDiscussion(channel: String, post: Long, open: Boolean) {
+        api.request("/channels/$channel/posts/$post/discussion", json("open" to open), method = "PUT")
+    }
+
+    internal suspend fun followChannelDiscussion(channel: String, post: Long, following: Boolean) {
+        api.request("/channels/$channel/posts/$post/comments/follow", json("following" to following), method = "PUT")
+    }
+
+    internal suspend fun markChannelCommentsRead(channel: String, post: Long, sequence: Long, fromGroup: Boolean) {
+        val path = if (fromGroup) "/rooms/$channel/discussions/$post/comments" else "/channels/$channel/posts/$post/comments"
+        api.request("$path/read", json("sequence" to sequence))
+    }
+
+    internal suspend fun discussionSummaries(channel: String, posts: List<Long>): Map<Long, ChannelDiscussionSummary> {
+        if (posts.isEmpty()) return emptyMap()
+        return JSONArray(api.request("/channels/$channel/comments?posts=${posts.joinToString(",")}")).items {
+            ChannelDiscussionSummary(it.getLong("post"), it.getLong("count"), it.getLong("unread"))
+        }.associateBy(ChannelDiscussionSummary::post)
+    }
+
+    internal suspend fun channelComments(channel: String, post: Long, before: Long? = null, fromGroup: Boolean = false): DiscussionThread {
+        val cursor = before?.let { "?before=$it" }.orEmpty()
+        val path = if (fromGroup) "/rooms/$channel/discussions/$post/comments" else "/channels/$channel/posts/$post/comments"
+        val value = JSONObject(api.request(path + cursor))
+        return DiscussionThread(value.getString("groupId"), value.getLong("rootSequence"), value.getBoolean("closed"),
+            value.getLong("count"), decodeMessages(value.getJSONArray("messages").toString()),
+            value.getLong("readSequence"), value.getLong("unread"), value.optBoolean("canComment", !value.getBoolean("closed")), value.optBoolean("following"))
     }
 
     fun send(room: String, text: String, replyTo: Long?, file: SelectedAttachment?, accepted: () -> Unit) = action {
@@ -463,7 +561,7 @@ class ChatRepository(context: Context) {
         val members = group?.let { id ->
             try {
                 JSONArray(api.request("/rooms/$id/members")).items {
-                    ChatMember(it.getString("name"), it.getString("displayName"), it.getBoolean("robot"), it.optBoolean("owner"))
+                    ChatMember(it.getString("name"), it.getString("displayName"), it.getBoolean("robot"), it.optBoolean("owner"), it.optBoolean("administrator"), it.optBoolean("silenced"))
                 }
             } catch (error: ChatRequestException) {
                 if (error.status != 404) throw error
@@ -520,7 +618,7 @@ class ChatRepository(context: Context) {
                 "text" to message.text, "deleted" to message.deleted, "sentAt" to message.sentAt, "replyTo" to message.replyTo,
                 "attachment" to message.attachment?.json(),
                 "card" to message.card?.json(),
-                "edited" to message.edited, "forwardedFrom" to message.forwardedFrom,
+                "edited" to message.edited, "forwardedFrom" to message.forwardedFrom, "discussionRoot" to message.discussionRoot,
             ))
             outbox.saveSnapshot(key, room.id, cached.toString())
             val seen = history.lastOrNull()?.sequence ?: 0
@@ -550,7 +648,7 @@ class ChatRepository(context: Context) {
             it.getLong("unread"), it.getLong("read"), it.getBoolean("muted"), it.getBoolean("archived"),
             it.getBoolean("canPost"), it.optString("preview"), it.optLong("revision"),
             it.optLong("pinnedMessage").takeIf { sequence -> sequence > 0 }, it.stringOrNull("parentId"), it.optBoolean("canManage"),
-            it.optBoolean("previewDeleted"))
+            it.optBoolean("previewDeleted"), it.optInt("channelRights"), it.optBoolean("signPosts"), it.optBoolean("canModerate"))
     }
 
     private suspend fun messages(path: String) = decodeMessages(api.request(path))
@@ -561,7 +659,7 @@ class ChatRepository(context: Context) {
         ChatMessage(it.getLong("sequence"), it.getString("clientId"), it.getString("sender"), it.optString("text"),
             it.getBoolean("deleted"), it.optString("sentAt"), it.optLong("replyTo").takeIf { sequence -> sequence > 0 },
             it.optJSONObject("attachment")?.attachment(), it.optJSONObject("card")?.let(BotCard::decode),
-            it.optBoolean("edited"), it.stringOrNull("forwardedFrom"))
+            it.optBoolean("edited"), it.stringOrNull("forwardedFrom"), it.optBoolean("discussionRoot"))
 
     private fun attach() {
         if (foreground || listening) realtime.connect()

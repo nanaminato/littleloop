@@ -13,7 +13,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -24,7 +28,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 data class ChatFriend(val id: String, val username: String, val displayName: String, val state: String)
-data class ChatMember(val username: String, val displayName: String, val robot: Boolean, val owner: Boolean)
+data class ChatMember(val username: String, val displayName: String, val robot: Boolean, val owner: Boolean, val administrator: Boolean = false, val silenced: Boolean = false)
 
 @Composable
 internal fun FriendsPanel(chat: ChatRepository, state: ChatState, openChat: () -> Unit) {
@@ -77,6 +81,15 @@ internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Roo
     var target by rememberSaveable(room.id) { mutableStateOf<String?>(null) }
     var operation by rememberSaveable(room.id) { mutableStateOf("") }
     val enabled = state.connected && !state.busy
+    var joinRequests by remember(room.id) { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(room.id, room.canManage) {
+        while (room.canManage) {
+            try { joinRequests = chat.discussionJoinRequests(room.id) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* A later refresh can recover. */ }
+            delay(5000)
+        }
+    }
     if (room.canManage) {
         SocialUsername(
             username, { username = it },
@@ -98,19 +111,40 @@ internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Roo
                 ) {
                     RoomAvatar(member.displayName, "direct", 40.dp)
                     Column(Modifier.weight(1f)) {
+                        val adminLabel = stringResource(R.string.social_admin)
+                        val silencedLabel = stringResource(R.string.social_silenced)
                         Text(member.displayName, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            if (member.owner) "@${member.username} · ${stringResource(R.string.social_owner)}" else "@${member.username}",
+                            if (member.owner) "@${member.username} · ${stringResource(R.string.social_owner)}" else buildString {
+                                append("@${member.username}")
+                                if (member.administrator) append(" · ").append(adminLabel)
+                                if (member.silenced) append(" · ").append(silencedLabel)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (room.canManage && !member.owner && !member.robot) {
-                        TextButton(enabled = enabled, onClick = { target = member.username; operation = "remove" }) {
-                            Text(stringResource(R.string.action_remove))
-                        }
-                        TextButton(enabled = enabled, onClick = { target = member.username; operation = "transfer" }) {
-                            Text(stringResource(R.string.social_transfer))
+                    if (room.canModerate && !member.owner && !member.robot && member.username != state.username &&
+                        (room.canManage || !member.administrator)) {
+                        var menu by remember(member.username) { mutableStateOf(false) }
+                        androidx.compose.foundation.layout.Box {
+                            TextButton(enabled = enabled, onClick = { menu = true }) { Text("⋮") }
+                            androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                val choices = buildList {
+                                    add("remove")
+                                    add(if (member.silenced) "unsilence" else "silence")
+                                    if (room.canManage) {
+                                        add(if (member.administrator) "demote" else "promote")
+                                        add("transfer")
+                                    }
+                                }
+                                choices.forEach { choice ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(stringResource(groupMemberAction(choice))) },
+                                        onClick = { menu = false; target = member.username; operation = choice },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -118,9 +152,34 @@ internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Roo
             }
         }
     }
+    var reviewingJoins by remember(room.id) { mutableStateOf(false) }
+    if (room.canManage && joinRequests.isNotEmpty()) {
+        TextButton(onClick = { reviewingJoins = true }) { Text(stringResource(R.string.channel_join_requests)) }
+    }
+    if (room.canManage && reviewingJoins && joinRequests.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { reviewingJoins = false },
+            title = { Text(stringResource(R.string.channel_join_requests)) },
+            text = {
+                val applicant = joinRequests.first()
+                Column {
+                    Text("@$applicant")
+                    Row {
+                        TextButton(enabled = enabled, onClick = {
+                            chat.changeMember(room.id, applicant, "approve_join") { joinRequests = joinRequests - applicant }
+                        }) { Text(stringResource(R.string.channel_join_approve)) }
+                        TextButton(enabled = enabled, onClick = {
+                            chat.changeMember(room.id, applicant, "decline_join") { joinRequests = joinRequests - applicant }
+                        }) { Text(stringResource(R.string.channel_join_decline)) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { reviewingJoins = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
     val pending = target
-    if (room.canManage && pending != null) {
-        val title = if (operation == "remove") stringResource(R.string.social_remove_member) else stringResource(R.string.social_transfer)
+    if (room.canModerate && pending != null) {
+        val title = stringResource(groupMemberAction(operation))
         AlertDialog(
             onDismissRequest = { target = null },
             title = { Text(title) },
@@ -133,6 +192,15 @@ internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Roo
             },
         )
     }
+}
+
+private fun groupMemberAction(operation: String) = when (operation) {
+    "remove" -> R.string.social_remove_member
+    "transfer" -> R.string.social_transfer
+    "promote" -> R.string.social_promote
+    "demote" -> R.string.social_demote
+    "silence" -> R.string.social_silence
+    else -> R.string.social_unsilence
 }
 
 @Composable

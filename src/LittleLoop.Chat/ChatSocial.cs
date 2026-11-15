@@ -60,7 +60,7 @@ sealed partial class ChatStore
     {
         await using var db = await Open();
         var target = await Find(db, username);
-        if (target is null || target.Id == user || target.Password == RobotCredential || await Blocked(db, null, user, target.Id)) return null;
+        if (target is null || target.Id == user || target.Name == ReviewBotName || await Blocked(db, null, user, target.Id)) return null;
         var (low, high) = FriendPair(user, target.Id);
         await using var insert = Command(db, null, """
             INSERT INTO chat_friends(low_id,high_id,requester_id) VALUES(@low,@high,@user)
@@ -85,6 +85,35 @@ sealed partial class ChatStore
     private static (string Low, string High) FriendPair(string a, string b) =>
         string.CompareOrdinal(a, b) < 0 ? (a,b) : (b,a);
 
+    public async Task InitializeGroupModeration()
+    {
+        await using var db = await Open();
+        await using var cmd = Command(db, null, """
+            CREATE TABLE IF NOT EXISTS chat_group_moderation (
+                group_id CHAR(36) NOT NULL,
+                user_id CHAR(36) NOT NULL,
+                administrator BOOLEAN NOT NULL DEFAULT FALSE,
+                silenced BOOLEAN NOT NULL DEFAULT FALSE,
+                PRIMARY KEY(group_id,user_id),
+                FOREIGN KEY(group_id) REFERENCES chat_rooms(id),
+                FOREIGN KEY(user_id) REFERENCES chat_accounts(id)
+            )
+            """);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<int> GroupModeration(MySqlConnection db, MySqlTransaction tx,
+        string room, string user)
+    {
+        await using var query = Command(db, tx, """
+            SELECT g.administrator,g.silenced FROM chat_rooms r
+            JOIN chat_group_moderation g ON g.group_id=IF(r.type='topic',r.parent_id,r.id) AND g.user_id=@user
+            WHERE r.id=@room AND r.type IN ('group','topic')
+            """, ("room", room), ("user", user));
+        await using var reader = await query.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? (reader.GetBoolean(0) ? 1 : 0) | (reader.GetBoolean(1) ? 2 : 0) : 0;
+    }
+
     public async Task<(int Status, string[] Recipients)> ChangeGroupMember(string user, string group, string username, string operation)
     {
         await using var db = await Open();
@@ -92,10 +121,48 @@ sealed partial class ChatStore
         await using var guard = Command(db, tx, "SELECT owner_id FROM chat_rooms WHERE id=@room AND type='group' FOR UPDATE", ("room", group));
         var owner = await guard.ExecuteScalarAsync();
         if (owner is null || !await IsMember(db, tx, group, user)) return (404, []);
-        if (owner as string != user) return (403, []);
+        bool ownsGroup = owner as string == user;
+        if (!ownsGroup && (operation is not ("remove" or "silence" or "unsilence")
+            || (await GroupModeration(db, tx, group, user) & 1) == 0)) return (403, []);
         var target = await Find(db, username, tx);
-        if (target is null || target.Password == RobotCredential) return (404, []);
+        if (target is null || target.Name == ReviewBotName) return (404, []);
         if (target.Id == user) return (400, []);
+        if (Equals(owner, target.Id)) return (403, []);
+        if (!ownsGroup && (await GroupModeration(db, tx, group, target.Id) & 1) != 0) return (403, []);
+        if (operation is "promote" or "demote" or "silence" or "unsilence")
+        {
+            if (!await IsMember(db, tx, group, target.Id)) return (404, []);
+            string column = operation is "promote" or "demote" ? "administrator" : "silenced";
+            await using var moderation = Command(db, tx, $"""
+                INSERT INTO chat_group_moderation(group_id,user_id,{column}) VALUES(@room,@target,@value)
+                ON DUPLICATE KEY UPDATE {column}=@value
+                """, ("room", group), ("target", target.Id), ("value", operation is "promote" or "silence"));
+            await moderation.ExecuteNonQueryAsync();
+            var members = await MessageRecipients(db, tx, group);
+            await tx.CommitAsync();
+            return (204, members);
+        }
+        if (operation is "remove" or "transfer")
+        {
+            await using var clear = Command(db, tx, """
+                DELETE FROM chat_group_moderation WHERE group_id=@room AND user_id=@target
+                """, ("room", group), ("target", target.Id));
+            await clear.ExecuteNonQueryAsync();
+        }
+        if (operation is "approve_join" or "decline_join")
+        {
+            await using var request = Command(db, tx, """
+                DELETE FROM chat_discussion_join_requests WHERE group_id=@room AND user_id=@target
+                """, ("room", group), ("target", target.Id));
+            if (await request.ExecuteNonQueryAsync() == 0) return (404, []);
+            if (operation == "decline_join")
+            {
+                await tx.CommitAsync();
+                return (204, [user, target.Id]);
+            }
+            if (await Blocked(db, tx, user, target.Id)) return (403, []);
+            operation = "accept_invited_join";
+        }
         if (operation == "invite" && (await Blocked(db, tx, user, target.Id) ||
             !(await GetSetting(target.Id, "privacy", new PrivacySettings())).GroupInvites)) return (403, []);
         if (operation == "transfer")
@@ -118,13 +185,20 @@ sealed partial class ChatStore
                     await using var hold = Command(db, tx, "SELECT id FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
                     await hold.ExecuteScalarAsync();
                 }
-                string sql = operation == "invite" ? """
+                string sql = operation is "invite" or "accept_invited_join" ? """
                     INSERT INTO chat_members(room_id,user_id,read_to)
                     SELECT id,@target,latest FROM chat_rooms WHERE id=@room ON DUPLICATE KEY UPDATE read_to=chat_members.read_to
                     """ : "DELETE FROM chat_members WHERE room_id=@room AND user_id=@target";
                 await using var membership = Command(db, tx, sql, ("room", room), ("target", target.Id));
                 await membership.ExecuteNonQueryAsync();
             }
+        }
+        if (operation is "invite" or "remove")
+        {
+            await using var clearJoin = Command(db, tx, """
+                DELETE FROM chat_discussion_join_requests WHERE group_id=@room AND user_id=@target
+                """, ("room", group), ("target", target.Id));
+            await clearJoin.ExecuteNonQueryAsync();
         }
         var recipients = await MessageRecipients(db, tx, group);
         await tx.CommitAsync();
@@ -157,7 +231,7 @@ static class ChatSocialEndpoints
         api.MapPost("/rooms/{room:guid}/members", async (Guid room, GroupMemberChange input, ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
         {
             string? name = Username(input.Username);
-            if (name is null || input.Operation is not ("invite" or "remove" or "transfer")) return Results.BadRequest();
+            if (name is null || input.Operation is not ("invite" or "remove" or "transfer" or "promote" or "demote" or "silence" or "unsilence" or "approve_join" or "decline_join")) return Results.BadRequest();
             var change = await store.ChangeGroupMember(Id(user), room.ToString(), name, input.Operation);
             if (change.Status == 204) await hub.Clients.Users(change.Recipients).SendAsync("socialChanged", room.ToString());
             return Results.StatusCode(change.Status);

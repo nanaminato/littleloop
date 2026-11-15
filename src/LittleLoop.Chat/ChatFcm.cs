@@ -7,7 +7,7 @@ using Google.Apis.Auth.OAuth2;
 using Google.Apis.Auth.OAuth2.Responses;
 using MySqlConnector;
 
-sealed record FcmSubscription(string Token, string Project);
+sealed record FcmSubscription(string Token, string Project, bool InstallationId = false);
 
 sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<ChatFcm> log) : BackgroundService
 {
@@ -40,13 +40,13 @@ sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<Chat
                 timeout.CancelAfter(TimeSpan.FromSeconds(10));
                 credential ??= (await GoogleCredential.GetApplicationDefaultAsync(timeout.Token)).CreateScoped(CloudMessagingScope);
                 string bearer = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync(cancellationToken: timeout.Token);
-                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) {
-                    Content = JsonContent.Create(new { message = new {
-                        token = notice.Token,
-                        data = new { littleloop = notice.Id.ToString(CultureInfo.InvariantCulture) },
-                        android = new { priority = "HIGH", ttl = "900s" }
-                    } })
+                var message = new Dictionary<string, object>
+                {
+                    [notice.InstallationId ? "fid" : "token"] = notice.Token,
+                    ["data"] = new { littleloop = notice.Id.ToString(CultureInfo.InvariantCulture) },
+                    ["android"] = new { priority = "HIGH", ttl = "900s" },
                 };
+                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = JsonContent.Create(new { message }) };
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
                 using var response = await transport.SendAsync(request, timeout.Token);
                 if (response.IsSuccessStatusCode)
@@ -95,9 +95,11 @@ sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<Chat
         {
             if (project is null) return Results.NotFound();
             if (input.Project != project || input.Token is not { Length: >= 20 and <= 4096 } ||
-                input.Token.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not (':' or '_' or '-')))
+                input.Token.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not (':' or '_' or '-')) ||
+                (input.InstallationId && (input.Token.Length != 22 || input.Token.Contains(':'))))
                 return Results.BadRequest();
-            return await store.SaveFcm(ChatSettingsEndpoints.Device(user), input.Token) ? Results.NoContent() : Results.Conflict();
+            return await store.SaveFcm(ChatSettingsEndpoints.Device(user), input.Token, input.InstallationId)
+                ? Results.NoContent() : Results.Conflict();
         });
         api.MapPost("/settings/fcm/remove", async (ClaimsPrincipal user) =>
         {
@@ -109,7 +111,7 @@ sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<Chat
             if (project is null || id <= 0) return Results.NotFound();
             var notice = await Resolve(store, bot, id, ChatSettingsEndpoints.Device(user));
             return notice is null ? Results.NotFound() : Results.Ok(new {
-                notice.Room, notice.Sequence, notice.Title, notice.Body, notice.Sound, notice.Work
+                notice.Room, notice.Sequence, notice.Title, notice.Body, notice.Sound, notice.Work, notice.CommentChannel, notice.CommentPost
             });
         });
     }

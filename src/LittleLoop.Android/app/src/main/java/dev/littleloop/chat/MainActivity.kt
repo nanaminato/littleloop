@@ -65,7 +65,10 @@ class MainActivity : ComponentActivity() {
         val supplied = intent?.getStringExtra("room") ?: return
         val room = runCatching { UUID.fromString(supplied).toString() }.getOrNull() ?: return
         val scope = intent.getStringExtra("pushScope")
-        if (scope != null) chat.openNotification(room, intent.getLongExtra("sequence", 0), intent.getStringExtra("work"), scope)
+        val sequence = intent.getLongExtra("sequence", 0)
+        val comments = intent.getBooleanExtra("comments", false)
+        if (scope != null) chat.openNotification(room, sequence, intent.getStringExtra("work"), scope, comments)
+        else if (comments && sequence > 0) chat.openDiscussionLink(room, sequence)
         else chat.select(room)
         intent.removeExtra("room")
     }

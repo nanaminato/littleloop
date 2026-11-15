@@ -12,6 +12,9 @@ export interface Room {
   parentId?: string;
   canPost: boolean;
   canManage: boolean;
+  canModerate?: boolean;
+  channelRights?: number;
+  signPosts?: boolean;
   preview: string;
   lastSent?: string;
   avatarName?: string;
@@ -25,6 +28,8 @@ export interface Member {
   displayName: string;
   robot: boolean;
   owner: boolean;
+  administrator?: boolean;
+  silenced?: boolean;
 }
 
 export interface Friend {
@@ -71,6 +76,7 @@ export interface ChatMessage {
   replyTo: number | null;
   attachment: Attachment | null;
   edited: boolean;
+  discussionRoot?: boolean;
   deleted: boolean;
   forwardedFrom: string | null;
   card?: MessageCard;
@@ -89,3 +95,5 @@ export interface Notice {
   title: string;
   preview?: string;
 }
+
+export interface DiscussionSummary { post: number; count: number; unread: number; closed: boolean }

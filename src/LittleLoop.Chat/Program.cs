@@ -52,6 +52,9 @@ if (string.IsNullOrEmpty(fcmProject)) fcmProject = null;
 var store = new ChatStore(builder.Configuration.GetConnectionString("Chat") ?? throw new InvalidOperationException("Set ConnectionStrings__Chat"),
     fcmProject is not null);
 await store.Initialize();
+await store.InitializeChannelAdministration();
+await store.InitializeGroupModeration();
+await store.InitializeChannelDiscussions();
 builder.Services.AddSingleton(store);
 var pushIdentity = ChatPush.LoadIdentity(config["ChatPush:KeyFile"] ?? Path.Combine(keyDirectory.FullName, "web-push.json"));
 builder.Services.AddHostedService(sp => new ChatPush(store, pushIdentity,
@@ -103,12 +106,23 @@ api.MapPost("/register", async (Login body, PasswordHasher<Account> hash) =>
     return await store.Register(account with { Password = hash.HashPassword(account, body.Password) })
         ? Results.NoContent() : Results.Conflict("账号已存在。");
 });
+string? automationSecret = config["ChatAutomation:LittleLoopSecret"];
+if (automationSecret is not null && automationSecret.Length is < 32 or > 128)
+    throw new InvalidOperationException("ChatAutomation:LittleLoopSecret must contain 32–128 characters.");
+if (automationSecret is not null) await store.GetRobot(ChatStore.BotName);
 api.MapPost("/login", async (Login body, PasswordHasher<Account> hash, HttpContext ctx) =>
 {
     string name = Normalize(body.Name);
-    if (!ValidName(name) || ChatStore.IsRobot(name) || body.Password is not { Length: >= 10 and <= 128 }) return Results.Unauthorized();
+    if (!ValidName(name) || body.Password is not { Length: >= 10 and <= 128 }) return Results.Unauthorized();
     var account = await store.Find(name);
-    if (account is null || hash.VerifyHashedPassword(account, account.Password, body.Password) == PasswordVerificationResult.Failed)
+    if (account is null) return Results.Unauthorized();
+    if (ChatStore.IsRobot(name))
+    {
+        if (name != ChatStore.BotName || automationSecret is null ||
+            !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(automationSecret), Encoding.UTF8.GetBytes(body.Password)))
+            return Results.Unauthorized();
+    }
+    else if (hash.VerifyHashedPassword(account, account.Password, body.Password) == PasswordVerificationResult.Failed)
         return Results.Unauthorized();
     string? device = await store.AddDevice(account, ctx.Request.Headers.UserAgent.ToString());
     if (device is null) return Results.Unauthorized();
@@ -162,10 +176,14 @@ secured.MapPost("/rooms/{room:guid}/messages", async (Guid room, PostMessage req
         var result = await store.Send(Id(user), user.Identity!.Name!, room.ToString(), request with { ClientId = clientId.ToString() });
         if (result is null) return Results.NotFound();
         if (result.IsNew) await Push(hub, result.Recipients, room.ToString());
+        if (result.Discussion is { } discussion)
+            await Push(hub, discussion.Recipients, discussion.Room);
         return Results.Ok(result.Message);
     }
     catch (ArgumentException e) { return Results.BadRequest(e.Message); }
     catch (InvalidOperationException e) { return Results.Conflict(e.Message); }
+    catch (DiscussionClosedException) { return Results.Json(new { code = "discussion_closed" }, statusCode: 403); }
+    catch (GroupSilencedException) { return Results.Json(new { code = "group_silenced" }, statusCode: 403); }
     catch (ChannelWriteDeniedException) { return Results.StatusCode(403); }
     catch (DirectMessageBlockedException) { return Results.Json(new { code = "communication_unavailable" }, statusCode: 403); }
 });
@@ -178,6 +196,8 @@ secured.MapPost("/rooms/{room:guid}/read", async (Guid room, ReadTo request, Cla
 });
 ChatFeatureEndpoints.Map(secured, store);
 ChatSpaceEndpoints.Map(secured, store);
+ChatChannelAdminEndpoints.Map(secured, store);
+ChatChannelDiscussionEndpoints.Map(secured, store);
 ChatSettingsEndpoints.Map(secured, store);
 IdentityEndpoints.Map(secured, store);
 ChatPush.Map(secured, store, pushIdentity);

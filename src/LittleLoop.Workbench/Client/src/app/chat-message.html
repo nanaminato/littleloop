@@ -2,7 +2,7 @@
   [attr.data-sequence]="message().sequence" [attr.data-sender]="message().sender">
   @if (!mine()) {
     @if (!continued()) {
-      <span class="avatar sender-avatar" aria-hidden="true">{{ store.initial(message().sender) }}</span>
+      <span class="avatar sender-avatar" [attr.data-kind]="channel()?.type" aria-hidden="true">{{ store.initial(senderName()) }}</span>
     } @else {
       <span class="avatar-spacer" aria-hidden="true"></span>
     }
@@ -37,6 +37,10 @@
             <span class="file-action">{{ store.t('下载') }}</span>
           </a>
         }
+        @if (store.currentRoom()?.type === 'channel') {
+          <chat-comments [post]="message()" [summary]="discussion()" />
+        }
+        @if (channel()?.signPosts) { <small class="edited">{{ message().sender }}</small> }
         @if (message().edited) { <small class="edited">{{ store.t('已编辑') }}</small> }
         <div class="bubble-footer">
           @if (message().sentAt) { <time>{{ store.dateLabel(message().sentAt!, true) }}</time> }
@@ -47,7 +51,7 @@
               @if (store.currentRoom()?.canPost) { <button type="button" class="quiet" (click)="store.reply.set(message())">{{ store.t('回复') }}</button> }
               @if (message().text) { <button type="button" class="quiet" (click)="store.copyMessage(message().text)">{{ store.t('复制') }}</button> }
               <button type="button" class="quiet" (click)="store.beginForward(message())">{{ store.t('转发') }}</button>
-              @if (store.currentRoom()?.canPost) {
+              @if (canPin()) {
                 <button type="button" class="quiet" (click)="store.pinMessage(message())">
                   {{ store.currentRoom()?.pinnedMessage === message().sequence ? store.t('取消置顶消息') : store.t('置顶消息') }}
                 </button>
@@ -55,13 +59,18 @@
               @if (store.bot().canOperate && store.botInstalled() && message().card?.kind !== 'task') {
                 <button type="button" class="quiet" (click)="store.beginTask(message())">{{ store.t('安排开发任务') }}</button>
               }
-              @if (mine() && !message().card) {
+              @if (canChange(2)) {
                 <button type="button" class="quiet" (click)="store.beginEdit(message())">{{ store.t('编辑') }}</button>
+              }
+              @if (canChange(4)) {
                 <button type="button" class="quiet" (click)="store.removing.set(message())">{{ store.t('删除') }}</button>
               }
             </div>
           </details>
         </div>
+      }
+      @if (message().discussionRoot && store.currentRoom()?.type === 'group') {
+        <chat-comments [post]="message()" [fromGroup]="true" />
       }
     </div>
 

@@ -30,6 +30,9 @@ export class ChatStore {
   private scrolls = new Map<string, number>();
   private audio?: AudioContext;
   private linkRoom = new URLSearchParams(location.search).get('room');
+  private readonly linkMessage = Number(new URLSearchParams(location.search).get('message'));
+  private readonly linkPost = Number(new URLSearchParams(location.search).get('comments'));
+  readonly linkedComments = signal<{roomId: string; sequence: number} | null>(null);
 
   readonly visibleRooms = computed(() => {
     const folder = this.accountPrefs().folders.find(item => item.name === this.folder());
@@ -256,6 +259,13 @@ export class ChatStore {
       const rooms = await this.api<Room[]>('/rooms');
       if (this.hub !== hub) continue;
       const previous = this.rooms();
+      const directory = this.directory();
+      if (directory !== null && previous.some(room => room.type === 'channel' && incoming.has(room.id) &&
+        !rooms.some(current => current.id === room.id))) {
+        const channels = await this.api<Channel[]>('/channels');
+        if (this.hub !== hub) continue;
+        if (this.directory() === directory) this.directory.set(channels);
+      }
       const notify = rooms.find(item => incoming.has(item.id) && this.notificationsEnabled(item) && !item.muted && item.id !== this.selected() && item.unread > 0 &&
         item.latest > (previous.find(old => old.id === item.id)?.latest ?? 0));
       if (notify) {
@@ -288,7 +298,13 @@ export class ChatStore {
       if (this.linkRoom && rooms.some(item => item.id === this.linkRoom)) {
         const target = this.linkRoom;
         this.linkRoom = null;
-        this.select(target);
+        if (Number.isSafeInteger(this.linkPost) && this.linkPost > 0 &&
+            rooms.some(item => item.id === target && item.type === 'channel')) {
+          this.linkedComments.set({ roomId: target, sequence: this.linkPost });
+          this.openResult({ roomId: target, sequence: this.linkPost });
+        } else if (Number.isSafeInteger(this.linkMessage) && this.linkMessage > 0) {
+          this.openResult({ roomId: target, sequence: this.linkMessage });
+        } else this.select(target);
       }
       if (incoming.size > 0 && this.searchResults() !== null) await this.runSearch(this.searchTerm);
       const room = this.selected();
@@ -389,6 +405,15 @@ export class ChatStore {
   }
 
   private async refreshChannels() { this.directory.set(await this.api<Channel[]>('/channels')); }
+
+  async deleteChannel(id: string) {
+    const response = await fetch('/api/chat/channels/' + id, {
+      method: 'DELETE', headers: { 'X-LittleLoop-Chat': '1' },
+    });
+    if (!response.ok) throw new Error('Channel deletion failed.');
+    this.notifications.add(id);
+    this.requestSync();
+  }
 
   async subscribe(channel: Channel) {
     await this.action(async () => {
@@ -758,7 +783,7 @@ export class ChatStore {
     });
   }
 
-  async changeMember(operation: 'invite' | 'remove' | 'transfer', username = this.memberUsername) {
+  async changeMember(operation: 'invite' | 'remove' | 'transfer' | 'promote' | 'demote' | 'silence' | 'unsilence', username = this.memberUsername) {
     const room = this.currentRoom();
     if (!room?.canManage) return;
     await this.action(async () => {

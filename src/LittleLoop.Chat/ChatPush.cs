@@ -9,7 +9,7 @@ using MySqlConnector;
 sealed record PushKeys(string P256dh, string Auth);
 sealed record DevicePush(string Endpoint, PushKeys Keys, string Language);
 sealed record PushDelivery(long Id, string Device, string Endpoint, string P256dh, string Auth,
-    string Room, long Sequence, string Title, string Preview, string Language);
+    string Room, long Sequence, string Title, string Preview, string Language, string? CommentChannel, long? CommentPost);
 sealed record PushIdentity(string PublicKey, string PrivateKey);
 
 sealed partial class ChatStore
@@ -124,20 +124,37 @@ sealed partial class ChatStore
         await using var cmd = Command(db, null, """
             SELECT q.id,p.device_id,p.endpoint,p.p256dh,p.auth,r.id,q.seq,
               IF(r.type='direct',a.name,r.title),
-              IF(JSON_UNQUOTE(JSON_EXTRACT(s.value,'$.preview'))='false','',COALESCE(NULLIF(LEFT(msg.body,140),''),f.name,'')),p.language
+              IF(JSON_UNQUOTE(JSON_EXTRACT(s.value,'$.preview'))='false','',COALESCE(NULLIF(LEFT(msg.body,140),''),f.name,'')),p.language, IF(channel_post.deleted, NULL, subscription.room_id),
+              IF(subscription.room_id IS NULL OR channel_post.deleted, NULL, thread.post_seq)
             FROM chat_push_queue q JOIN chat_push_devices p ON p.device_id=q.device_id
             JOIN chat_devices d ON d.id=p.device_id
             JOIN chat_rooms r ON r.id=q.room_id
             JOIN chat_members m ON m.room_id=r.id AND m.user_id=d.user_id
             JOIN chat_messages msg ON msg.room_id=r.id AND msg.seq=q.seq
             JOIN chat_accounts a ON a.id=msg.sender_id
+            LEFT JOIN chat_channel_comments cc ON cc.group_id=q.room_id AND cc.seq=q.seq
+            LEFT JOIN chat_channel_threads thread ON thread.group_id=cc.group_id AND thread.root_seq=cc.root_seq
+            LEFT JOIN chat_messages channel_post ON channel_post.room_id=thread.channel_id AND channel_post.seq=thread.post_seq
+            LEFT JOIN chat_members subscription ON subscription.room_id=thread.channel_id AND subscription.user_id=d.user_id
+            LEFT JOIN chat_channel_comment_reads comment_read ON comment_read.channel_id=thread.channel_id
+              AND comment_read.post_seq=thread.post_seq AND comment_read.user_id=d.user_id
+            LEFT JOIN chat_accounts receiver ON receiver.id=d.user_id
+            LEFT JOIN chat_messages reply_target ON reply_target.room_id=q.room_id AND reply_target.seq=msg.reply_to
             LEFT JOIN chat_attachments f ON f.id=msg.attachment_id
             LEFT JOIN chat_user_settings s ON s.user_id=d.user_id AND s.section='notifications'
             WHERE q.id=@id AND q.expires>UTC_TIMESTAMP() AND d.expires>UTC_TIMESTAMP() AND NOT m.muted
               AND m.read_to<q.seq AND NOT msg.deleted
-              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.value,
+              AND (cc.seq IS NULL OR COALESCE(comment_read.read_to,0)<q.seq)
+              AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.value,
                 CASE r.type WHEN 'channel' THEN '$.channels' WHEN 'group' THEN '$.groups'
                 WHEN 'topic' THEN '$.groups' ELSE '$.direct' END)),'true')<>'false'
+                OR (cc.seq IS NOT NULL AND (
+                     reply_target.sender_id=d.user_id
+                     OR REGEXP_LIKE(msg.body,CONCAT('(^|[^a-z0-9_@])@',receiver.name,'($|[^a-z0-9_])'),'i')
+                     OR (subscription.room_id IS NOT NULL AND NOT subscription.muted AND EXISTS (
+                         SELECT 1 FROM chat_channel_comment_follows followed
+                         WHERE followed.channel_id=thread.channel_id AND followed.post_seq=thread.post_seq
+                           AND followed.user_id=d.user_id)))))
               AND (r.type<>'direct' OR NOT EXISTS(
                 SELECT 1 FROM chat_blocks b
                 WHERE (b.blocker_id=d.user_id AND b.target_id=msg.sender_id)
@@ -146,7 +163,8 @@ sealed partial class ChatStore
             """, ("id", id));
         await using var reader = await cmd.ExecuteReaderAsync();
         return await reader.ReadAsync() ? new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-            reader.GetString(4), reader.GetString(5), reader.GetInt64(6), reader.GetString(7), reader.GetString(8), reader.GetString(9)) : null;
+            reader.GetString(4), reader.GetString(5), reader.GetInt64(6), reader.GetString(7), reader.GetString(8), reader.GetString(9),
+            reader.IsDBNull(10) ? null : reader.GetString(10), reader.IsDBNull(11) ? null : reader.GetInt64(11)) : null;
     }
 
     public async Task FinishPush(long id)
@@ -204,6 +222,7 @@ sealed class ChatPush(ChatStore store, PushIdentity identity, string subject, IL
                         subscription.SetKey(PushEncryptionKeyName.P256DH, push.P256dh);
                         subscription.SetKey(PushEncryptionKeyName.Auth, push.Auth);
                         var notification = new PushMessage(ChatStore.ToJson(new { room = push.Room, sequence = push.Sequence, title = push.Title,
+                            commentChannel = push.CommentChannel, commentPost = push.CommentPost,
                             body = push.Preview.Length > 0 ? push.Preview : push.Language == "en" ? "New message" : "新消息" })) { TimeToLive = 900 };
                         await client.RequestPushMessageDeliveryAsync(subscription, notification, vapid, VapidAuthenticationScheme.Vapid, timeout.Token);
                         await store.FinishPush(id);

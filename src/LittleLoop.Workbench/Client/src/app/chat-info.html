@@ -27,6 +27,10 @@
     </button>
   </div>
 
+  @if (room().type === 'channel') {
+    <chat-channel-settings [channel]="room().id" [owner]="isChannelOwner()" />
+  }
+
   @if (room().type === 'group') {
     <section class="panel-section">
       <h3>{{ store.t('群话题') }}</h3>
@@ -40,6 +44,20 @@
           }
         } @empty { <p class="empty-copy">{{ store.t('暂无话题') }}</p> }
       </div>
+    </section>
+  }
+
+  @if (room().type === 'group' && room().canManage && (joinRequests().length || joinError())) {
+    <section class="panel-section">
+      <h3>{{ store.t('入群申请') }}</h3>
+      @for (username of joinRequests(); track username) {
+        <div class="member">
+          <span class="member-copy">@{{ username }}</span>
+          <button type="button" [disabled]="!!decidingJoin()" (click)="decideJoin(username, true)">{{ store.t('同意') }}</button>
+          <button type="button" class="quiet" [disabled]="!!decidingJoin()" (click)="decideJoin(username, false)">{{ store.t('拒绝') }}</button>
+        </div>
+      }
+      @if (joinError()) { <p role="alert">{{ store.t('无法处理入群申请。') }}</p> }
     </section>
   }
 
@@ -58,14 +76,18 @@
           <span class="avatar member-avatar" aria-hidden="true">{{ store.initial(member.displayName) }}</span>
           <span class="member-copy">
             <strong>{{ member.displayName }}</strong>
-            <small>@{{ member.name }} @if (member.owner) { · {{ store.t('群主') }} }</small>
+            <small>@{{ member.name }} @if (member.owner) { · {{ store.t('群主') }} } @if (member.administrator) { · {{ store.t('群管理员') }} } @if (member.silenced) { · {{ store.t('已禁言') }} }</small>
           </span>
-          @if (store.currentRoom()?.canManage && !member.owner && !member.robot) {
+          @if (room().type === 'group' && room().canModerate && !member.owner && !member.robot && member.name !== store.user() && (room().canManage || !member.administrator)) {
             <details class="popover member-menu">
               <summary class="icon" [attr.aria-label]="store.t('成员操作')">⋯</summary>
               <div class="menu-sheet" (click)="$any($event.currentTarget).parentElement.open = false">
                 <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.changeMember('remove', member.name)">{{ store.t('移除') }}</button>
-                <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.changeMember('transfer', member.name)">{{ store.t('转让群主') }}</button>
+                <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.changeMember(member.silenced ? 'unsilence' : 'silence', member.name)">{{ store.t(member.silenced ? '解除禁言' : '禁言') }}</button>
+                @if (room().canManage) {
+                  <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.changeMember(member.administrator ? 'demote' : 'promote', member.name)">{{ store.t(member.administrator ? '撤销群管理员' : '设为群管理员') }}</button>
+                  <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.changeMember('transfer', member.name)">{{ store.t('转让群主') }}</button>
+                }
               </div>
             </details>
           }

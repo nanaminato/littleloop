@@ -88,10 +88,14 @@ static class ChatFeatureEndpoints
                 var result = await store.Send(Id(user), user.Identity!.Name!, room.ToString(), new(input.ClientId.ToString(), "", null), input);
                 if (result is null) return Results.NotFound();
                 if (result.IsNew) await Notify(hub, result.Recipients, room.ToString());
+                if (result.Discussion is { } discussion)
+                    await Notify(hub, discussion.Recipients, discussion.Room);
                 return Results.Ok(result.Message);
             }
             catch (ArgumentException e) { return Results.BadRequest(e.Message); }
             catch (InvalidOperationException e) { return Results.Conflict(e.Message); }
+            catch (DiscussionClosedException) { return Results.Json(new { code = "discussion_closed" }, statusCode: 403); }
+            catch (GroupSilencedException) { return Results.Json(new { code = "group_silenced" }, statusCode: 403); }
             catch (ChannelWriteDeniedException) { return Results.StatusCode(403); }
             catch (DirectMessageBlockedException) { return Results.Json(new { code = "communication_unavailable" }, statusCode: 403); }
         });
@@ -112,9 +116,11 @@ static class ChatFeatureEndpoints
     {
         try
         {
-            var recipients = await store.ChangeMessage(Id(user), room.ToString(), seq, text);
-            if (recipients is null) return Results.NotFound();
-            if (recipients.Length > 0) await Notify(hub, recipients, room.ToString());
+            var result = await store.ChangeMessage(Id(user), room.ToString(), seq, text);
+            if (result is null) return Results.NotFound();
+            if (result.Recipients.Length > 0) await Notify(hub, result.Recipients, room.ToString());
+            if (result.Discussion is { } discussion)
+                await Notify(hub, discussion.Recipients, discussion.Room);
             return Results.NoContent();
         }
         catch (ArgumentException e) { return Results.BadRequest(e.Message); }

@@ -3,15 +3,17 @@ using MySqlConnector;
 sealed record Account(string Id, string Name, string Password);
 sealed record Room(string Id, string Type, string Title, long Latest, long Read, long Unread, long Revision,
     bool Pinned, bool Archived, bool Muted, string? ParentId, bool CanPost, string Preview, DateTime? LastSent,
-    string? AvatarName, string? AvatarVersion, bool PreviewDeleted, long? PinnedMessage, bool CanManage);
+    string? AvatarName, string? AvatarVersion, bool PreviewDeleted, long? PinnedMessage, bool CanManage, int ChannelRights = 0, bool SignPosts = false, bool CanModerate = false);
 sealed record Attachment(string Id, string Name, string Mime, long Size);
 sealed record ChatMessage(string RoomId, long Sequence, string ClientId, string Sender, string Text, long? ReplyTo,
-    Attachment? Attachment, bool Edited, bool Deleted, string? ForwardedFrom, MessageCard? Card, DateTime? SentAt);
+    Attachment? Attachment, bool Edited, bool Deleted, string? ForwardedFrom, MessageCard? Card, DateTime? SentAt, bool DiscussionRoot = false);
 sealed record Login(string Name, string Password, string? Invite);
 sealed record OpenRoom(string Type, string? Title, string[] Members);
 sealed record PostMessage(string ClientId, string Text, long? ReplyTo, string? AttachmentId = null);
 sealed record ReadTo(long Sequence);
-sealed record SendResult(ChatMessage Message, string[] Recipients, bool IsNew);
+sealed record MessageChange(string[] Recipients, DiscussionRoomChange? Discussion);
+sealed record DiscussionRoomChange(string Room, string[] Recipients);
+sealed record SendResult(ChatMessage Message, string[] Recipients, bool IsNew, DiscussionRoomChange? Discussion = null);
 
 sealed partial class ChatStore(string connection, bool fcmEnabled)
 {
@@ -130,11 +132,18 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         await using var cmd = Command(db, null, """
             SELECT r.id,r.type,IF(r.type='direct',COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(profile.value,'$.displayName')),''),peer.name),r.title),r.latest,m.read_to,
               (SELECT COUNT(*) FROM chat_messages msg WHERE msg.room_id=r.id AND msg.seq>m.read_to AND msg.sender_id<>@user AND NOT msg.deleted),
-              r.revision,m.pinned,m.archived,m.muted,r.parent_id,(r.type<>'channel' OR r.owner_id=@user),
+              r.revision,m.pinned,m.archived,m.muted,r.parent_id,(COALESCE(gm.silenced,FALSE)=FALSE AND (r.type<>'channel' OR r.owner_id=@user OR EXISTS (
+                SELECT 1 FROM chat_channel_admins g WHERE g.room_id=r.id AND g.user_id=@user AND (g.rights & 1)=1))),
               CASE WHEN last.deleted THEN '消息已删除' ELSE COALESCE(NULLIF(LEFT(last.body,140),''),f.name,'') END,last.sent_at,
               peer.name,picture.version,COALESCE(last.deleted,FALSE),r.pinned_message,
-              COALESCE(r.type='group' AND r.owner_id=@user,FALSE)
+              COALESCE(r.type='group' AND r.owner_id=@user,FALSE),
+              CASE WHEN r.type<>'channel' THEN 0 WHEN r.owner_id=@user THEN 127
+                   ELSE COALESCE((SELECT g.rights FROM chat_channel_admins g WHERE g.room_id=r.id AND g.user_id=@user),0) END, COALESCE(cp.sign_posts,FALSE),
+              COALESCE(gr.owner_id=@user OR gm.administrator,FALSE)
             FROM chat_members m JOIN chat_rooms r ON r.id=m.room_id
+            LEFT JOIN chat_rooms gr ON gr.type='group' AND gr.id=IF(r.type='topic',r.parent_id,r.id)
+            LEFT JOIN chat_group_moderation gm ON gm.group_id=gr.id AND gm.user_id=@user
+            LEFT JOIN chat_channel_profiles cp ON cp.room_id=r.id
             LEFT JOIN chat_members p ON r.type='direct' AND p.room_id=r.id AND p.user_id<>m.user_id
             LEFT JOIN chat_accounts peer ON peer.id=p.user_id
             LEFT JOIN chat_user_settings profile ON profile.user_id=peer.id AND profile.section='profile'
@@ -150,7 +159,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
                 reader.GetInt64(6), reader.GetBoolean(7), reader.GetBoolean(8), reader.GetBoolean(9),
                 reader.IsDBNull(10) ? null : reader.GetString(10), reader.GetBoolean(11), reader.GetString(12), ReadTimestamp(reader, 13),
                 reader.IsDBNull(14) ? null : reader.GetString(14), reader.IsDBNull(15) ? null : reader.GetString(15), reader.GetBoolean(16),
-                reader.IsDBNull(17) ? null : reader.GetInt64(17), reader.GetBoolean(18)));
+                reader.IsDBNull(17) ? null : reader.GetInt64(17), reader.GetBoolean(18), reader.GetInt32(19), reader.GetBoolean(20), reader.GetBoolean(21)));
         return rooms.ToArray();
     }
 
@@ -188,7 +197,11 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
             latest = reader.GetInt64(0);
         }
         if (!await IsMember(db, tx, room, user)) return null;
-        if (roomType == "channel" && owner != user) throw new ChannelWriteDeniedException();
+        if (roomType == "channel" && owner != user &&
+            !await HasChannelRight(db, tx, room, user, ChannelRights.Publish))
+            throw new ChannelWriteDeniedException();
+        if (roomType is "group" or "topic" && (await GroupModeration(db, tx, room, user) & 2) != 0)
+            throw new GroupSilencedException();
         string requestKey = RequestKey(input, forward, card, job?.Input);
         // A locking read observes a competing sender's committed retry even under repeatable read.
         await using (var lookup = Command(db, tx, MessageSelect + """
@@ -227,11 +240,13 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         {
             attachment = await OwnedAttachment(db, tx, user, attachmentId) ?? throw new ArgumentException("找不到附件。");
         }
+        long? commentRoot = null;
         if (input.ReplyTo is { } reply)
         {
             await using var parent = Command(db, tx, "SELECT seq FROM chat_messages WHERE room_id=@room AND seq=@seq FOR SHARE",
                 ("room", room), ("seq", reply));
             if (await parent.ExecuteScalarAsync() is null) throw new ArgumentException("回复目标不在该会话中。");
+            if (roomType == "group") commentRoot = await FindCommentRoot(db, tx, room, reply);
         }
         long seq = checked(latest + 1);
         await using (var insert = Command(db, tx, """
@@ -241,6 +256,13 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
             """, ("room", room), ("seq", seq), ("user", user), ("client", input.ClientId), ("body", input.Text), ("reply", input.ReplyTo),
             ("attachment", attachment?.Id), ("forwarded", forwardedFrom), ("request", requestKey), ("card", card is null ? null : ToJson(card))))
             await insert.ExecuteNonQueryAsync();
+        if (commentRoot is { } root)
+        {
+            await using var comment = Command(db, tx, """
+                INSERT INTO chat_channel_comments(group_id,seq,root_seq) VALUES(@room,@seq,@root)
+                """, ("room", room), ("seq", seq), ("root", root));
+            await comment.ExecuteNonQueryAsync();
+        }
         if (job is not null) await InsertJob(db, tx, job with { Sequence = seq });
         if (roomType != "legacy")
         {
@@ -251,8 +273,11 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         var recipients = new List<string>();
         await using (var reader = await select.ExecuteReaderAsync())
             while (await reader.ReadAsync()) recipients.Add(reader.GetString(0));
+        if (roomType == "channel")
+            await RecordChannelAction(db, tx, room, user, "post_published", seq.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var discussion = roomType == "channel" ? await MirrorChannelPost(db, tx, room, seq) : null;
         await tx.CommitAsync();
-        return new(new(room, seq, input.ClientId, name, input.Text, input.ReplyTo, attachment, false, false, forwardedFrom, card, DateTime.UtcNow), recipients.ToArray(), true);
+        return new(new(room, seq, input.ClientId, name, input.Text, input.ReplyTo, attachment, false, false, forwardedFrom, card, DateTime.UtcNow), recipients.ToArray(), true, discussion);
     }
 
     public async Task<bool> MarkRead(string user, string room, long seq)
@@ -274,7 +299,8 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
 
     private const string MessageSelect = """
         SELECT msg.seq,msg.client_id,a.name,msg.body,msg.reply_to,f.id,f.name,f.mime,f.size,
-               msg.edited,msg.deleted,msg.forwarded_from,msg.request_key,msg.room_id,msg.card,msg.sent_at
+               msg.edited,msg.deleted,msg.forwarded_from,msg.request_key,msg.room_id,msg.card,msg.sent_at,
+               EXISTS (SELECT 1 FROM chat_channel_threads t WHERE t.group_id=msg.room_id AND t.root_seq=msg.seq)
         FROM chat_messages msg JOIN chat_accounts a ON a.id=msg.sender_id
         LEFT JOIN chat_attachments f ON f.id=msg.attachment_id
         """;
@@ -286,7 +312,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         return new(room, reader.GetInt64(0), reader.GetString(1), reader.GetString(2), deleted ? "" : reader.GetString(3),
             reader.IsDBNull(4) ? null : reader.GetInt64(4), attachment, reader.GetBoolean(9), deleted,
             deleted || reader.IsDBNull(11) ? null : reader.GetString(11),
-            deleted || reader.IsDBNull(14) ? null : FromJson<MessageCard>(reader.GetString(14)), ReadTimestamp(reader, 15));
+            deleted || reader.IsDBNull(14) ? null : FromJson<MessageCard>(reader.GetString(14)), ReadTimestamp(reader, 15), reader.GetBoolean(16));
     }
 
     private static DateTime? ReadTimestamp(MySqlDataReader reader, int index) => reader.IsDBNull(index)

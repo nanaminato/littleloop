@@ -20,12 +20,12 @@ sealed partial class ChatStore
             if (await check.ExecuteScalarAsync() as string != "group" || !await IsMember(db, tx, parent, user)) return null;
             await using var select = Command(db, tx, """
                 SELECT m.user_id FROM chat_members m JOIN chat_accounts a ON a.id=m.user_id
-                WHERE m.room_id=@room AND a.password<>@robot ORDER BY m.user_id
-                """, ("room", parent), ("robot", RobotCredential));
-            var humanMembers = new List<string>();
+                WHERE m.room_id=@room AND a.name<>@review ORDER BY m.user_id
+                """, ("room", parent), ("review", ReviewBotName));
+            var topicMembers = new List<string>();
             await using (var reader = await select.ExecuteReaderAsync())
-                while (await reader.ReadAsync()) humanMembers.Add(reader.GetString(0));
-            members = humanMembers.ToArray();
+                while (await reader.ReadAsync()) topicMembers.Add(reader.GetString(0));
+            members = topicMembers.ToArray();
         }
 
         string id = Guid.NewGuid().ToString();
@@ -71,9 +71,7 @@ sealed partial class ChatStore
         }
         else
         {
-            await using var remove = Command(db, tx, "DELETE FROM chat_members WHERE room_id=@room AND user_id=@user",
-                ("room", channel), ("user", user));
-            await remove.ExecuteNonQueryAsync();
+            await RemoveChannelSubscription(db, tx, channel, user);
         }
         await tx.CommitAsync();
         return 204;

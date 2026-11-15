@@ -26,14 +26,15 @@ import java.util.UUID
 internal enum class MessageOperation { Edit, Delete, Forward, Pin, Save }
 
 @Composable
-internal fun MessageMenu(own: Boolean, canPin: Boolean, pinned: Boolean, enabled: Boolean, dismiss: () -> Unit,
+internal fun MessageMenu(canEdit: Boolean, canDelete: Boolean, canPin: Boolean, pinned: Boolean, enabled: Boolean, dismiss: () -> Unit, reply: (() -> Unit)? = null,
                          select: (MessageOperation) -> Unit) {
     DropdownMenu(
         expanded = true,
         onDismissRequest = dismiss,
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
-        if (own) ActionItem(stringResource(R.string.action_edit), MessageOperation.Edit, enabled, select)
+        if (reply != null) DropdownMenuItem(text = { Text(stringResource(R.string.action_reply)) }, onClick = reply)
+        if (canEdit) ActionItem(stringResource(R.string.action_edit), MessageOperation.Edit, enabled, select)
         ActionItem(stringResource(R.string.action_forward), MessageOperation.Forward, enabled, select)
         if (canPin) {
             ActionItem(
@@ -44,7 +45,7 @@ internal fun MessageMenu(own: Boolean, canPin: Boolean, pinned: Boolean, enabled
             )
         }
         ActionItem(stringResource(R.string.message_save), MessageOperation.Save, enabled, select)
-        if (own) ActionItem(stringResource(R.string.action_delete), MessageOperation.Delete, enabled, select)
+        if (canDelete) ActionItem(stringResource(R.string.action_delete), MessageOperation.Delete, enabled, select)
         if (!enabled) DropdownMenuItem(text = { Text(stringResource(R.string.message_offline_actions)) }, onClick = {}, enabled = false)
     }
 }

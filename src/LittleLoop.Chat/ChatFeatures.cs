@@ -52,6 +52,7 @@ sealed partial class ChatStore
             await UpgradeIdentity(db);
             await UpgradeSocial(db);
             await UpgradePush(db);
+            await AddColumn("chat_fcm_devices", "installation_id", "BOOLEAN NOT NULL DEFAULT FALSE");
         }
         finally
         {
@@ -145,7 +146,7 @@ sealed partial class ChatStore
         return items.ToArray();
     }
 
-    public async Task<string[]?> ChangeMessage(string user, string room, long seq, string? text)
+    public async Task<MessageChange?> ChangeMessage(string user, string room, long seq, string? text)
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -153,9 +154,24 @@ sealed partial class ChatStore
         if (await clock.ExecuteScalarAsync() is null) return null;
         if (!await IsMember(db, tx, room, user)) return null;
         await using var find = Command(db, tx, """
-            SELECT body,attachment_id,deleted,client_id,reply_to,request_key FROM chat_messages
-            WHERE room_id=@room AND seq=@seq AND sender_id=@user AND card IS NULL FOR UPDATE
-            """, ("room", room), ("seq", seq), ("user", user));
+            SELECT msg.body,msg.attachment_id,msg.deleted,msg.client_id,msg.reply_to,msg.request_key
+            FROM chat_messages msg JOIN chat_rooms r ON r.id=msg.room_id
+            WHERE msg.room_id=@room AND msg.seq=@seq AND msg.card IS NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM chat_channel_threads t WHERE t.group_id=msg.room_id AND t.root_seq=msg.seq)
+            AND (
+                (r.type<>'channel' AND msg.sender_id=@user) OR
+                (@deleting AND r.type IN ('group','topic') AND EXISTS (
+                    SELECT 1 FROM chat_rooms parent
+                    LEFT JOIN chat_group_moderation moderation ON moderation.group_id=parent.id AND moderation.user_id=@user
+                    WHERE parent.id=IF(r.type='topic',r.parent_id,r.id)
+                      AND (parent.owner_id=@user OR moderation.administrator))) OR
+                (r.type='channel' AND (r.owner_id=@user OR EXISTS (
+                    SELECT 1 FROM chat_channel_admins g WHERE g.room_id=r.id AND g.user_id=@user
+                    AND (g.rights & @right)=@right))))
+            FOR UPDATE
+            """, ("room", room), ("seq", seq), ("user", user),
+            ("deleting", text is null), ("right", (int)(text is null ? ChannelRights.Delete : ChannelRights.Edit)));
         string previous, requestKey;
         bool hasAttachment, deleted;
         await using (var reader = await find.ExecuteReaderAsync())
@@ -168,8 +184,8 @@ sealed partial class ChatStore
                 ? RequestKey(new(reader.GetString(3), previous, reader.IsDBNull(4) ? null : reader.GetInt64(4)), null)
                 : reader.GetString(5);
         }
-        if (deleted) return text is null ? [] : null;
-        if (text == previous) return [];
+        if (deleted) return text is null ? new([], null) : null;
+        if (text == previous) return new([], null);
         if (text is not null && string.IsNullOrWhiteSpace(text) && !hasAttachment)
             throw new ArgumentException("文字消息不能为空。");
         await using (var update = Command(db, tx, """
@@ -182,8 +198,10 @@ sealed partial class ChatStore
             await update.ExecuteNonQueryAsync();
 
         var recipients = await MessageRecipients(db, tx, room);
+        await RecordChannelPostChange(db, tx, room, user, text is null ? "post_deleted" : "post_edited", seq);
+        var discussion = await UpdateDiscussionPost(db, tx, room, seq, text);
         await tx.CommitAsync();
-        return recipients;
+        return new(recipients, discussion);
     }
 
     public async Task<string[]?> SetPinnedMessage(string user, string room, long seq, bool pinned)
@@ -202,7 +220,8 @@ sealed partial class ChatStore
             current = reader.IsDBNull(2) ? null : reader.GetInt64(2);
         }
         if (!await IsMember(db, tx, room, user)) return null;
-        if (restricted) throw new ChannelWriteDeniedException();
+        if (restricted && !await HasChannelRight(db, tx, room, user, ChannelRights.Pin))
+            throw new ChannelWriteDeniedException();
         if (pinned)
         {
             await using var target = Command(db, tx, """
@@ -215,6 +234,7 @@ sealed partial class ChatStore
         await using var update = Command(db, tx, "UPDATE chat_rooms SET pinned_message=@pin WHERE id=@room",
             ("pin", pinned ? seq : (long?)null), ("room", room));
         await update.ExecuteNonQueryAsync();
+        await RecordChannelPostChange(db, tx, room, user, pinned ? "post_pinned" : "post_unpinned", seq);
         var recipients = await MessageRecipients(db, tx, room);
         await tx.CommitAsync();
         return recipients;

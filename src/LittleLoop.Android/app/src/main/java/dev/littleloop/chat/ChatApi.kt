@@ -37,11 +37,11 @@ data class Session(val base: HttpUrl, val cookie: String) {
 data class Room(val id: String, val title: String, val type: String, val latest: Long, val unread: Long,
                 val read: Long, val muted: Boolean, val archived: Boolean, val canPost: Boolean, val preview: String,
                 val revision: Long, val pinnedMessage: Long?, val parentId: String?, val canManage: Boolean = false,
-                val previewDeleted: Boolean = false)
+                val previewDeleted: Boolean = false, val channelRights: Int = 0, val signPosts: Boolean = false, val canModerate: Boolean = false)
 data class ChatChannel(val id: String, val title: String, val subscribed: Boolean, val owner: Boolean)
 data class ChatMessage(val sequence: Long, val clientId: String, val sender: String, val text: String,
                        val deleted: Boolean, val sentAt: String, val replyTo: Long?, val attachment: ChatAttachment?,
-                       val card: BotCard?, val edited: Boolean, val forwardedFrom: String?)
+                       val card: BotCard?, val edited: Boolean, val forwardedFrom: String?, val discussionRoot: Boolean = false)
 data class ChatAttachment(val id: String, val name: String, val mime: String, val size: Long) {
     val image get() = mime in setOf("image/png", "image/jpeg", "image/webp", "image/gif")
     fun json() = json("id" to id, "name" to name, "mime" to mime, "size" to size)
@@ -126,9 +126,9 @@ class ChatApi(private val storage: SessionStorage) {
 
     fun clear() { session = null; storage.clear() }
 
-    suspend fun request(path: String, body: JSONObject? = null, expected: Session? = session): String = withContext(Dispatchers.IO) {
+    suspend fun request(path: String, body: JSONObject? = null, expected: Session? = session, method: String = "POST"): String = withContext(Dispatchers.IO) {
         val current = expected?.takeIf { it === session } ?: throw ChatRequestException(401, "")
-        http.newCall(build(current.base, current.cookie, path, body)).execute().use { response ->
+        http.newCall(build(current.base, current.cookie, path, body, method)).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw ChatRequestException(response.code, text)
             text
@@ -177,12 +177,13 @@ class ChatApi(private val storage: SessionStorage) {
         return http.newWebSocket(Request.Builder().url(url).header("Cookie", current.cookie).build(), listener)
     }
 
-    private fun build(base: HttpUrl, cookie: String?, path: String, body: JSONObject?): Request {
+    private fun build(base: HttpUrl, cookie: String?, path: String, body: JSONObject?, method: String = "POST"): Request {
         val url = base.resolve("/api/chat$path") ?: throw IOException("Invalid API path.")
         val request = Request.Builder().url(url).header("Accept", "application/json")
         if (cookie != null) request.header("Cookie", cookie)
+        if (body == null && method == "DELETE") request.header("X-LittleLoop-Chat", "1").delete()
         if (body != null) request.header("X-LittleLoop-Chat", "1")
-            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .method(method, body.toString().toRequestBody("application/json".toMediaType()))
         return request.build()
     }
 }

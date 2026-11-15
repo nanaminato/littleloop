@@ -10,15 +10,19 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import androidx.work.*
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.FirebaseApp
+import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
@@ -66,17 +70,28 @@ internal class NativePush(private val context: Context, private val api: ChatApi
         }
     }
 
-    // HTTP v1 targets a registration token in Message.token.
-    @Suppress("DEPRECATION")
     private suspend fun register(session: Session) {
         val project = FirebaseApp.getInstance().options.projectId ?: error(strings.getString(R.string.error_firebase_project))
         val server = JSONObject(api.request("/settings/fcm", expected = session)).stringOrNull("project")
         if (server != project) throw ChatRequestException(if (server == null) 404 else 400, "")
-        val token = withContext(Dispatchers.IO) {
-            Tasks.await(FirebaseMessaging.getInstance().token, 25, TimeUnit.SECONDS)
+        val installation = withContext(Dispatchers.IO) {
+            try {
+                Tasks.await(FirebaseMessaging.getInstance().register(), 25, TimeUnit.SECONDS)
+                Tasks.await(FirebaseInstallations.getInstance().id, 5, TimeUnit.SECONDS)
+            } catch (error: TimeoutException) {
+                Log.w("LittleLoopPush", "Firebase messaging registration timed out")
+                throw error
+            } catch (error: ExecutionException) {
+                val cause = error.cause
+                val reason = generateSequence(cause) { it.cause }.take(6).firstNotNullOfOrNull { failure ->
+                    registrationErrors.firstOrNull { code -> failure.message?.contains(code) == true }
+                } ?: cause?.javaClass?.simpleName ?: "unknown"
+                Log.w("LittleLoopPush", "Firebase messaging registration failed: $reason")
+                throw error
+            }
         }
         if (api.session !== session) return
-        api.request("/settings/fcm", json("token" to token, "project" to project), session)
+        api.request("/settings/fcm", json("token" to installation, "project" to project, "installationId" to true), session)
     }
 
     fun refreshRegistration() {
@@ -95,9 +110,10 @@ internal class NativePush(private val context: Context, private val api: ChatApi
     fun receive(id: Long) {
         val session = api.session ?: return
         if (!isEnabled(session)) return
+        // A LAN chat server can be reachable before Android validates internet access.
+        // The worker retries failed notice requests through WorkManager backoff.
         val builder = OneTimeWorkRequestBuilder<FcmNoticeWorker>()
             .setInputData(workDataOf("id" to id, "scope" to session.outboxKey))
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
         if (Build.VERSION.SDK_INT >= 31) builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
         WorkManager.getInstance(context).enqueueUniqueWork("littleloop-fcm-${session.outboxKey}-$id", ExistingWorkPolicy.KEEP, builder.build())
     }
@@ -111,6 +127,9 @@ internal class NativePush(private val context: Context, private val api: ChatApi
         val room = notice.getString("room").asGuid() ?: return
         val sequence = notice.getLong("sequence").takeIf { it > 0 } ?: return
         val work = notice.stringOrNull("work")?.asGuid()
+        val commentChannel = notice.stringOrNull("commentChannel")?.asGuid()
+        val commentPost = notice.optLong("commentPost")
+        val opensComments = work == null && commentChannel != null && commentPost > 0
         synchronized(lock) {
             if (api.session !== session || !isEnabled(session) || seen.contains(key)) return
             if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -128,7 +147,9 @@ internal class NativePush(private val context: Context, private val api: ChatApi
             val target = Intent(context, MainActivity::class.java)
                 .setData(Uri.parse("littleloop://notice/$id"))
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                .putExtra("room", room).putExtra("sequence", sequence).putExtra("work", work)
+                .putExtra("room", if (opensComments) commentChannel else room)
+                .putExtra("sequence", if (opensComments) commentPost else sequence)
+                .putExtra("comments", opensComments).putExtra("work", work)
                 .putExtra("pushScope", scope)
             val pending = PendingIntent.getActivity(context, 0, target,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -153,15 +174,13 @@ internal class NativePush(private val context: Context, private val api: ChatApi
 
     private fun String.asGuid() = runCatching { UUID.fromString(this).toString() }.getOrNull()
 
-    private companion object { const val DAY_MS = 86_400_000L }
+    private companion object {
+        const val DAY_MS = 86_400_000L
+        val registrationErrors = listOf("SERVICE_NOT_AVAILABLE", "AUTHENTICATION_FAILED", "FIS_AUTH_ERROR", "MISSING_INSTANCEID_SERVICE")
+    }
 }
 
 class ChatFcmMessagingService : FirebaseMessagingService() {
-    @Suppress("OVERRIDE_DEPRECATION")
-    override fun onNewToken(token: String) {
-        (application as ChatApplication).chat.push.refreshRegistration()
-    }
-
     override fun onMessageReceived(message: RemoteMessage) {
         val id = message.data["littleloop"]?.toLongOrNull()?.takeIf { it > 0 } ?: return
         (application as ChatApplication).chat.push.receive(id)

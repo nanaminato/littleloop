@@ -2,6 +2,8 @@ package dev.littleloop.chat
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +59,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+
+internal data class ChannelDiscussionSummary(val post: Long, val count: Long, val unread: Long)
 
 @Composable
 internal fun ConversationScreen(
@@ -72,6 +78,7 @@ internal fun ConversationScreen(
     var draft by rememberSaveable(room.id) { mutableStateOf("") }
     var replyTo by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
     var file by remember(room.id) { mutableStateOf<SelectedAttachment?>(null) }
+    var commentPost by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
     var preview by rememberSaveable(room.id) { mutableStateOf<Long?>(null) }
     var fileError by remember(room.id) { mutableStateOf<String?>(null) }
     var robot by remember(room.id) { mutableStateOf<BotRoom?>(null) }
@@ -86,6 +93,24 @@ internal fun ConversationScreen(
     val searchLabel = stringResource(R.string.conv_search_in)
     val moreLabel = stringResource(R.string.conv_more_actions)
 
+    var discussionSummaries by remember(room.id) { mutableStateOf<Map<Long, ChannelDiscussionSummary>>(emptyMap()) }
+    val discussionPosts = if (room.type == "channel") state.messages.filterNot(ChatMessage::deleted)
+        .takeLast(100).map(ChatMessage::sequence) else emptyList()
+    LaunchedEffect(room.id, discussionPosts) {
+        while (discussionPosts.isNotEmpty()) {
+            try { discussionSummaries = chat.discussionSummaries(room.id, discussionPosts) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { discussionSummaries = emptyMap() }
+            delay(5000)
+        }
+    }
+    LaunchedEffect(state.openComments, room.type) {
+        val post = state.openComments
+        if (post != null && room.type == "channel") {
+            commentPost = post
+            chat.commentLinkOpened()
+        }
+    }
     LaunchedEffect(state.openWork, state.focus) {
         if (state.openWork != null && state.focus != null) {
             botDetails = state.focus
@@ -110,6 +135,7 @@ internal fun ConversationScreen(
 
     val bySequence = remember(state.messages) { state.messages.associateBy(ChatMessage::sequence) }
     var menu by remember(room.id) { mutableStateOf<Long?>(null) }
+    var channelSettings by remember(room.id) { mutableStateOf(false) }
     var headerMenu by remember(room.id) { mutableStateOf(false) }
     var messageOperation by remember(room.id) { mutableStateOf<Pair<Long, MessageOperation>?>(null) }
     var operationResult by remember(room.id) { mutableStateOf<String?>(null) }
@@ -151,6 +177,10 @@ internal fun ConversationScreen(
                         DropdownMenuItem(
                             text = { Text(stringResource(if (room.muted) R.string.action_unmute else R.string.action_mute)) },
                             onClick = { headerMenu = false; chat.roomPreference(room) },
+                        )
+                        if (room.type == "channel") DropdownMenuItem(
+                            text = { Text(stringResource(R.string.channel_settings)) },
+                            onClick = { headerMenu = false; channelSettings = true },
                         )
                         if (room.type == "group") {
                             val unread = state.rooms.filter { it.type == "topic" && it.parentId == room.id }.sumOf(Room::unread)
@@ -259,6 +289,8 @@ internal fun ConversationScreen(
                     },
                     onPreview = { preview = message.sequence },
                     onCard = { botDetails = message.sequence },
+                    discussionSummary = discussionSummaries[message.sequence],
+                    onComments = if (room.type == "channel" || message.discussionRoot) ({ commentPost = message.sequence }) else null,
                 )
             }
             if ((state.messages.firstOrNull()?.sequence ?: 0) > 1) item {
@@ -333,15 +365,22 @@ internal fun ConversationScreen(
                 }
             }
         } else {
-            Text(
-                stringResource(R.string.conv_channel_read_only),
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(if (room.type == "channel") R.string.conv_channel_read_only else R.string.conv_group_silenced),
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (room.type == "channel") TextButton(onClick = { channelSettings = true }) {
+                    Text(stringResource(R.string.channel_discussion_entry))
+                }
+            }
         }
     }
 
+    if (channelSettings) ChannelAdministration(chat, state, room) { channelSettings = false }
+    bySequence[commentPost]?.let { ChannelComments(chat, state, room, it) { commentPost = null } }
     bySequence[preview]?.takeUnless(ChatMessage::deleted)?.let { message ->
         AttachmentDialog(chat, room.id, message) { preview = null }
     }
@@ -408,10 +447,18 @@ private fun MessageBubble(
     onOperation: (MessageOperation) -> Unit,
     onPreview: () -> Unit,
     onCard: () -> Unit,
+    discussionSummary: ChannelDiscussionSummary?,
+    onComments: (() -> Unit)?,
 ) {
-    val own = message.sender == state.username
-    val continued = older != null && older.sender == message.sender && messageDay(older.sentAt) == messageDay(message.sentAt)
-    val newDay = older == null || messageDay(older.sentAt) != messageDay(message.sentAt)
+    val actionsLabel = stringResource(R.string.status_message_actions)
+    val broadcast = room.type == "channel"
+    val own = !broadcast && message.sender == state.username
+    val sender = if (broadcast) room.title else message.sender
+    val dayLabel = messageDay(message.sentAt)
+    val olderDayLabel = older?.let { messageDay(it.sentAt) }
+    val continued = dayLabel.isNotBlank() && older != null &&
+        (broadcast || older.sender == message.sender) && olderDayLabel == dayLabel
+    val newDay = dayLabel.isNotBlank() && olderDayLabel != dayLabel
     val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     val shape = when {
         own && continued -> RoundedCornerShape(16.dp, 6.dp, 6.dp, 16.dp)
@@ -431,7 +478,7 @@ private fun MessageBubble(
             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                 Surface(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .78f), shape = CircleShape) {
                     Text(
-                        messageDay(message.sentAt),
+                        dayLabel,
                         color = MaterialTheme.colorScheme.surface,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
@@ -445,23 +492,26 @@ private fun MessageBubble(
             verticalAlignment = Alignment.Bottom,
         ) {
             if (!own) {
-                if (!continued) RoomAvatar(message.sender, "direct", 28.dp) else Spacer(Modifier.width(28.dp))
+                if (!continued) RoomAvatar(sender, if (broadcast) "channel" else "direct", 28.dp) else Spacer(Modifier.width(28.dp))
                 Spacer(Modifier.width(7.dp))
             }
             Column(
                 Modifier.widthIn(max = 316.dp)
                     .clip(shape)
                     .background(bubbleColor)
+                    .semantics {
+                        if (!message.deleted) customActions = listOf(CustomAccessibilityAction(actionsLabel) { onMenu(); true })
+                    }
                     .combinedClickable(
                         enabled = !message.deleted,
                         onClick = {},
                         onLongClickLabel = stringResource(R.string.status_message_actions),
                         onLongClick = onMenu,
                     )
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
             ) {
                 if (!own && !continued) {
-                    Text(message.sender, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+                    Text(sender, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
                 }
                 message.forwardedFrom?.let {
                     Text(
@@ -482,6 +532,9 @@ private fun MessageBubble(
                 }
                 if (message.deleted) {
                     Text(stringResource(R.string.conv_deleted), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    if (message.discussionRoot && onComments != null) TextButton(onClick = onComments) {
+                        Text(stringResource(R.string.channel_comments))
+                    }
                 } else {
                     if (message.text.isNotBlank()) Text(message.text, style = MaterialTheme.typography.bodyLarge)
                     message.attachment?.let { attachment ->
@@ -495,42 +548,36 @@ private fun MessageBubble(
                     if (message.forwardedFrom == null && message.text.isBlank() && message.attachment == null && message.card == null) {
                         Text(" ", style = MaterialTheme.typography.bodyLarge)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onComments != null) TextButton(onClick = onComments) {
+                        Text(stringResource(R.string.channel_comments))
+                        if (discussionSummary != null) {
+                            Text(" · " + discussionSummary.count)
+                            if (discussionSummary.unread > 0) Text(" · " + stringResource(
+                                R.string.channel_comments_unread, discussionSummary.unread))
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (broadcast && room.signPosts) Text(message.sender,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                        if (message.edited) Text(stringResource(R.string.conv_edited), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                         messageTime(message.sentAt).takeIf(String::isNotEmpty)?.let {
                             Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                         }
-                        if (message.edited) {
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.conv_edited), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        if (room.canPost) {
-                            TextButton(
-                                onClick = onReply,
-                                modifier = Modifier.size(34.dp),
-                                contentPadding = PaddingValues(0.dp),
-                            ) {
-                                Text("↩", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                            }
-                        }
-                        Box {
-                            TextButton(
-                                onClick = onMenu,
-                                modifier = Modifier.size(34.dp),
-                                contentPadding = PaddingValues(0.dp),
-                            ) {
-                                Text("⋯", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-                            }
-                            if (menuOpen) {
-                                MessageMenu(
-                                    own && message.card == null,
-                                    room.canPost,
-                                    room.pinnedMessage == message.sequence,
-                                    enabled = state.connected && !state.busy,
-                                    dismiss = onDismissMenu,
-                                ) { operation -> onOperation(operation) }
-                            }
-                        }
+                    }
+                    if (menuOpen) {
+                        MessageMenu(
+                            canEdit = message.card == null && if (room.type == "channel") room.channelRights and 2 != 0 else own,
+                            canDelete = message.card == null && if (room.type == "channel") room.channelRights and 4 != 0 else own,
+                            canPin = if (room.type == "channel") room.channelRights and 8 != 0 else room.canPost,
+                            pinned = room.pinnedMessage == message.sequence,
+                            enabled = state.connected && !state.busy,
+                            dismiss = onDismissMenu,
+                            reply = if (room.canPost) ({ onDismissMenu(); onReply() }) else null,
+                        ) { operation -> onOperation(operation) }
                     }
                 }
             }

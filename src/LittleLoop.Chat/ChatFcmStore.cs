@@ -1,11 +1,12 @@
 using MySqlConnector;
 
 sealed record FcmDelivery(long Id, string Device, string Token, string User, string Room, long Sequence,
-    string Title, string Body, bool Sound, Guid? Work, string? Nonce);
+    string Title, string Body, bool Sound, Guid? Work, string? Nonce, string? CommentChannel, long? CommentPost,
+    bool InstallationId);
 
 sealed partial class ChatStore
 {
-    public async Task<bool> SaveFcm(string device, string token)
+    public async Task<bool> SaveFcm(string device, string token, bool installationId)
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -15,9 +16,9 @@ sealed partial class ChatStore
             """, ("device", device), ("token", token));
         await release.ExecuteNonQueryAsync();
         await using var save = Command(db, tx, """
-            INSERT INTO chat_fcm_devices(device_id,token,token_hash) VALUES(@device,@token,SHA2(@token,256))
-            ON DUPLICATE KEY UPDATE token=@token,token_hash=SHA2(@token,256)
-            """, ("device", device), ("token", token));
+            INSERT INTO chat_fcm_devices(device_id,token,token_hash,installation_id) VALUES(@device,@token,SHA2(@token,256),@installation)
+            ON DUPLICATE KEY UPDATE token=@token,token_hash=SHA2(@token,256),installation_id=@installation
+            """, ("device", device), ("token", token), ("installation", installationId));
         try { await save.ExecuteNonQueryAsync(); await tx.CommitAsync(); return true; }
         catch (MySqlException e) when (e.Number is 1062 or 1213 or 1452) { return false; }
     }
@@ -85,21 +86,38 @@ sealed partial class ChatStore
               IF(r.type='direct',a.name,r.title),
               IF(q.work_id IS NOT NULL,'LittleLoop 有待审批的任务',
                 IF(JSON_UNQUOTE(JSON_EXTRACT(s.value,'$.preview'))='false','新消息',COALESCE(NULLIF(LEFT(msg.body,140),''),f2.name,'新消息'))),
-              COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.value,'$.sound')),'true')<>'false',q.work_id,q.nonce
+              COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.value,'$.sound')),'true')<>'false',q.work_id,q.nonce, IF(channel_post.deleted, NULL, subscription.room_id),
+              IF(subscription.room_id IS NULL OR channel_post.deleted, NULL, thread.post_seq),f.installation_id
             FROM chat_fcm_queue q JOIN chat_fcm_devices f ON f.device_id=q.device_id
             JOIN chat_devices d ON d.id=f.device_id
             JOIN chat_rooms r ON r.id=q.room_id
             JOIN chat_members m ON m.room_id=r.id AND m.user_id=d.user_id
             JOIN chat_messages msg ON msg.room_id=r.id AND msg.seq=q.seq
             JOIN chat_accounts a ON a.id=msg.sender_id
+            LEFT JOIN chat_channel_comments cc ON cc.group_id=q.room_id AND cc.seq=q.seq
+            LEFT JOIN chat_channel_threads thread ON thread.group_id=cc.group_id AND thread.root_seq=cc.root_seq
+            LEFT JOIN chat_messages channel_post ON channel_post.room_id=thread.channel_id AND channel_post.seq=thread.post_seq
+            LEFT JOIN chat_members subscription ON subscription.room_id=thread.channel_id AND subscription.user_id=d.user_id
+            LEFT JOIN chat_channel_comment_reads comment_read ON comment_read.channel_id=thread.channel_id
+              AND comment_read.post_seq=thread.post_seq AND comment_read.user_id=d.user_id
+            LEFT JOIN chat_accounts receiver ON receiver.id=d.user_id
+            LEFT JOIN chat_messages reply_target ON reply_target.room_id=q.room_id AND reply_target.seq=msg.reply_to
             LEFT JOIN chat_attachments f2 ON f2.id=msg.attachment_id
             LEFT JOIN chat_user_settings s ON s.user_id=d.user_id AND s.section='notifications'
             WHERE q.id=@id AND (@device IS NULL OR q.device_id=@device) AND q.expires>UTC_TIMESTAMP()
               AND d.expires>UTC_TIMESTAMP() AND NOT m.muted AND NOT msg.deleted
               AND (q.work_id IS NOT NULL OR m.read_to<q.seq)
-              AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.value,
+              AND (cc.seq IS NULL OR COALESCE(comment_read.read_to,0)<q.seq)
+              AND (COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.value,
                 CASE r.type WHEN 'channel' THEN '$.channels' WHEN 'group' THEN '$.groups'
                 WHEN 'topic' THEN '$.groups' ELSE '$.direct' END)),'true')<>'false'
+                OR (cc.seq IS NOT NULL AND (
+                     reply_target.sender_id=d.user_id
+                     OR REGEXP_LIKE(msg.body,CONCAT('(^|[^a-z0-9_@])@',receiver.name,'($|[^a-z0-9_])'),'i')
+                     OR (subscription.room_id IS NOT NULL AND NOT subscription.muted AND EXISTS (
+                         SELECT 1 FROM chat_channel_comment_follows followed
+                         WHERE followed.channel_id=thread.channel_id AND followed.post_seq=thread.post_seq
+                           AND followed.user_id=d.user_id)))))
               AND (r.type<>'direct' OR NOT EXISTS(
                 SELECT 1 FROM chat_blocks b
                 WHERE (b.blocker_id=d.user_id AND b.target_id=msg.sender_id)
@@ -109,7 +127,9 @@ sealed partial class ChatStore
         return await reader.ReadAsync() ? new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
             reader.GetString(3), reader.GetString(4), reader.GetInt64(5), reader.GetString(6), reader.GetString(7),
             reader.GetBoolean(8), reader.IsDBNull(9) ? null : Guid.Parse(reader.GetString(9)),
-            reader.IsDBNull(10) ? null : reader.GetString(10)) : null;
+            reader.IsDBNull(10) ? null : reader.GetString(10),
+            reader.IsDBNull(11) ? null : reader.GetString(11), reader.IsDBNull(12) ? null : reader.GetInt64(12),
+            reader.GetBoolean(13)) : null;
     }
 
     public async Task CompleteFcm(long id, bool delivered)
