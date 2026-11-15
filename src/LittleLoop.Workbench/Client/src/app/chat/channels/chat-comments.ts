@@ -117,12 +117,13 @@ interface DiscussionThread {
     }
   `,
   styles: [`
-    :host { display: block; margin-top: .25rem; }
+    :host { display: block; margin-top: .25rem; min-width: 0; overflow-wrap: anywhere; }
     section { display: grid; gap: .5rem; min-width: min(16rem, 55vw); border-top: 1px solid var(--line); padding-top: .5rem; }
     article { border-bottom: 1px solid var(--line); padding: .35rem 0; }
     p { margin: .25rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     blockquote { margin: .25rem 0; padding-inline-start: .5rem; border-inline-start: 2px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     form { display: grid; gap: .35rem; }
+    section > *, form > * { min-width: 0; max-width: 100%; }
     textarea { width: 100%; }
   `],
 })

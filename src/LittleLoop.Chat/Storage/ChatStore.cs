@@ -91,7 +91,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
                 throw new ArgumentException($"{found.Name} 当前不接受群邀请。");
             if (found.Id != user.Id) others.Add(found);
         }
-        if (request.Type == "direct" ? others.Count != 1 : request.Type == "group" && others.Count == 0)
+        if (request.Type == "direct" && others.Count != 1)
             throw new ArgumentException("请选择有效成员。");
         string[] members = [.. others.Select(x => x.Id).Order(), user.Id];
         string? directKey = request.Type switch

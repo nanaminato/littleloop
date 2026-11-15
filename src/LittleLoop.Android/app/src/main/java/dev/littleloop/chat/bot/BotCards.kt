@@ -142,7 +142,8 @@ internal fun BotDetails(bot: BotChat, card: BotCard, dismiss: () -> Unit) {
 @Composable
 private fun Evidence(label: String, body: String) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    TextButton(onClick = { expanded = !expanded }) { Text(label) }
+    TextButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.small) { Text(label, Modifier.fillMaxWidth()) }
     if (expanded) Text(body, Modifier.horizontalScroll(rememberScrollState()), fontFamily = FontFamily.Monospace)
 }
 
@@ -182,7 +183,7 @@ internal fun BotRequestDialog(bot: BotChat, room: String, providers: List<String
                     )
                     Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
                         paths.orEmpty().filter { it.contains(filter, ignoreCase = true) }.forEach { candidate ->
-                            TextButton(onClick = { path = candidate; picker = false }) { Text(candidate) }
+                            TextButton(onClick = { path = candidate; picker = false }, shape = MaterialTheme.shapes.small) { Text(candidate) }
                         }
                     }
                 }

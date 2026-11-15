@@ -87,7 +87,7 @@ interface ChannelAdmin { name: string; rights: number }
             <select name="group" [(ngModel)]="groupChoice">
               <option value="">{{ store.t('无') }}</option>
               @for (room of store.rooms(); track room.id) {
-                @if (room.type === 'group' && room.canManage) { <option [value]="room.id">{{ room.title }}</option> }
+                @if (room.type === 'group' && (room.canManage || room.id === group())) { <option [value]="room.id">{{ room.title }}</option> }
               }
             </select>
           </label>
@@ -119,7 +119,7 @@ interface ChannelAdmin { name: string; rights: number }
       @if (error()) { <p role="alert">{{ store.t(error()) }}</p> }
     </section>
   `,
-  styles: [`section,form { display:grid; gap:.45rem; } h3,p { margin:0; } label { display:block; }`],
+  styleUrl: './chat-channel-settings.css',
 })
 export class ChatChannelSettings {
   readonly store = inject(ChatStore);
@@ -252,7 +252,7 @@ export class ChatChannelSettings {
   }
 
   canDiscuss() {
-    return this.owner() || this.admins().some(admin => admin.name === this.store.user() && (admin.rights & 64) !== 0);
+    return ((this.store.currentRoom()?.channelRights ?? 0) & 64) !== 0;
   }
 
   labels(mask: number) {

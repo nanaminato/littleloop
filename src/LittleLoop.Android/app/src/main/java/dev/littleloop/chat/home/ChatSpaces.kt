@@ -1,5 +1,8 @@
 package dev.littleloop.chat
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -77,13 +80,13 @@ internal fun ColumnScope.ChannelDirectory(state: ChatState, subscribe: (ChatChan
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                if (channel.subscribed) {
-                    TextButton(onClick = { open(channel.id) }) { Text(stringResource(R.string.channels_open)) }
-                }
-                if (!channel.owner) {
-                    TextButton(onClick = { subscribe(channel) }, enabled = !state.busy && state.connected) {
-                        Text(stringResource(if (channel.subscribed) R.string.channels_unsubscribe else R.string.channels_subscribe))
+                    if (channel.subscribed) {
+                        TextButton(onClick = { open(channel.id) }) { Text(stringResource(R.string.channels_open)) }
+                    }
+                    if (!channel.owner) {
+                        TextButton(onClick = { subscribe(channel) }, enabled = !state.busy && state.connected) {
+                            Text(stringResource(if (channel.subscribed) R.string.channels_unsubscribe else R.string.channels_subscribe))
+                        }
                     }
                 }
             }
@@ -99,7 +102,7 @@ internal fun CreateChatSpace(topic: Boolean, state: ChatState, dismiss: () -> Un
         onDismissRequest = { if (!state.busy) dismiss() },
         title = { Text(stringResource(if (topic) R.string.topics_new else R.string.channels_new)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     title, { if (it.length <= 100) title = it }, Modifier.fillMaxWidth(),
                     label = { Text(stringResource(if (topic) R.string.topics_title else R.string.channels_name)) },

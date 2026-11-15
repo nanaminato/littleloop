@@ -1,5 +1,8 @@
 package dev.littleloop.chat
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,7 +64,14 @@ internal fun MessageOperationDialog(chat: ChatRepository, state: ChatState, room
     var draft by rememberSaveable(message.sequence) { mutableStateOf(message.text) }
     var target by rememberSaveable { mutableStateOf<String?>(null) }
     val id = rememberSaveable(room.id, message.sequence, operation.name, target) { UUID.randomUUID().toString() }
-    val online = state.connected && !state.busy && !message.deleted
+    val own = message.sender == state.username
+    val allowed = when (operation) {
+        MessageOperation.Edit -> if (room.type == "channel") room.channelRights and 2 != 0 else own
+        MessageOperation.Delete -> if (room.type == "channel") room.channelRights and 4 != 0 else own || room.canModerate
+        MessageOperation.Pin -> if (room.type == "channel") room.channelRights and 8 != 0 else room.canPost
+        else -> true
+    }
+    val online = state.connected && !state.busy && !message.deleted && allowed
     val targets = state.rooms.filter { it.canPost && it.type !in setOf("saved", "legacy") && !it.archived }
     val label = when (operation) {
         MessageOperation.Edit -> stringResource(R.string.message_edit)
@@ -78,7 +88,7 @@ internal fun MessageOperationDialog(chat: ChatRepository, state: ChatState, room
         onDismissRequest = { if (!state.busy) dismiss() },
         title = { Text(label) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when (operation) {
                     MessageOperation.Edit -> OutlinedTextField(
                         draft, { if (it.length <= 4000) draft = it },
@@ -93,7 +103,7 @@ internal fun MessageOperationDialog(chat: ChatRepository, state: ChatState, room
                         items(targets, key = Room::id) { candidate ->
                             TextButton(
                                 onClick = { target = candidate.id }, enabled = !state.busy,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small,
                             ) { Text(if (target == candidate.id) "✓ ${candidate.title}" else candidate.title) }
                         }
                     }

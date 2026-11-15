@@ -1,4 +1,4 @@
-import { Component, effect, inject, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Room } from '../../shared/chat-model';
 import { ChatChannelSettings } from '../../channels/chat-channel-settings';
@@ -13,6 +13,8 @@ import { ChatStore } from '../../shared/chat-store';
 export class ChatInfo {
   readonly store = inject(ChatStore);
   readonly room = input.required<Room>();
+  readonly topics = computed(() => this.store.rooms().filter(room => room.parentId === this.room().id));
+  readonly media = computed(() => this.store.messages().filter(message => !message.deleted && message.attachment));
 
   readonly joinRequests = signal<string[]>([]);
   readonly decidingJoin = signal<string | null>(null);

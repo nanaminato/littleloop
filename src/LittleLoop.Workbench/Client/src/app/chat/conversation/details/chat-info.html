@@ -35,13 +35,11 @@
     <section class="panel-section">
       <h3>{{ store.t('群话题') }}</h3>
       <div class="topic-list">
-        @for (topic of store.rooms(); track topic.id) {
-          @if (topic.parentId === room().id) {
+        @for (topic of topics(); track topic.id) {
             <button type="button" class="wide quiet" (click)="store.select(topic.id)">
               <span class="topic-dot" aria-hidden="true"></span>{{ topic.title }}
               @if (topic.unread > 0) { <b class="tiny-unread">{{ topic.unread }}</b> }
             </button>
-          }
         } @empty { <p class="empty-copy">{{ store.t('暂无话题') }}</p> }
       </div>
     </section>
@@ -99,7 +97,7 @@
   <section class="panel-section">
     <h3>{{ store.t('当前加载的共享媒体') }}</h3>
     <div class="shared-media">
-      @for (message of store.messages(); track message.sequence) {
+      @for (message of media(); track message.sequence) {
         @if (message.attachment; as file) {
           <a class="media-link" [href]="store.attachmentUrl(message) + '?download=true'">
             <span aria-hidden="true">▣</span><span>{{ file.name }}</span>

@@ -112,6 +112,7 @@ const english: Record<string, string> = {
   '群聊': 'Group',
   '群名称': 'Group name',
   '成员账号': 'Member usernames',
+  '成员可选，创建后可在会话详情中邀请。': 'Members are optional. Invite people from conversation details after creating the group.',
   '多个账号用逗号分隔': 'Separate usernames with commas',
   '创建会话': 'Create chat',
   '已置顶': 'Pinned',

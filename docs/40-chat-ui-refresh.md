@@ -46,6 +46,8 @@ Web 由 `chat-i18n.ts` 提供 `ChatI18n` 服务和语言字典。中文是源文
 
 ## 验收
 
+下列为当时的抽样记录，不代表全部会话类型和权限分支均已检查。后续完整 Web 覆盖矩阵、发现的问题及修复见 [对话界面审查](42-chat-ui-audit.md)。
+
 - Web：`npm run build` 通过；Chrome/Playwright 在 1440×900 与 390×844 下登录现有 MySQL 实库，检查中文、英文、浅色、会话、详情、主菜单、设置、移动端返回以及频道/话题弹窗的自动聚焦、Esc 关闭和成功创建；英文界面固定文案未发现漏译（仅剩用户创建的文件夹名与「简体中文」选项）。
 - Android：`:app:assembleDebug` 与 `:app:lintDebug` 通过；Android 17 模拟器用 `alice_settings` 登录，检查首页、会话、设置、溢出菜单、中文/English 切换和浅色/深色；语言重启后保持。
 - 证据：`data/ui-refresh/` 内的桌面、移动端与 Android 截图。

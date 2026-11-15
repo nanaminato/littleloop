@@ -1937,6 +1937,102 @@
       "references": [
         "REF-CHAT-SOCIAL"
       ]
+    },
+    {
+      "id": "INTENT-CHAT-UI-AUDIT",
+      "type": "intent",
+      "title": "Review and repair conversation surfaces and allow owner-only group creation",
+      "body": "Review conversation types, permission roles and desktop/mobile layouts; directly fix discovered problems and verify actual behavior. Allow group creation before inviting other members.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user instruction in this chat on 2026-11-15: review conversation interfaces across types, roles and desktop/mobile, fix and verify; allow creating groups before inviting members.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "references": [
+        "REF-CHAT-UI-AUDIT"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-UI-AUDIT",
+      "type": "evidence",
+      "title": "Web role/layout matrix and targeted Android checks",
+      "body": "Real Chrome and MySQL: 165 conversation states plus 96 peripheral states, seven individual channel grants and real create/invite/send/edit/forward/delete/attachment/comment actions. Android emulator created an owner-only group, invited a member and showed moderator deletion without editing. Six bot card states use synthetic responses only; no real agent execution or approvals. Existing 5190 service restarted with preserved configuration and passed empty-group/invite checks.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-full-audit/{result,extras-result,actions-result,bot-visual-result,main-result}.json; screenshots; Angular and .NET builds; Android assembleDebug and lintDebug. Native Android not covered by the complete Web matrix; physical phones and push delivery not retested."
+      },
+      "references": [
+        "REF-CHAT-UI-AUDIT"
+      ]
+    },
+    {
+      "id": "MOD-CHAT-UI-AUDIT",
+      "type": "module",
+      "title": "Conversation layout and permission repair",
+      "body": "Scoped channel settings styling and checkbox sizing; optional initial group members across clients/API/storage; bounded menus and result lists; accurate empty states; permitted forwarding and moderator actions; current discussion association; VARCHAR(100) forwarded source migration for long channel titles.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-UI-AUDIT"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-CHAT-UI-AUDIT"
+      ]
+    },
+    {
+      "id": "INTENT-ANDROID-CHAT-UI-AUDIT",
+      "type": "intent",
+      "title": "Audit and repair native Android conversation interfaces across roles and screen sizes",
+      "body": "Review all Android conversation types and permission roles across different screen sizes, fix discovered issues, and actually verify in emulators.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested comprehensive native Android conversation review across types, roles and sizes, fixes and emulator verification in this chat on 2026-11-15.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-CHAT-UI-AUDIT"
+      ]
+    },
+    {
+      "id": "MOD-ANDROID-CHAT-UI-AUDIT",
+      "type": "module",
+      "title": "Native conversation layout and live permission repairs",
+      "body": "Account-scoped navigation reset; scrollable creation, message and comment dialogs; full-width social forms and bounded lists; channel directory actions below titles; wrapping language/theme choices and a compact connection subtitle; bounded channel signatures; live permission checks for pending edits, deletes and member actions; channel settings refresh on grant changes; multiline bot evidence and forwarding labels avoid capsule clipping.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-CHAT-UI-AUDIT"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-CHAT-UI-AUDIT"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-CHAT-UI-AUDIT",
+      "type": "evidence",
+      "title": "Android 16/17 emulator audit across four sizes and permission roles",
+      "body": "76 real conversation-role-size combinations and 64 peripheral states. Fourteen real create/invite/message/revocation/offline checks, six comment states, four discussion join checks, native attachment upload/preview/download with byte equality. Chinese dark mode and large fonts checked. Sixteen bot and four legacy cases are explicitly synthetic native rendering only; no actual bot task, approval or historical import executed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/android-ui-audit contains XML/screenshots and matrix, extras, actions, attachment, comments, joins, bot and legacy results. assembleDebug and lintDebug passed; lint 0 errors, 39 warnings. Physical phones and push delivery not retested. Original secondary emulator users, display sizes and proxy restored."
+      },
+      "references": [
+        "REF-ANDROID-CHAT-UI-AUDIT"
+      ]
     }
   ],
   "relations": [
@@ -2743,6 +2839,42 @@
       "type": "supports",
       "source": "EVIDENCE-CHAT-SOCIAL",
       "target": "MOD-CHAT-SOCIAL"
+    },
+    {
+      "id": "REL-CHAT-UI-AUDIT-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-UI-AUDIT",
+      "target": "INTENT-CHAT-UI-AUDIT"
+    },
+    {
+      "id": "REL-CHAT-UI-AUDIT-BASE",
+      "type": "depends_on",
+      "source": "MOD-CHAT-UI-AUDIT",
+      "target": "MOD-TELEGRAM-UI"
+    },
+    {
+      "id": "REL-CHAT-UI-AUDIT-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-UI-AUDIT",
+      "target": "MOD-CHAT-UI-AUDIT"
+    },
+    {
+      "id": "REL-ANDROID-UI-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-CHAT-UI-AUDIT",
+      "target": "INTENT-ANDROID-CHAT-UI-AUDIT"
+    },
+    {
+      "id": "REL-ANDROID-UI-BASE",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-CHAT-UI-AUDIT",
+      "target": "MOD-ANDROID-CHAT"
+    },
+    {
+      "id": "REL-ANDROID-UI-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-CHAT-UI-AUDIT",
+      "target": "MOD-ANDROID-CHAT-UI-AUDIT"
     }
   ],
   "references": [
@@ -3297,6 +3429,20 @@
       "kind": "project_file",
       "target": "docs/39-chat-friends-and-group-members.md",
       "purpose": "Friends, group management, permission semantics and cross-client verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-UI-AUDIT",
+      "kind": "project_file",
+      "target": "docs/42-chat-ui-audit.md",
+      "purpose": "Scoped UI coverage matrix, fixes, actual and synthetic verification boundaries",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-CHAT-UI-AUDIT",
+      "kind": "project_file",
+      "target": "docs/43-android-chat-ui-audit.md",
+      "purpose": "Native Android audit scope, repairs, actual emulator evidence and limits",
       "tracking": "live"
     }
   ],

@@ -13,7 +13,7 @@
     <span class="search-icon" aria-hidden="true">⌕</span>
     <input id="search" name="search" [attr.aria-label]="store.t('搜索消息')" [placeholder]="store.t('搜索')"
       [(ngModel)]="store.searchTerm" maxlength="100" autocomplete="off">
-    <button type="button" class="search-submit" [attr.aria-label]="store.t('搜索')" [disabled]="store.busy() || !store.searchTerm.trim()">→</button>
+    <button type="submit" class="search-submit" [attr.aria-label]="store.t('搜索')" [disabled]="store.busy() || !store.searchTerm.trim()">→</button>
   </form>
 
   <div class="folder-tabs" [attr.aria-label]="store.t('会话文件夹')">
@@ -98,7 +98,8 @@
         <input id="title" name="title" [(ngModel)]="store.title" maxlength="100" required>
       }
       <label for="members">{{ store.t('成员账号') }}</label>
-      <input id="members" name="members" [(ngModel)]="store.members" [attr.placeholder]="store.t('多个账号用逗号分隔')" required>
+      <input id="members" name="members" [(ngModel)]="store.members" [attr.placeholder]="store.t('多个账号用逗号分隔')" [required]="store.kind === 'direct'" [attr.aria-describedby]="store.kind === 'group' ? 'members-help' : null">
+      @if (store.kind === 'group') { <small id="members-help" class="muted">{{ store.t('成员可选，创建后可在会话详情中邀请。') }}</small> }
       <button class="primary" [disabled]="store.busy()">{{ store.t('创建会话') }}</button>
     </form>
   </details>

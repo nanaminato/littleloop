@@ -1,5 +1,8 @@
 package dev.littleloop.chat
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,7 +31,7 @@ internal fun CreateRoom(busy: Boolean, error: String?, cancel: () -> Unit, confi
         onDismissRequest = cancel,
         title = { Text(stringResource(R.string.home_new_chat)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(!group, { group = false }, { Text(stringResource(R.string.home_direct)) })
                     FilterChip(group, { group = true }, { Text(stringResource(R.string.home_group)) })
@@ -43,6 +46,7 @@ internal fun CreateRoom(busy: Boolean, error: String?, cancel: () -> Unit, confi
                 OutlinedTextField(
                     members, { members = it }, Modifier.fillMaxWidth(),
                     label = { Text(stringResource(if (group) R.string.home_members_hint else R.string.home_peer_hint)) },
+                    supportingText = if (group) { { Text(stringResource(R.string.home_members_optional)) } } else null,
                     singleLine = true, shape = MaterialTheme.shapes.medium,
                 )
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -51,7 +55,7 @@ internal fun CreateRoom(busy: Boolean, error: String?, cancel: () -> Unit, confi
         confirmButton = {
             TextButton(
                 onClick = { confirm(if (group) "group" else "direct", title, members) },
-                enabled = !busy && members.isNotBlank() && (!group || title.isNotBlank()),
+                enabled = !busy && (if (group) title.isNotBlank() else members.isNotBlank()),
             ) { Text(stringResource(R.string.action_create)) }
         },
         dismissButton = { TextButton(onClick = cancel) { Text(stringResource(R.string.action_cancel)) } },

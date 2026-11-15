@@ -98,7 +98,7 @@
         <label for="forward-room">{{ store.t('转发到') }}</label>
         <select id="forward-room" name="forwardRoom" [(ngModel)]="store.forwardRoom">
           <option value="">{{ store.t('选择会话') }}</option>
-          @for (room of store.rooms(); track room.id) { <option [value]="room.id">{{ store.roomName(room) }}</option> }
+          @for (room of store.rooms(); track room.id) { @if (room.canPost) { <option [value]="room.id">{{ store.roomName(room) }}</option> } }
         </select>
         <div class="toolbar">
           <button class="primary" [disabled]="!store.forwardRoom || store.busy()">{{ store.t('确认转发') }}</button>

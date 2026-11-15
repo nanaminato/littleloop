@@ -892,6 +892,9 @@ export class ChatStore {
     const margin = 8;
     const width = document.documentElement.clientWidth;
     const height = window.innerHeight;
+    const aboveSpace = Math.max(0, anchor.top - margin - 5);
+    const belowSpace = Math.max(0, height - margin - anchor.bottom - 5);
+    sheet.style.maxHeight = `${Math.max(aboveSpace, belowSpace)}px`;
     const left = Math.max(margin, Math.min(anchor.right - sheet.offsetWidth, width - sheet.offsetWidth - margin));
     const below = anchor.bottom + 5;
     const top = below + sheet.offsetHeight <= height - margin ? below : anchor.top - sheet.offsetHeight - 5;
@@ -908,12 +911,13 @@ export class ChatStore {
   }
 
   escape() {
-    if (this.settingsOpen()) this.settingsOpen.set(false);
+    const menu = document.querySelector<HTMLDetailsElement>('details.popover[open]');
+    if (menu) { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); }
+    else if (this.settingsOpen()) this.settingsOpen.set(false);
     else if (this.friendsOpen()) this.friendsOpen.set(false);
     else if (this.detailsOpen()) this.detailsOpen.set(false);
     else if (this.drawer()) this.drawer.set(false);
     else if (this.inRoomSearch()) this.toggleSearch(false);
-    else for (const menu of document.querySelectorAll<HTMLDetailsElement>('details.popover[open]')) menu.open = false;
   }
 
   private async action(run: () => Promise<void>) {

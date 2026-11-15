@@ -2,6 +2,7 @@ package dev.littleloop.chat
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -31,7 +32,7 @@ data class ChatFriend(val id: String, val username: String, val displayName: Str
 data class ChatMember(val username: String, val displayName: String, val robot: Boolean, val owner: Boolean, val administrator: Boolean = false, val silenced: Boolean = false)
 
 @Composable
-internal fun FriendsPanel(chat: ChatRepository, state: ChatState, openChat: () -> Unit) {
+internal fun ColumnScope.FriendsPanel(chat: ChatRepository, state: ChatState, openChat: () -> Unit) {
     var username by rememberSaveable { mutableStateOf("") }
     val enabled = state.connected && !state.busy
     SocialUsername(
@@ -43,7 +44,7 @@ internal fun FriendsPanel(chat: ChatRepository, state: ChatState, openChat: () -
         chat.requestFriend(username) { username = "" }
     }
     SocialError(state.error)
-    LazyColumn(Modifier.fillMaxWidth()) {
+    LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
         if (state.friends.isEmpty()) item {
             EmptyState("♧", stringResource(R.string.friends_empty))
         }
@@ -57,17 +58,17 @@ internal fun FriendsPanel(chat: ChatRepository, state: ChatState, openChat: () -
                 Column(Modifier.weight(1f)) {
                     Text(friend.displayName, style = MaterialTheme.typography.titleMedium)
                     Text("@${friend.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                when (friend.state) {
-                    "incoming" -> {
-                        TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, true) }) { Text(stringResource(R.string.friends_accept)) }
-                        TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, false) }) { Text(stringResource(R.string.friends_decline)) }
+                    when (friend.state) {
+                        "incoming" -> {
+                            TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, true) }) { Text(stringResource(R.string.friends_accept)) }
+                            TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, false) }) { Text(stringResource(R.string.friends_decline)) }
+                        }
+                        "outgoing" -> Text(stringResource(R.string.friends_pending), style = MaterialTheme.typography.bodySmall)
+                        "friend" -> TextButton(
+                            enabled = enabled,
+                            onClick = { chat.create("direct", "", friend.username, openChat) },
+                        ) { Text(stringResource(R.string.friends_direct)) }
                     }
-                    "outgoing" -> Text(stringResource(R.string.friends_pending), style = MaterialTheme.typography.bodySmall)
-                    "friend" -> TextButton(
-                        enabled = enabled,
-                        onClick = { chat.create("direct", "", friend.username, openChat) },
-                    ) { Text(stringResource(R.string.friends_direct)) }
                 }
             }
             HorizontalDivider(Modifier.padding(start = 68.dp))
@@ -76,7 +77,7 @@ internal fun FriendsPanel(chat: ChatRepository, state: ChatState, openChat: () -
 }
 
 @Composable
-internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Room) {
+internal fun ColumnScope.GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Room) {
     var username by rememberSaveable(room.id) { mutableStateOf("") }
     var target by rememberSaveable(room.id) { mutableStateOf<String?>(null) }
     var operation by rememberSaveable(room.id) { mutableStateOf("") }
@@ -101,7 +102,7 @@ internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Roo
         }
     }
     SocialError(state.error)
-    LazyColumn(Modifier.fillMaxWidth()) {
+    LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
         if (state.membersRoom == room.id) {
             items(state.members, key = { it.username }) { member ->
                 Row(
@@ -178,7 +179,8 @@ internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Roo
         )
     }
     val pending = target
-    if (room.canModerate && pending != null) {
+    val canConfirm = room.canModerate && (operation !in setOf("promote", "demote", "transfer") || room.canManage)
+    if (canConfirm && pending != null) {
         val title = stringResource(groupMemberAction(operation))
         AlertDialog(
             onDismissRequest = { target = null },
@@ -206,16 +208,15 @@ private fun groupMemberAction(operation: String) = when (operation) {
 @Composable
 private fun SocialUsername(value: String, update: (String) -> Unit, label: String, action: String,
                            enabled: Boolean, submit: () -> Unit) {
-    Row(
+    Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         OutlinedTextField(
-            value, { if (it.length <= 32) update(it) }, Modifier.weight(1f),
+            value, { if (it.length <= 32) update(it) }, Modifier.fillMaxWidth(),
             label = { Text(label) }, singleLine = true, shape = MaterialTheme.shapes.medium,
         )
-        TextButton(enabled = enabled && value.isNotBlank(), onClick = submit) { Text(action) }
+        TextButton(enabled = enabled && value.isNotBlank(), onClick = submit, modifier = Modifier.align(Alignment.End)) { Text(action) }
     }
 }
 

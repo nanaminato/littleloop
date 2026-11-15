@@ -108,6 +108,9 @@
   transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease;
 }
 .chat-shell input::placeholder, .chat-shell textarea::placeholder { color: var(--muted); opacity: .85; }
+.chat-shell input:is([type=checkbox], [type=radio]) {
+  width: 18px; height: 18px; padding: 0; margin: 0; flex: none; accent-color: var(--accent);
+}
 .chat-shell input:focus, .chat-shell select:focus, .chat-shell textarea:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
 }

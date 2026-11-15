@@ -107,6 +107,8 @@ nav {
   border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); animation: section-in .18s ease both;
 }
 .new-chat form .form-title { font-size: .95rem; margin-bottom: 2px; }
+.new-chat form { max-height: calc(100dvh - 100px); overflow-y: auto; }
+.results, .channel-directory { min-height: 0; max-height: 45%; overflow-y: auto; flex-shrink: 0; }
 .new-chat form label { font-size: .8rem; color: var(--muted); }
 .new-chat form .primary { background: var(--accent); color: #fff; margin-top: 4px; }
 @keyframes section-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }

@@ -40,7 +40,19 @@ sealed partial class ChatStore
             await AddColumn("chat_messages", "attachment_id", "CHAR(36) NULL REFERENCES chat_attachments(id)");
             await AddColumn("chat_messages", "edited", "BOOLEAN NOT NULL DEFAULT FALSE");
             await AddColumn("chat_messages", "deleted", "BOOLEAN NOT NULL DEFAULT FALSE");
-            await AddColumn("chat_messages", "forwarded_from", "VARCHAR(32) NULL");
+            await AddColumn("chat_messages", "forwarded_from", "VARCHAR(100) NULL");
+            // Mirrored channel posts store a channel title, which may exceed a username's 32 characters.
+            await using (var length = Command(db, null, """
+                SELECT character_maximum_length FROM information_schema.columns
+                WHERE table_schema=DATABASE() AND table_name='chat_messages' AND column_name='forwarded_from'
+                """))
+            {
+                if (Convert.ToInt64(await length.ExecuteScalarAsync()) < 100)
+                {
+                    await using var widen = Command(db, null, "ALTER TABLE chat_messages MODIFY COLUMN forwarded_from VARCHAR(100) NULL");
+                    await widen.ExecuteNonQueryAsync();
+                }
+            }
             await AddColumn("chat_messages", "request_key", "CHAR(64) NULL");
             await AddColumn("chat_messages", "card", "JSON NULL");
             await UpgradeBot(db);

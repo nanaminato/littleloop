@@ -21,8 +21,8 @@ export class ChatMessageView {
   readonly mine = computed(() => !this.channel() && this.message().sender === this.store.user());
   canChange(flag: number) {
     const room = this.store.currentRoom();
-    return !this.message().card && (room?.type === 'channel'
-      ? ((room.channelRights ?? 0) & flag) !== 0 : this.mine());
+    return !this.message().card && !this.message().discussionRoot && (room?.type === 'channel'
+      ? ((room.channelRights ?? 0) & flag) !== 0 : this.mine() || (flag === 4 && !!room?.canModerate));
   }
 
   canPin() {

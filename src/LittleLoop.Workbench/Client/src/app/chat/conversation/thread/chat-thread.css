@@ -42,6 +42,8 @@
 .results-inline { display: grid; padding: 6px 12px 10px; background: var(--paper); border-bottom: 1px solid var(--line); }
 .results-inline button { text-align: left; overflow-wrap: anywhere; }
 .results-inline p { padding: 0 4px; color: var(--muted); }
+.results-inline { min-height: 0; max-height: 30vh; overflow-y: auto; }
+.conversation-header, .composer, .read-only, .topics, .pinned-bar { flex-shrink: 0; }
 
 .pinned-bar {
   display: flex; align-items: center; gap: 8px; justify-content: center; width: 100%;

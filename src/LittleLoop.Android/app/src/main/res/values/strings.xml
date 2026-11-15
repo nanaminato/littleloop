@@ -57,7 +57,8 @@
     <string name="home_direct">Direct chat</string>
     <string name="home_group">Group</string>
     <string name="home_group_name">Group name</string>
-    <string name="home_members_hint">Usernames, separated by commas</string>
+    <string name="home_members_hint">Members (optional)</string>
+    <string name="home_members_optional">Separate usernames with commas, or invite people after creating the group.</string>
     <string name="home_peer_hint">Username</string>
     <string name="home_open_menu">Open menu</string>
     <string name="room_history">History</string>

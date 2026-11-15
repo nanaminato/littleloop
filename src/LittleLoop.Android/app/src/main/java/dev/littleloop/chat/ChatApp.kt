@@ -40,6 +40,22 @@ internal fun ChatApp(
     var showMembers by rememberSaveable { mutableStateOf(false) }
     var showTopics by rememberSaveable { mutableStateOf(false) }
     var createSpace by rememberSaveable { mutableStateOf(false) }
+    var navigationAccount by rememberSaveable { mutableStateOf(state.username) }
+
+    LaunchedEffect(state.username) {
+        if (navigationAccount != state.username) {
+            settings = false
+            create = false
+            searching = false
+            searchRoom = null
+            showChannels = false
+            showTopics = false
+            showFriends = false
+            showMembers = false
+            createSpace = false
+            navigationAccount = state.username
+        }
+    }
 
     LaunchedEffect(state.notificationTarget) {
         state.notificationTarget?.let { id ->

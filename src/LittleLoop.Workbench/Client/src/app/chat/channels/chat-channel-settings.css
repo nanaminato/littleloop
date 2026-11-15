@@ -1,0 +1,11 @@
+:host { display: block; min-width: 0; }
+section { display: grid; gap: 12px; padding: 16px; border-bottom: 1px solid var(--line); min-width: 0; }
+form { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper); }
+h3 { margin: 4px 0 0; font-size: .85rem; color: var(--muted); }
+p { margin: 0; font-size: .85rem; overflow-wrap: anywhere; }
+label { display: grid; gap: 6px; min-width: 0; font-size: .85rem; }
+label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 10px; min-height: 36px; }
+button { white-space: normal; overflow-wrap: anywhere; }
+form button[type=submit] { background: var(--accent); color: var(--paper); }
+small { display: block; color: var(--muted); }
+[role=alert] { color: var(--danger); }

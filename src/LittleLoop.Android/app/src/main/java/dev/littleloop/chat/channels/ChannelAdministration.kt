@@ -77,7 +77,7 @@ internal fun ChannelAdministration(chat: ChatRepository, state: ChatState, room:
             }
         }
     }
-    LaunchedEffect(room.id) { update() }
+    LaunchedEffect(room.id, room.channelRights) { update() }
 
     AlertDialog(onDismissRequest = dismiss, title = { Text(stringResource(R.string.channel_settings)) },
         text = {
@@ -177,7 +177,7 @@ internal fun ChannelAdministration(chat: ChatRepository, state: ChatState, room:
                             }
                         }) { Text(stringResource(if (pending) R.string.channel_join_requested else R.string.channel_request_join)) }
                     }
-                    val canLink = current.owner || current.grants.any { it.name == state.username && it.rights and 64 != 0 }
+                    val canLink = room.channelRights and 64 != 0
                     if (canLink) {
                         Text(stringResource(R.string.channel_link_notice))
                         TextButton(enabled = !busy, onClick = { picker = !picker }) {

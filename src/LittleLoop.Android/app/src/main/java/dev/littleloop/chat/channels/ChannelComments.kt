@@ -1,5 +1,8 @@
 package dev.littleloop.chat
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -86,7 +89,7 @@ internal fun ChannelComments(chat: ChatRepository, state: ChatState, channel: Ro
         onDismissRequest = dismiss,
         title = { Text(stringResource(R.string.channel_comments)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (post.deleted) stringResource(R.string.conv_deleted) else post.text, maxLines = 3)
                 if (error) Text(stringResource(R.string.channel_comments_unavailable))
                 else if (offline) Text(stringResource(R.string.conv_offline))
@@ -237,16 +240,10 @@ internal fun ChannelComments(chat: ChatRepository, state: ChatState, channel: Ro
         MessageOperationDialog(chat, state, discussionRoom, latest, MessageOperation.Edit,
             dismiss = { editing = null }, done = { editing = null })
     }
-    if (group != null) deleting?.let { comment ->
-        AlertDialog(onDismissRequest = { deleting = null },
-            title = { Text(stringResource(R.string.message_delete)) },
-            text = { Text(stringResource(R.string.message_delete_note)) },
-            confirmButton = {
-                TextButton(enabled = !state.busy, onClick = {
-                    chat.deleteMessage(group, comment.sequence) { deleting = null }
-                }) { Text(stringResource(R.string.action_delete)) }
-            },
-            dismissButton = { TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.action_cancel)) } })
+    if (discussionRoom != null) deleting?.let { comment ->
+        val latest = thread?.messages?.firstOrNull { it.sequence == comment.sequence } ?: comment
+        MessageOperationDialog(chat, state, discussionRoom, latest, MessageOperation.Delete,
+            dismiss = { deleting = null }, done = { deleting = null })
     }
     if (group != null) preview?.let { AttachmentDialog(chat, group, it) { preview = null } }
 }

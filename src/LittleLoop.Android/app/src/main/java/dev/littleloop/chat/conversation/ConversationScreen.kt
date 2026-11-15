@@ -585,6 +585,7 @@ private fun MessageBubble(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         if (broadcast && room.signPosts) Text(message.sender,
+                            modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                         if (message.edited) Text(stringResource(R.string.conv_edited), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                         messageTime(message.sentAt).takeIf(String::isNotEmpty)?.let {
@@ -593,8 +594,8 @@ private fun MessageBubble(
                     }
                     if (menuOpen) {
                         MessageMenu(
-                            canEdit = message.card == null && if (room.type == "channel") room.channelRights and 2 != 0 else own,
-                            canDelete = message.card == null && if (room.type == "channel") room.channelRights and 4 != 0 else own,
+                            canEdit = message.card == null && !message.discussionRoot && if (room.type == "channel") room.channelRights and 2 != 0 else own,
+                            canDelete = message.card == null && !message.discussionRoot && if (room.type == "channel") room.channelRights and 4 != 0 else own || room.canModerate,
                             canPin = if (room.type == "channel") room.channelRights and 8 != 0 else room.canPost,
                             pinned = room.pinnedMessage == message.sequence,
                             enabled = state.connected && !state.busy,

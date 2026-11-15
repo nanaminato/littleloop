@@ -147,7 +147,8 @@ secured.MapGet("/rooms/{room:guid}/members", async (Guid room, ClaimsPrincipal u
 });
 secured.MapPost("/rooms", async (OpenRoom request, ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
 {
-    if (request.Type is not ("direct" or "group") || request.Members is not { Length: >= 1 and <= 30 }
+    if (request.Type is not ("direct" or "group") || request.Members is not { Length: <= 30 }
+        || (request.Type == "direct" && request.Members.Length == 0)
         || request.Members.Any(m => !ValidName(Normalize(m))) || request.Title?.Length > 100
         || (request.Type == "group" && string.IsNullOrWhiteSpace(request.Title))) return Results.BadRequest("请填写会话类型、名称和已注册成员。");
     try

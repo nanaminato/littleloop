@@ -64,20 +64,17 @@ internal fun ChatHomeScreen(
                 BrandMark(38.dp)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        stringResource(R.string.app_chat_subtitle),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text(stringResource(R.string.app_name), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleLarge)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(stringResource(R.string.app_chat_subtitle), style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ConnectionDot(state.connected)
+                        Text(stringResource(if (state.connected) R.string.status_connected else R.string.status_reconnecting),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
-                ConnectionDot(state.connected)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    stringResource(if (state.connected) R.string.status_connected else R.string.status_reconnecting),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 TextButton(onClick = onSettings) {
                     Text("⚙", style = MaterialTheme.typography.titleLarge)
                 }
