@@ -98,9 +98,10 @@ class ChatApi(private val storage: SessionStorage) {
     companion object {
         fun validateUrl(raw: String): HttpUrl {
             val url = raw.trim().toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid server URL")
-            val local = BuildConfig.DEBUG && url.scheme == "http" && url.host in setOf("127.0.0.1", "10.0.2.2", "localhost")
-            require((url.isHttps || local) && url.encodedPath == "/" && url.query == null &&
-                url.fragment == null && url.username.isEmpty() && url.password.isEmpty()) { "Use the server's HTTPS origin." }
+            require((url.isHttps || url.scheme == "http") && url.encodedPath == "/" && url.query == null &&
+                url.fragment == null && url.username.isEmpty() && url.password.isEmpty()) {
+                "Use the server's HTTP or HTTPS origin without a path, query, fragment, or credentials."
+            }
             return url
         }
     }
