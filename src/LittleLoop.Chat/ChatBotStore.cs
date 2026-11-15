@@ -1,0 +1,201 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using LittleLoop.Tools;
+using MySqlConnector;
+
+sealed record MessageCard(string Kind, SourceCitation? Source = null, Guid? TaskId = null);
+sealed record BotInput(string Text, string? Anchor = null, SourceCitation? Source = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null);
+sealed record BotWork(Guid Id, string Room, string Owner, long Sequence, string Kind, string Status, BotInput Input,
+    string? Error = null, string? Output = null);
+sealed record BotInstall(bool Enabled);
+sealed record BotAsk(Guid ClientId, string Text, string Path, int Start, int End, long? ReplyTo, string? Provider);
+sealed record BotSchedule(Guid ClientId, long Sequence, string Goal, string? Provider);
+sealed record BotDecision(string Nonce, string Value);
+
+sealed partial class ChatStore
+{
+    public const string BotName = "littleloop";
+    public const string ReviewBotName = "source_review";
+    public static bool IsRobot(string name) => name is BotName or ReviewBotName;
+    private const string RobotCredential = "!robot:v1";
+    private static readonly JsonSerializerOptions BotJson = new(JsonSerializerDefaults.Web);
+    internal static string ToJson<T>(T item) => JsonSerializer.Serialize(item, BotJson);
+    internal static T FromJson<T>(string raw) => JsonSerializer.Deserialize<T>(raw, BotJson)!;
+
+    private static async Task UpgradeBot(MySqlConnection db)
+    {
+        await using var cmd = Command(db, null, """
+            CREATE TABLE IF NOT EXISTS chat_bot_rooms (
+                room_id CHAR(36) PRIMARY KEY, enabled BOOLEAN NOT NULL,
+                FOREIGN KEY(room_id) REFERENCES chat_rooms(id)
+            );
+            CREATE TABLE IF NOT EXISTS chat_bot_work (
+                id CHAR(36) PRIMARY KEY, room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL,
+                seq BIGINT NOT NULL, kind VARCHAR(10) NOT NULL, status VARCHAR(32) NOT NULL, input JSON NOT NULL,
+                error VARCHAR(256) NULL, created DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                INDEX(status,created), FOREIGN KEY(room_id,seq) REFERENCES chat_messages(room_id,seq),
+                FOREIGN KEY(owner_id) REFERENCES chat_accounts(id)
+            );
+            """);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<Account> GetRobot(string name)
+    {
+        await Register(new(Guid.NewGuid().ToString(), name, RobotCredential));
+        var robot = await Find(name);
+        return robot is { Password: RobotCredential } ? robot : throw new InvalidOperationException($"Account {name} is reserved.");
+    }
+
+    public async Task<string[]?> InstallRobot(string room, string user, string[] robots, bool enabled)
+    {
+        await using var db = await Open();
+        await using var tx = await db.BeginTransactionAsync();
+        if (!await IsMember(db, tx, room, user)) return null;
+        await using (var kind = Command(db, tx, "SELECT type FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room)))
+        {
+            string? type = await kind.ExecuteScalarAsync() as string;
+            if (type is not ("group" or "topic") && (type != "direct" || robots.Length != 1 || !await IsMember(db, tx, room, robots[0]))) return null;
+        }
+        await using (var write = Command(db, tx, """
+            INSERT INTO chat_bot_rooms(room_id,enabled) VALUES(@room,@enabled)
+            ON DUPLICATE KEY UPDATE enabled=@enabled
+            """, ("room", room), ("enabled", enabled)))
+            await write.ExecuteNonQueryAsync();
+        if (enabled)
+            foreach (string robot in robots) await AddMember(db, tx, room, robot);
+        var recipients = await MemberIds(db, tx, room);
+        await tx.CommitAsync();
+        return recipients;
+    }
+
+    public async Task<bool> RobotIsMember(string room, string robot)
+    {
+        await using var db = await Open();
+        return await IsMember(db, null, room, robot);
+    }
+
+    internal static async Task AddMember(MySqlConnection db, MySqlTransaction tx, string room, string robot)
+    {
+        await using var join = Command(db, tx, """
+            INSERT INTO chat_members(room_id,user_id) VALUES(@room,@robot)
+            ON DUPLICATE KEY UPDATE read_to=read_to
+            """, ("room", room), ("robot", robot));
+        await join.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<string[]> MemberIds(MySqlConnection db, MySqlTransaction tx, string room)
+    {
+        await using var select = Command(db, tx, "SELECT user_id FROM chat_members WHERE room_id=@room", ("room", room));
+        var recipients = new List<string>();
+        await using (var reader = await select.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) recipients.Add(reader.GetString(0));
+        return recipients.ToArray();
+    }
+
+    public async Task<(bool Member, bool Installed, string? Type)> BotRoom(string room, string user)
+    {
+        await using var db = await Open();
+        await using var cmd = Command(db, null, """
+            SELECT IFNULL(b.enabled,FALSE),r.type FROM chat_members m
+            JOIN chat_rooms r ON r.id=m.room_id LEFT JOIN chat_bot_rooms b ON b.room_id=m.room_id
+            WHERE m.room_id=@room AND m.user_id=@user
+            """, ("room", room), ("user", user));
+        await using var reader = await cmd.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? (true, reader.GetBoolean(0), reader.GetString(1)) : (false, false, null);
+    }
+
+    public async Task<ChatMessage?> FindMessage(string room, long seq, string user)
+    {
+        await using var db = await Open();
+        await using var cmd = Command(db, null, MessageSelect + """
+             JOIN chat_members m ON m.room_id=msg.room_id AND m.user_id=@user
+             WHERE msg.room_id=@room AND msg.seq=@seq AND NOT msg.deleted
+            """, ("room", room), ("seq", seq), ("user", user));
+        await using var reader = await cmd.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? Message(reader, room) : null;
+    }
+
+    private static async Task InsertJob(MySqlConnection db, MySqlTransaction tx, BotWork task)
+    {
+        await using var cmd = Command(db, tx, """
+            INSERT INTO chat_bot_work(id,room_id,owner_id,seq,kind,status,input,error)
+            VALUES(@id,@room,@user,@seq,@kind,@status,@input,@error)
+            """, ("id", task.Id.ToString()), ("room", task.Room), ("user", task.Owner), ("seq", task.Sequence),
+            ("kind", task.Kind), ("status", task.Status), ("input", ToJson(task.Input)), ("error", task.Error));
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<MySqlConnection> AcquireBotLease()
+    {
+        var settings = new MySqlConnectionStringBuilder(connectionString) { Pooling = false };
+        var db = new MySqlConnection(settings.ConnectionString);
+        try
+        {
+            await db.OpenAsync();
+            await using var cmd = Command(db, null, """
+                SELECT GET_LOCK(SHA2(CONCAT('littleloop-chat-bot:',DATABASE()),256),0)
+                """);
+            if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1) return db;
+            throw new IOException("Another chat bot worker already owns this database.");
+        }
+        catch { await db.DisposeAsync(); throw; }
+    }
+
+    public async Task RecoverBotWork(MySqlConnection lease)
+    {
+        await using var cmd = Command(lease, null, """
+            UPDATE chat_bot_work SET status='needs-reconciliation', error='进程曾中断，请核对执行记录。'
+            WHERE status='running'
+            """);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<BotWork?> ClaimBotWork(MySqlConnection lease)
+    {
+        BotWork? work;
+        await using (var select = Command(lease, null, """
+            SELECT id,room_id,owner_id,seq,kind,status,input,error,output
+            FROM chat_bot_work WHERE status='queued' ORDER BY created,id LIMIT 1
+            """))
+        {
+            await using var reader = await select.ExecuteReaderAsync();
+            work = await reader.ReadAsync() ? ReadWork(reader) : null;
+        }
+        if (work is null) return null;
+        await using var update = Command(lease, null, "UPDATE chat_bot_work SET status='running' WHERE id=@id AND status='queued'", ("id", work.Id.ToString()));
+        return await update.ExecuteNonQueryAsync() == 1 ? work with { Status = "running" } : null;
+    }
+
+    public async Task SetBotStatus(MySqlConnection lease, BotWork work, string state, string? error = null, string? output = null)
+    {
+        await using var cmd = Command(lease, null, "UPDATE chat_bot_work SET status=@status,error=@error,output=@output WHERE id=@id AND status='running'",
+            ("status", state), ("error", error), ("output", output), ("id", work.Id.ToString()));
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<BotWork?> ReadBotWork(Guid id, string user)
+    {
+        await using var db = await Open();
+        await using var cmd = Command(db, null, """
+            SELECT w.id,w.room_id,w.owner_id,w.seq,w.kind,w.status,w.input,w.error,w.output
+            FROM chat_bot_work w JOIN chat_members m ON m.room_id=w.room_id AND m.user_id=@user WHERE w.id=@id
+            """, ("user", user), ("id", id.ToString()));
+        await using var reader = await cmd.ExecuteReaderAsync();
+        return await reader.ReadAsync() ? ReadWork(reader) : null;
+    }
+
+    private static BotWork ReadWork(MySqlDataReader r) => new(Guid.Parse(r.GetString(0)), r.GetString(1), r.GetString(2),
+        r.GetInt64(3), r.GetString(4), r.GetString(5), FromJson<BotInput>(r.GetString(6)), r.IsDBNull(7) ? null : r.GetString(7),
+        r.IsDBNull(8) ? null : r.GetString(8));
+
+    public async Task AddLegacyRobot(string room, string user, string robot)
+    {
+        await using var db = await Open();
+        await using var tx = await db.BeginTransactionAsync();
+        if (!await IsMember(db, tx, room, user)) throw new InvalidOperationException("Historical room was not created.");
+        await AddMember(db, tx, room, robot);
+        await tx.CommitAsync();
+    }
+}

@@ -1184,6 +1184,382 @@
         "REF-CODEX-DEVELOPMENT-BRIDGE",
         "REF-CODEX-AGENT-CHECKS"
       ]
+    },
+    {
+      "id": "INTENT-WORKBENCH",
+      "type": "intent",
+      "title": "Angular development chat workbench",
+      "body": "Build the first Angular and ASP.NET Core workbench backed by LittleLoop. Validate cited source questions, task scheduling in conversation, background execution, approvals, code edits and test results using RelaxKonOS. MySQL is an allowed persistence backend.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for Angular and ASP.NET Core workbench with real RelaxKonOS verification on 2026-11-15",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-WORKBENCH",
+      "type": "module",
+      "title": "Angular and ASP.NET Core development workbench",
+      "body": "Local single-user chat, source citations, durable background task queue, LittleLoop approval and patch/test receipts. Angular build, real Chrome flow with RelaxKonOS, MySQL 8.4.13 persistence and backend restart verified.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-WORKBENCH"
+      ],
+      "verification_basis": [
+        "EVIDENCE-WORKBENCH-BROWSER-MYSQL"
+      ]
+    },
+    {
+      "id": "EVIDENCE-WORKBENCH-BROWSER-MYSQL",
+      "type": "evidence",
+      "title": "Chrome and MySQL development workflow and restart",
+      "body": "On 2026-11-15 Chrome previewed RelaxKonOS source and got a cited Codex answer, scheduled task 029c7293-eb89-4e43-a347-62c1a72b3ca2 and clicked three bounded approvals. UI showed patch, baseline failure and 19 passing checks. ASP.NET Core restarted and a new Chrome session showed the same records. MySQL 8.4.13 held two messages and one task with identical JSON SHA256 before and after restart.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/workbench-browser/restart-evidence.txt; approval.png; completed.png; after-restart.png"
+      },
+      "references": [
+        "REF-WORKBENCH"
+      ]
+    },
+    {
+      "id": "INTENT-CHAT-PHASE-A",
+      "type": "intent",
+      "title": "Implement phase A multiplayer chat",
+      "body": "Implement independent accounts, direct and group chat, history and unread with Angular, ASP.NET Core, SignalR and MySQL. Verify realtime delivery, non-member isolation, reconnect, retry and restart in real browsers.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for chat phase A and browser verification",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-CHAT-PHASE-A",
+      "type": "module",
+      "title": "Phase A private chat",
+      "body": "Angular and ASP.NET Core chat with SignalR, MySQL, invited accounts, direct and group messages, ordered history, replies and unread. Post-commit notifications and cursor recovery. Single-process deployment.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-PHASE-A"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-CHAT-PHASE-A"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-PHASE-A",
+      "type": "evidence",
+      "title": "Three Chrome users and MySQL restart acceptance",
+      "body": "2026-11-15: three Chrome contexts against MySQL 8.4.13. Verified direct and group realtime in both directions, unread and reply, outsider denied reads/writes/notifications, lost response retry without duplicates, two missing messages recovered after disconnect, exact history and realtime delivery after ASP.NET Core restart.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-phase-a/browser.cjs, chat-live.png, chat-after-restart.png; backend PIDs 8024 and 31768"
+      },
+      "references": [
+        "REF-CHAT-PHASE-A"
+      ]
+    },
+    {
+      "id": "INTENT-CHAT-PHASE-B",
+      "type": "intent",
+      "title": "Implement phase B daily chat features",
+      "body": "Provide images/files, search, edit/delete, forwarding, pin/archive, saved messages and notification mute; validate cross-device reads, synchronization, attachment permissions and mobile operation using real Chrome and MySQL.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for chat phase B and live browser/MySQL verification",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-CHAT-PHASE-B",
+      "type": "module",
+      "title": "Daily chat features",
+      "body": "Phase A MySQL migration, images and files, scoped search, author edits/deletes, scoped forwards, saved messages, per-user pin/archive/mute and in-app notices. Chrome desktop and mobile viewport verified.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-PHASE-B"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-CHAT-PHASE-B"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-PHASE-B",
+      "type": "evidence",
+      "title": "Chrome desktop, mobile and MySQL phase B acceptance",
+      "body": "MySQL 8.4.13 upgrade retained phase A history. Chrome desktop and a 390px mobile context verified synchronized reads, edits, deletes, folder settings and mute; genuine image render, downloaded original bytes, membership rejection, private saves, forward access and deletion of original download.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-phase-b/browser.cjs, room.json, mobile-chat.png, desktop-chat.png"
+      },
+      "references": [
+        "REF-CHAT-PHASE-B"
+      ]
+    },
+    {
+      "id": "INTENT-CHAT-PHASE-C",
+      "type": "intent",
+      "title": "Chat phase C LittleLoop integration",
+      "body": "Connect LittleLoop in direct and group chat. Support grounded source quotes, message-linked jobs, approval cards, patches and test results, and import legacy workbench history. Verify RelaxKonOS workflow with two real browser accounts and MySQL, unauthorized and duplicate approvals, and restart recovery.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for chat phase C, real RelaxKonOS execution and legacy import",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-CHAT-PHASE-C",
+      "type": "module",
+      "title": "LittleLoop chat bot and development task cards",
+      "body": "Role-scoped bot installation, cited question, durable SQL job with message card, bounded agent execution and single-use approvals. Owner-scoped legacy MySQL or snapshot import and saved filesystem evidence. Verified with Chrome, MySQL and real RelaxKonOS work.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-PHASE-C"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-CHAT-PHASE-C"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-PHASE-C",
+      "type": "evidence",
+      "title": "Two-account RelaxKonOS workflow through chats",
+      "body": "Task 4462198b-8244-41be-bc8c-7a00687f2b4e: two Chrome accounts, MySQL 8.4.13 and real Codex. Imported 2 old messages and 1 historical task with IDs and receipts, private owner only. Direct and group source questions answered. Three real approvals, requester 403 and duplicate 409 for each; one patch and exactly two command receipts with baseline failure and 19 checks passing. Backend PID changed 32012 to 35652 and browser restored identical task and import. Existing 308 checks passed.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-phase-c/result.json; approval.png; completed.png; after-restart.png; checks.log"
+      },
+      "references": [
+        "REF-CHAT-PHASE-C"
+      ]
+    },
+    {
+      "id": "INTENT-CHAT-PHASE-D",
+      "type": "intent",
+      "title": "Chat phase D adapters, topics and broadcast channels",
+      "body": "Add a second robot adapter, group topics and channel subscriptions. Verify shared messaging/tasks, isolated topic history, channel broadcast notifications and permissions using real browser sessions and MySQL.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for second bot, group topics, channel broadcasting and live test",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-CHAT-PHASE-D",
+      "type": "module",
+      "title": "Chat robot adapters, group topics and channels",
+      "body": "Shared bot adapter for LittleLoop and read-only citation review, with real question and task dispatch. Topic rooms inherit group membership and keep independent history. Authenticated channel directory and subscription with publisher-only writes and subscriber-scoped notifications.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-PHASE-D"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-CHAT-PHASE-D"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-PHASE-D",
+      "type": "evidence",
+      "title": "Three Chrome accounts, MySQL 8.4.13 and two adapters",
+      "body": "Chrome verified two independent topics, outsider denials and absence of notifications. Channel subscriber got history and realtime notice, writing and forwarding denied, unsubscribe removed access and stopped notifications including across devices. Review task d850ea7b-2566-421f-9ede-1242c19733fe and LittleLoop task e01f2477-8256-493d-8fc7-2e59a42b43ae used the same endpoints. Real RelaxKonOS patch followed by 19 passing regression cases. Restart restored history and task state.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-phase-d/browser.cjs, result.json, robots.png, restart.png"
+      },
+      "references": [
+        "REF-CHAT-PHASE-D"
+      ]
+    },
+    {
+      "id": "INTENT-TELEGRAM-UI",
+      "type": "intent",
+      "title": "Design chat UI and settings against Telegram",
+      "body": "Use Telegram Desktop and mobile UI as close references for chat and its settings. Design before implementing. Provide interface specification and an interactive browser prototype. Production implementation and actual settings persistence remain future work.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for Telegram-like UI and settings design before implementation",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "references": [
+        "REF-TELEGRAM-UI-DESIGN",
+        "REF-TELEGRAM-UI-PROTOTYPE"
+      ]
+    },
+    {
+      "id": "INTENT-TELEGRAM-UI-IMPLEMENTATION",
+      "type": "intent",
+      "title": "Implement the Telegram-style chat design",
+      "body": "Implement the approved chat and settings design in the actual Angular and ASP.NET Core app. Preserve ordinary chat, robot execution, and authorization. Validate responsive UI and real persistent settings.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request to implement the preceding Telegram-style UI design",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-TELEGRAM-UI",
+      "type": "module",
+      "title": "Telegram-style responsive chat and settings",
+      "body": "Angular desktop/mobile layouts and settings, account preferences in MySQL, device-local themes, avatars, real device revocation, password change, group invite policy and folder management. Remaining localization and additional privacy controls are documented.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-TELEGRAM-UI"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-TELEGRAM-UI-IMPLEMENTATION"
+      ]
+    },
+    {
+      "id": "EVIDENCE-TELEGRAM-UI",
+      "type": "evidence",
+      "title": "Responsive chat and real preferences verified in Chrome and MySQL",
+      "body": "Chrome tested 1440, 1024, 390, and 360 px; cross-device preferences, invite denial, device revocation, avatar privacy, password change, attachments, history and scoped search. RelaxKonOS task 15c2e461-389d-4614-a033-703aa365511c in redesigned topic was approved three times by the other account, reproduced a failure, and passed 19 regression cases. Restart restored settings, history and receipts.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-ui-implementation/browser.cjs, result.json, desktop-chat.png, mobile-settings.png"
+      },
+      "references": [
+        "REF-TELEGRAM-UI-IMPLEMENTATION"
+      ]
+    },
+    {
+      "id": "INTENT-TELEGRAM-SETTINGS",
+      "type": "intent",
+      "title": "Complete Telegram-style settings and background notifications",
+      "body": "Add username changes, blocking, Chinese and English UI, and closed-tab push. Verify renamed bot roles and history, blocking, and persistence after restart with real Chrome and MySQL.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit follow-up requesting rename, block list, bilingual interface and closed-tab Web Push",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-TELEGRAM-SETTINGS",
+      "type": "module",
+      "title": "Stable renames, blocking, localization and Web Push",
+      "body": "Username reservations and role binding by account ID. Bilateral private block and invitation rules. Bilingual chat UI and device locale. MySQL push device and queue with VAPID, AES128GCM and service worker.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-TELEGRAM-SETTINGS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-TELEGRAM-SETTINGS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-TELEGRAM-SETTINGS",
+      "type": "evidence",
+      "title": "Renamed accounts and closed-tab FCM notifications after restart",
+      "body": "Real Chrome / MySQL 8.4.13: two renamed test accounts preserve role and history; block survives restart and unblocks. Chinese and English menu and task UI switch. Live RelaxKonOS work d2b53609-150a-4b88-a7ac-8aa2cd19d20a used renamed operator and approver with 19 passing cases. Real FCM subscribed Chrome produced notification event Notification displayed for message sequence 9 after server reboot, while no chat tab was open.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-settings-final/result.json, push-cdp-verified.json and english.png"
+      },
+      "references": [
+        "REF-TELEGRAM-SETTINGS"
+      ]
+    },
+    {
+      "id": "INTENT-ANDROID-CHAT",
+      "type": "intent",
+      "title": "Native Android chat client with shared backend",
+      "body": "Build a Telegram-style Kotlin and Jetpack Compose Android client for login, direct and group chat, settings and background notifications. Validate message, read and settings synchronization against the web client on a real device or emulator.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user request for native Kotlin and Compose Android client and emulator verification",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-CHAT",
+      "type": "module",
+      "title": "Native Kotlin and Compose chat client",
+      "body": "Existing authentication, direct and group text chat, read sync and shared account settings. Android Keystore protects the session. SignalR and HTTP catch-up support a user-enabled foreground service for notifications while the UI is closed. Native cloud push when the Android process is terminated remains pending.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-CHAT"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-CHAT"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-CHAT",
+      "type": "evidence",
+      "title": "Emulator, Chrome and live MySQL chat and notification checks",
+      "body": "Debug APK and Android Lint pass. Chrome and Android authenticated using existing MySQL accounts. Direct chat flowed both ways, Chrome group text appeared on Android, and Android read state and profile propagated back to Chrome. A Chrome profile update appeared on Android. After Android returned to the launcher, the system notification preview matched a unique group message sent from Chrome, and tapping it opened the group. The final build created a new group and sent a message read by the invited Chrome account, then repeated the background system notification and deep link check.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/chat-android/result.json, result-final.json, native-group-chrome.ok, final-background-activity.txt, final-notification-proof.txt and screenshots"
+      },
+      "references": [
+        "REF-ANDROID-CHAT"
+      ]
     }
   ],
   "relations": [
@@ -1684,6 +2060,156 @@
       "type": "supports",
       "source": "EVIDENCE-CODEX-DEVELOPMENT",
       "target": "MOD-CODEX-AGENT"
+    },
+    {
+      "id": "REL-WORKBENCH-INTENT",
+      "type": "implements",
+      "source": "MOD-WORKBENCH",
+      "target": "INTENT-WORKBENCH"
+    },
+    {
+      "id": "REL-WORKBENCH-AGENT",
+      "type": "depends_on",
+      "source": "MOD-WORKBENCH",
+      "target": "MOD-CODEX-AGENT"
+    },
+    {
+      "id": "REL-WORKBENCH-BROWSER-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-WORKBENCH-BROWSER-MYSQL",
+      "target": "MOD-WORKBENCH"
+    },
+    {
+      "id": "REL-CHAT-A-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-PHASE-A",
+      "target": "INTENT-CHAT-PHASE-A"
+    },
+    {
+      "id": "REL-CHAT-A-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-PHASE-A",
+      "target": "MOD-CHAT-PHASE-A"
+    },
+    {
+      "id": "REL-CHAT-B-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-PHASE-B",
+      "target": "INTENT-CHAT-PHASE-B"
+    },
+    {
+      "id": "REL-CHAT-B-BASE",
+      "type": "depends_on",
+      "source": "MOD-CHAT-PHASE-B",
+      "target": "MOD-CHAT-PHASE-A"
+    },
+    {
+      "id": "REL-CHAT-B-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-PHASE-B",
+      "target": "MOD-CHAT-PHASE-B"
+    },
+    {
+      "id": "REL-CHAT-C-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-PHASE-C",
+      "target": "INTENT-CHAT-PHASE-C"
+    },
+    {
+      "id": "REL-CHAT-C-BASE",
+      "type": "depends_on",
+      "source": "MOD-CHAT-PHASE-C",
+      "target": "MOD-CHAT-PHASE-B"
+    },
+    {
+      "id": "REL-CHAT-C-AGENT",
+      "type": "depends_on",
+      "source": "MOD-CHAT-PHASE-C",
+      "target": "MOD-CODEX-AGENT"
+    },
+    {
+      "id": "REL-CHAT-C-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-PHASE-C",
+      "target": "MOD-CHAT-PHASE-C"
+    },
+    {
+      "id": "REL-CHAT-D-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-PHASE-D",
+      "target": "INTENT-CHAT-PHASE-D"
+    },
+    {
+      "id": "REL-CHAT-D-BASE",
+      "type": "depends_on",
+      "source": "MOD-CHAT-PHASE-D",
+      "target": "MOD-CHAT-PHASE-C"
+    },
+    {
+      "id": "REL-CHAT-D-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-PHASE-D",
+      "target": "MOD-CHAT-PHASE-D"
+    },
+    {
+      "id": "REL-TELEGRAM-UI-INTENT",
+      "type": "implements",
+      "source": "MOD-TELEGRAM-UI",
+      "target": "INTENT-TELEGRAM-UI-IMPLEMENTATION"
+    },
+    {
+      "id": "REL-TELEGRAM-UI-DESIGN",
+      "type": "implements",
+      "source": "MOD-TELEGRAM-UI",
+      "target": "INTENT-TELEGRAM-UI"
+    },
+    {
+      "id": "REL-TELEGRAM-UI-BASE",
+      "type": "depends_on",
+      "source": "MOD-TELEGRAM-UI",
+      "target": "MOD-CHAT-PHASE-D"
+    },
+    {
+      "id": "REL-TELEGRAM-UI-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-TELEGRAM-UI",
+      "target": "MOD-TELEGRAM-UI"
+    },
+    {
+      "id": "REL-TELEGRAM-SETTINGS-INTENT",
+      "type": "implements",
+      "source": "MOD-TELEGRAM-SETTINGS",
+      "target": "INTENT-TELEGRAM-SETTINGS"
+    },
+    {
+      "id": "REL-TELEGRAM-SETTINGS-BASE",
+      "type": "depends_on",
+      "source": "MOD-TELEGRAM-SETTINGS",
+      "target": "MOD-TELEGRAM-UI"
+    },
+    {
+      "id": "REL-TELEGRAM-SETTINGS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-TELEGRAM-SETTINGS",
+      "target": "MOD-TELEGRAM-SETTINGS"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-CHAT",
+      "target": "INTENT-ANDROID-CHAT"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-SETTINGS",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-CHAT",
+      "target": "MOD-TELEGRAM-SETTINGS"
+    },
+    {
+      "id": "REL-ANDROID-CHAT-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-CHAT",
+      "target": "MOD-ANDROID-CHAT"
     }
   ],
   "references": [
@@ -2112,6 +2638,76 @@
       "kind": "project_file",
       "target": "src/LittleLoop.Tools/AgentDevelopmentBridge.cs",
       "purpose": "Bounded Codex development bridge and actual execution evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-WORKBENCH",
+      "kind": "project_file",
+      "target": "docs/22-workbench.md",
+      "purpose": "Workbench design and verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-PHASE-A",
+      "kind": "project_file",
+      "target": "docs/24-chat-phase-a.md",
+      "purpose": "Phase A behavior and real browser verification",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-PHASE-B",
+      "kind": "project_file",
+      "target": "docs/25-chat-phase-b.md",
+      "purpose": "Phase B features and live validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-PHASE-C",
+      "kind": "project_file",
+      "target": "docs/26-chat-phase-c.md",
+      "purpose": "LittleLoop chat integration and real execution evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-PHASE-D",
+      "kind": "project_file",
+      "target": "docs/27-chat-phase-d.md",
+      "purpose": "Chat phase D behavior and live validation",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-TELEGRAM-UI-DESIGN",
+      "kind": "project_file",
+      "target": "docs/28-telegram-ui-design.md",
+      "purpose": "Telegram-style chat design and browser prototype",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-TELEGRAM-UI-PROTOTYPE",
+      "kind": "project_file",
+      "target": "docs/design/chat-ui.html",
+      "purpose": "Telegram-style chat design and browser prototype",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-TELEGRAM-UI-IMPLEMENTATION",
+      "kind": "project_file",
+      "target": "docs/29-telegram-ui-implementation.md",
+      "purpose": "Actual Telegram-style chat UI implementation and evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-TELEGRAM-SETTINGS",
+      "kind": "project_file",
+      "target": "docs/30-telegram-settings.md",
+      "purpose": "Complete Telegram-style settings with actual Chrome and MySQL evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-CHAT",
+      "kind": "project_file",
+      "target": "docs/31-android-chat.md",
+      "purpose": "Android setup, implemented behavior and live validation",
       "tracking": "live"
     }
   ],

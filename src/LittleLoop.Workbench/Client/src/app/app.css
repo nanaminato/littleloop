@@ -1,0 +1,28 @@
+:host { display: block; max-width: 1280px; margin: auto; }
+header { display: flex; gap: 1rem; align-items: baseline; border-bottom: 1px solid var(--line); padding: 1.2rem 1.5rem; }
+header strong { font-size: 1.35rem; letter-spacing: -.04em; }
+header span, small, .muted { color: var(--muted); }
+main { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 1rem; padding: 1rem; }
+.chat, aside, .connect { padding: 1.25rem; border: 1px solid var(--line); background: white; border-radius: 12px; min-width: 0; }
+.connect { max-width: 28rem; margin: 2rem auto; }
+h1, h2, h3 { margin-top: 0; }
+article { margin: .8rem 0; padding: .9rem; border-radius: 8px; background: #f4f7fa; }
+p { white-space: pre-wrap; overflow-wrap: anywhere; }
+form { display: grid; gap: .65rem; }
+label { font-weight: 600; }
+input, select, textarea { min-width: 0; width: 100%; padding: .6rem; border: 1px solid #b8c3cf; border-radius: 5px; background: white; color: inherit; font: inherit; }
+textarea { min-height: 5rem; resize: vertical; }
+button { background: #155e58; color: white; border: 1px solid transparent; padding: .55rem .8rem; border-radius: 6px; cursor: pointer; font: inherit; justify-self: start; }
+button:disabled { opacity: .52; cursor: default; }
+.secondary { background: white; color: #174e49; border-color: #b7ceca; }
+.actions { display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
+.actions input { display: block; width: 6rem; }
+.job, .task-link { display: block; width: 100%; text-align: left; margin: .45rem 0; overflow-wrap: anywhere; }
+.job small { display: block; margin-top: .3rem; }
+.active { background: #e0f0ec; }
+.approval { margin-top: 1rem; padding: .8rem; border: 1px solid #d2a85d; background: #fff8e8; border-radius: 8px; }
+details { margin: .7rem 0; overflow-wrap: anywhere; }
+summary { cursor: pointer; }
+pre { color: #dce8ef; background: #203342; border-radius: 6px; padding: .75rem; max-height: 20rem; overflow: auto; white-space: pre-wrap; }
+.error { margin: 1rem; color: #9b262c; }
+@media (max-width: 790px) { main { grid-template-columns: minmax(0, 1fr); } }

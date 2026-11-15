@@ -96,7 +96,8 @@ public sealed class AgentDelegationHost(string directory)
                             await client.ReplyAsync(requestId, await development!.InvokeAsync(p, threadId, turnId, token), token); continue;
                         }
                         if (!hostTool && !AgentApproval.Supported(eventName)) throw new IOException("Unsupported server request requires host handling: " + eventName);
-                        string decision = AgentApproval.Decide(state.Policy, threadId, turnId, eventName, p);
+                        string decision = state.Policy.HostToolsOnly && !hostTool
+                            ? "decline" : AgentApproval.Decide(state.Policy, threadId, turnId, eventName, p);
                         if (decision is "wait" or "user")
                         {
                             string nonce = Guid.NewGuid().ToString("N");
@@ -167,15 +168,19 @@ public sealed class AgentDelegationHost(string directory)
         }
         void Replace(AgentTurnRecord record) { state.Turns[^1] = record; Save(state); }
     }
-    public void Answer(string nonce, string decision)
+    public void Answer(string nonce, string decision, string? actor = null)
     {
         if (decision is not ("accept" or "decline")) throw new ArgumentException("Use accept or decline.");
         var request = JsonSerializer.Deserialize<AgentApprovalRequest>(File.ReadAllText(ApprovalFile), Json)!;
         if (request.Nonce != nonce || request.Status != "pending" || Read().Status != "awaiting-approval") throw new ArgumentException("Stale approval.");
         string target = Path.Combine(root, "answer-" + nonce + ".json");
         string temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(new { nonce, decision }, Json));
-        File.Move(temporary, target, false);
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new { nonce, decision, actor }, Json));
+            File.Move(temporary, target, false);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     private FileStream Lease() => new(Path.Combine(root, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     private void Save(AgentHostState state) => Write(StateFile, state);

@@ -6,7 +6,7 @@ namespace LittleLoop.Tools;
 public sealed record AgentCommandGrant(string Command, string Cwd);
 public sealed record AgentHostPolicy(string Executable, string Project, string ApprovalMode = "auto", string OutsideRule = "user",
     AgentCommandGrant[]? Commands = null, int MaxTurns = 4, int TimeoutSeconds = 600, int MaxRepairs = 1, bool AttachDocumentation = true, PersistentRole? Role = null,
-    DevelopmentPolicy? Development = null);
+    DevelopmentPolicy? Development = null, bool HostToolsOnly = false);
 public sealed record AgentApprovalRequest(string Nonce, string Method, JsonElement RequestId, JsonElement Parameters, string Status);
 
 public static class AgentApproval

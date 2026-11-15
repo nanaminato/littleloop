@@ -70,4 +70,18 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 
 [只读项目指导与 agent 边界](docs/19-agent-guidance.md)：`dev-guide` 从有界项目文档生成下一步任务、验收条件和 agent 任务书草案；任务书生成不代表已经发送或执行。
 
-[Codex App Server 委派](docs/20-codex-agent.md)已接入：创建/恢复会话、发送任务、接收实际结果、按宿主检查自动补充任务，记录核心判断和经历。授权支持明确清单内的自主判断、等待与用户处理；RelaxKonOS 的只读验收矩阵已真实跑通。通用写代码/部署工作流及其他 agent 实现仍待扩展。
+[Codex App Server 委派](docs/20-codex-agent.md)已接入：创建/恢复会话、发送任务、接收实际结果、按宿主检查自动补充任务，记录核心判断和经历。授权支持明确清单内的自主判断、等待与用户处理；RelaxKonOS 的只读验收矩阵已真实跑通。受限代码开发见上文，其他 agent 实现仍待扩展。
+
+[开发工作台](docs/22-workbench.md)提供 Angular 对话界面、ASP.NET Core 后台队列、源码引用、逐次授权和测试回执，可配置 MySQL。
+
+[多人聊天](docs/24-chat-phase-a.md)及[日常聊天功能](docs/25-chat-phase-b.md)提供独立账号、私聊群聊、附件、搜索、收藏和多设备同步。
+
+[聊天机器人](docs/26-chat-phase-c.md)支持 LittleLoop 私聊和群聊、源码引用、开发任务、逐次审批、执行结果与历史工作台导入。
+
+[聊天平台扩展](docs/27-chat-phase-d.md)增加源码审阅机器人、群话题和频道订阅广播。
+
+[Telegram 式聊天界面](docs/29-telegram-ui-implementation.md)实现桌面和手机布局、十类设置入口及多设备同步。
+
+[聊天设置补齐](docs/30-telegram-settings.md)说明用户名、屏蔽、双语和后台推送。
+
+[原生 Android 聊天客户端](docs/31-android-chat.md)使用 Kotlin 和 Jetpack Compose，复用同一套账号、会话、已读与设置接口。

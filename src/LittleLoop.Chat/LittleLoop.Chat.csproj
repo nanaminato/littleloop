@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Lib.Net.Http.WebPush" Version="3.3.1" />
+    <ProjectReference Include="../LittleLoop.Tools/LittleLoop.Tools.csproj" />
+    <PackageReference Include="MySqlConnector" Version="2.6.1" />
+  </ItemGroup>
+</Project>

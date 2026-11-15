@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
@@ -29,9 +30,15 @@ public sealed class CodexAppServerClient : IAgentSessionClient
         Directory.CreateDirectory(logDirectory);
         requestsFile = Path.Combine(logDirectory, "requests.jsonl");
         var start = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
         start.ArgumentList.Add("app-server"); start.ArgumentList.Add("--stdio");
         start.Environment.Remove("DEEPSEEK_API_KEY");
+        foreach (var name in start.Environment.Keys.Where(name => name.StartsWith("Workbench__", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("ConnectionStrings__", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("Chat__", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("ChatBot__", StringComparison.OrdinalIgnoreCase)).ToArray())
+            start.Environment.Remove(name);
         process = Process.Start(start) ?? throw new IOException("Could not start Codex App Server.");
         reader = ReadAsync(Path.Combine(logDirectory, "events.jsonl"));
         errors = DrainErrors(Path.Combine(logDirectory, "stderr.log"));
@@ -75,8 +82,8 @@ public sealed class CodexAppServerClient : IAgentSessionClient
             while (await process.StandardOutput.ReadLineAsync(stopped.Token) is { } line)
             {
                 if (line.Length > 2_000_000 || (bytes += line.Length) > 40_000_000) throw new IOException("App Server event budget exceeded.");
-                using var doc = JsonDocument.Parse(line); var item = doc.RootElement.Clone();
                 await log.WriteLineAsync(line); await log.FlushAsync();
+                using var doc = JsonDocument.Parse(line); var item = doc.RootElement.Clone();
                 if (!item.TryGetProperty("method", out _) && item.TryGetProperty("id", out var id) && id.TryGetInt64(out long number) && calls.TryRemove(number, out var completion))
                 {
                     if (item.TryGetProperty("error", out var error)) completion.TrySetException(new IOException("App Server error: " + error.GetRawText()));

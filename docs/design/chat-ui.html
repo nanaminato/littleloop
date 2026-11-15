@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LittleLoop 聊天界面原型</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#18232c;background:#e8edf2;--line:#e4ebf0;--blue:#2489c5;--paper:#fff;--ink:#18232c;--muted:#5b6c79;--active:#e0f1fb;--wall:#deebe3;--mine:#e7f7db}
+*{box-sizing:border-box}button,input{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,input:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.preview{max-width:1280px;margin:12px auto 8px;padding:0 12px;display:flex;gap:8px;align-items:center}.preview strong{margin-right:auto}.preview button,.pill{border:1px solid #bbccda;border-radius:16px;background:white;padding:6px 13px;color:#24506d}.preview button[aria-pressed=true]{background:#d1eafd}
+.app{max-width:1280px;height:calc(100dvh - 74px);min-height:470px;margin:auto;display:grid;grid-template-columns:326px 1fr;position:relative;overflow:hidden;box-shadow:0 8px 30px #24374825;border-radius:10px;background:var(--paper);color:var(--ink)}
+.app.dark{--paper:#192630;--ink:#f0f7fb;--muted:#b8c8d3;--line:#304554;--active:#263e50;--wall:#233844;--mine:#304b41}
+.list,.chat,.settings,.info{min-width:0;background:var(--paper)}.list{border-right:1px solid var(--line);overflow:auto}.chat{min-height:0;display:flex;flex-direction:column}.top{display:flex;align-items:center;gap:12px;padding:10px 14px;min-height:61px;border-bottom:1px solid var(--line)}
+.icon{display:grid;place-items:center;min-width:44px;min-height:44px;font-size:20px;background:transparent;border:0;border-radius:50%}.icon:hover,.row:hover,.entry:hover{background:var(--active)}input{min-width:0;border:0;background:var(--active);padding:9px 12px;border-radius:8px;color:var(--ink)}.top input{width:100%}.grow{flex:1;min-width:0}
+.tabs{display:flex;padding:0 12px;border-bottom:1px solid var(--line)}.tabs button{border:0;background:transparent;min-height:44px;padding:0 10px}.tabs button[aria-pressed=true]{color:var(--blue);border-bottom:2px solid var(--blue)}
+.avatar{display:grid;place-items:center;flex:none;width:44px;height:44px;border-radius:50%;background:#487db0;color:white;font-weight:700}
+.row,.entry{width:100%;text-align:left;border:0;background:transparent;display:flex;align-items:center;gap:12px;padding:10px 14px;min-height:48px}.row[aria-current=true]{background:var(--active)}.row .grow{display:grid;gap:3px}.row small,.sub,.entry small{color:var(--muted)}.row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.time{align-self:start;color:var(--muted);font-size:11px}.badge{border-radius:20px;background:#147caf;color:white;font-size:11px;padding:2px 6px}.entry small{margin-left:auto}
+.timeline{flex:1;overflow:auto;min-height:0;background:var(--wall);padding:19px max(16px,calc((100% - 700px)/2));display:flex;flex-direction:column;gap:9px}.date{align-self:center;background:#436754;color:white;border-radius:15px;padding:4px 13px;font-size:12px}
+.bubble{background:var(--paper);max-width:min(85%,480px);border-radius:12px;padding:9px 12px;overflow-wrap:anywhere;align-self:flex-start}.bubble.mine{background:var(--mine);align-self:flex-end}.bubble small{display:block;text-align:right;color:var(--muted);margin-top:4px}.bubble details{border:1px solid var(--line);padding:7px;border-radius:7px;margin-top:5px}.bubble pre{white-space:pre-wrap;overflow-wrap:anywhere}.composer{display:flex;gap:8px;align-items:center;padding:8px 12px}.composer input{flex:1;background:transparent}.send{color:var(--blue)}
+.settings,.info,.drawer,.menu{position:absolute;z-index:2;border:1px solid var(--line);box-shadow:0 8px 26px #12263332;overflow:auto}.settings{width:400px;max-width:100%;top:12px;bottom:12px;left:12px;border-radius:12px}.settings .top,.info .top,.drawer .top{position:sticky;top:0;background:var(--paper)}.profile{padding:17px;display:flex;align-items:center;gap:13px;background:var(--active)}.profile strong{display:block}.info{right:0;top:0;bottom:0;width:300px}.drawer{left:0;top:0;bottom:0;width:280px;background:var(--paper)}.menu{right:12px;top:55px;width:210px;background:var(--paper);border-radius:8px}.entry span:last-child{margin-left:auto}
+.mobileBack{display:none}.app.phone{width:min(390px,100%);grid-template-columns:1fr}.phone[data-screen=list] .chat,.phone[data-screen=chat] .list{display:none}.phone .mobileBack{display:grid}.phone .settings,.phone .info{inset:0;width:100%;border-radius:0}.phone .timeline{padding:12px}
+[hidden]{display:none!important}@media(max-width:650px){.app{grid-template-columns:1fr;border-radius:0}.app[data-screen=list] .chat,.app[data-screen=chat] .list{display:none}.mobileBack{display:grid}.settings,.info{inset:0;width:100%;border-radius:0}.timeline{padding:12px}}
+</style>
+</head>
+<body>
+<div class="preview"><strong>LittleLoop · 交互原型</strong><button id="desktop" aria-pressed="true">桌面</button><button id="phone" aria-pressed="false">手机</button></div>
+<main id="app" class="app" data-screen="list">
+  <nav class="list" aria-label="会话列表">
+    <div class="top"><button class="icon" id="openDrawer" aria-label="主菜单">☰</button><input id="search" type="search" aria-label="搜索会话" placeholder="搜索"></div>
+    <div class="tabs" id="tabs"></div>
+    <div id="rooms"></div>
+  </nav>
+  <section class="chat" aria-label="聊天">
+    <header class="top"><button class="icon mobileBack" id="toList" aria-label="返回会话列表">‹</button><button class="icon avatar" id="roomAvatar" aria-label="打开会话详情">R</button><div class="grow"><strong id="roomTitle"></strong><div class="sub" id="roomSubtitle"></div></div><button class="icon" id="openMenu" aria-label="会话菜单">⋮</button></header>
+    <div class="timeline" id="timeline"></div>
+    <form class="composer" id="composer"><button class="icon" type="button" id="attach" aria-label="附件">＋</button><input id="draft" aria-label="消息" placeholder="写消息…"><button class="icon send" aria-label="发送">➤</button></form>
+    <button class="entry" id="subscribe" hidden>订阅频道</button>
+  </section>
+  <aside class="drawer" id="drawer" aria-label="主菜单" hidden><header class="top"><strong class="grow">LittleLoop</strong><button class="icon close" aria-label="关闭主菜单">×</button></header><div class="profile"><span class="avatar">我</span><div><strong>我的账号</strong><small>@developer</small></div></div><button class="entry" id="saved">个人收藏</button><button class="entry" id="openSettings">设置</button></aside>
+  <section class="settings" id="settings" aria-label="设置" hidden><header class="top"><button class="icon" id="backSettings" aria-label="返回设置上级">‹</button><strong class="grow" id="settingsTitle">设置</strong><button class="icon close" aria-label="关闭设置">×</button></header><div id="settingsBody"></div></section>
+  <aside class="info" id="info" aria-label="会话详情" hidden><header class="top"><strong class="grow">会话详情</strong><button class="icon close" aria-label="关闭会话详情">×</button></header><div id="infoBody"></div></aside>
+  <div class="menu" id="menu" hidden></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const rooms = [
+ {id:'group',name:'RelaxKonOS',avatar:'R',type:'群聊',time:'15:42',preview:'明天合并前检查一下回归结果',unread:2},
+ {id:'bot',name:'LittleLoop',avatar:'L',type:'机器人',time:'15:38',preview:'开发任务已完成',unread:0},
+ {id:'direct',name:'林同学',avatar:'林',type:'私聊',time:'14:55',preview:'我把测试结果发给你了',unread:1},
+ {id:'channel',name:'版本公告',avatar:'版',type:'频道',time:'13:12',preview:'v0.4 更新已发布',unread:0},
+ {id:'saved',name:'个人收藏',avatar:'★',type:'私聊',time:'昨天',preview:'回归测试记录',unread:0},
+ {id:'archive',name:'上周讨论',avatar:'上',type:'群聊',time:'周五',preview:'会议纪要',unread:0,archived:true}
+];
+const settings = {
+ '编辑资料':['头像','显示名','用户名','个人简介'],
+ '通知和声音':['私聊通知','群聊通知','频道通知','消息预览','通知声音','静音会话'],
+ '隐私和安全':['修改密码','允许群邀请','已屏蔽用户','会话可见性'],
+ '设备':['当前设备','其他登录设备','结束其他会话'],
+ '聊天设置':['主题','强调色','聊天背景','文字大小','发送键','界面动画'],
+ '数据和存储':['自动加载图片','文件下载','缓存使用与清理'],
+ '聊天文件夹':['新建文件夹','排序','包含会话','排除会话'],
+ '语言':['简体中文','English','跟随系统'],
+ '集成':['LittleLoop','源码审阅','审批权限'],
+ '高级与关于':['键盘快捷键','版本信息','使用帮助','退出登录']
+};
+let selected=rooms[0], filter='全部', category='', settingItem='', subscribed=false;
+const values={主题:'浅色',私聊通知:'开启',群聊通知:'开启',频道通知:'开启',文字大小:'默认',语言:'简体中文',消息预览:'开启'};
+const drafts=new Map(), sent=new Map();
+function button(label,fn,className='entry'){
+ const element=document.createElement('button');element.type='button';element.className=className;element.textContent=label;element.onclick=fn;return element;
+}
+function renderList(){
+ $('tabs').replaceChildren(...['全部','群聊','频道','已归档'].map(name=>{
+  const entry=button(name,()=>{filter=name;renderList();});entry.setAttribute('aria-pressed',String(name===filter));return entry;
+ }));
+ const query=$('search').value.trim().toLowerCase();
+ $('rooms').replaceChildren(...rooms.filter(room=>(filter==='已归档'?room.archived:!room.archived&&(filter==='全部'||room.type===filter))&&
+   (!query||room.name.toLowerCase().includes(query)||room.preview.toLowerCase().includes(query))).map(room=>{
+  const entry=button('',()=>openRoom(room),'row');entry.setAttribute('aria-current',String(room===selected));
+  const avatar=document.createElement('span');avatar.className='avatar';avatar.textContent=room.avatar;
+  const body=document.createElement('span');body.className='grow';
+  const name=document.createElement('strong');name.textContent=room.name;
+  const last=document.createElement('small');last.textContent=room.preview;
+  const metadata=document.createElement('span');metadata.className='time';metadata.textContent=room.time;
+  if(room.unread){const badge=document.createElement('span');badge.className='badge';badge.textContent=room.unread;metadata.append(' ',badge);}
+  body.append(name,last);entry.append(avatar,body,metadata);return entry;
+ }));
+}
+function bubble(text,mine=false){
+ const item=document.createElement('article');item.className='bubble'+(mine?' mine':'');item.textContent=text;
+ const time=document.createElement('small');time.textContent=mine?'15:42 ✓✓':'15:41';item.append(time);return item;
+}
+function renderChat(){
+ $('roomTitle').textContent=selected.name;$('roomAvatar').textContent=selected.avatar;
+ $('roomSubtitle').textContent=selected.type==='群聊'?'3 位成员':selected.type;
+ const date=document.createElement('div');date.className='date';date.textContent='今天';
+ const items=[date];
+ if(selected.id==='group'){items.push(bubble('明天合并前检查一下回归结果。'),bubble('我先确认 RelaxKonOS 的测试回执。',true));}
+ else if(selected.id==='bot'){
+  items.push(bubble('请检查应用 ID 末尾换行的校验。',true));
+  const task=bubble('应用 ID 校验 · 任务已完成');
+  const details=document.createElement('details');
+  const summary=document.createElement('summary');summary.textContent='查看补丁与测试结果';
+  const receipt=document.createElement('pre');receipt.textContent='ApplicationDescriptor.cs\n末尾锚点已更新\n回归测试 19 项通过';
+  details.append(summary,receipt);task.append(details);items.push(task);
+ }else items.push(bubble(selected.preview));
+ for(const text of sent.get(selected.id)||[])items.push(bubble(text,true));
+ $('timeline').replaceChildren(...items);
+ $('draft').value=drafts.get(selected.id)||'';
+ $('composer').hidden=selected.id==='channel';$('subscribe').hidden=selected.id!=='channel';
+ $('subscribe').textContent=subscribed?'已订阅 · 取消订阅':'订阅频道';
+}
+function openRoom(room){
+ selected=room;room.unread=0;$('app').dataset.screen='chat';$('drawer').hidden=true;$('info').hidden=true;renderList();renderChat();
+}
+function renderSettings(){
+ $('settingsTitle').textContent=settingItem||category||'设置';
+ const body=$('settingsBody');body.replaceChildren();
+ if(settingItem){
+  const choices=settingItem==='主题'?['浅色','深色','跟随系统']:settingItem==='语言'?['简体中文','English','跟随系统']:settingItem.endsWith('通知')||settingItem==='消息预览'?['开启','关闭']:[];
+  if(!choices.length){const row=document.createElement('p');row.className='entry';row.textContent='此处展示 '+settingItem+' 的设置页。';body.append(row);return;}
+  body.append(...choices.map(choice=>button(choice+(values[settingItem]===choice?' ✓':''),()=>{
+   values[settingItem]=choice;
+   if(settingItem==='主题')$('app').classList.toggle('dark',choice==='深色'||(choice==='跟随系统'&&matchMedia('(prefers-color-scheme: dark)').matches));
+   renderSettings();
+  })));return;
+ }
+ if(!category){
+  const profile=$('drawer').querySelector('.profile').cloneNode(true);body.append(profile);
+  body.append(...Object.keys(settings).map(name=>button(name+'　›',()=>{category=name;renderSettings();})));return;
+ }
+ const options=category==='语言'?['语言']:settings[category];
+ body.append(...options.map(name=>button(name+(values[name]?'　'+values[name]:'')+'　›',()=>{settingItem=name;renderSettings();})));
+}
+$('desktop').onclick=()=>view(false);$('phone').onclick=()=>view(true);
+function view(phone){$('app').classList.toggle('phone',phone);$('phone').setAttribute('aria-pressed',String(phone));$('desktop').setAttribute('aria-pressed',String(!phone));}
+$('toList').onclick=()=>{$('app').dataset.screen='list';$('info').hidden=true;};
+$('search').oninput=renderList;
+$('openDrawer').onclick=()=>{$('drawer').hidden=false;};
+$('openSettings').onclick=()=>{$('drawer').hidden=true;$('settings').hidden=false;category='';settingItem='';renderSettings();};
+$('backSettings').onclick=()=>{if(settingItem)settingItem='';else if(category)category='';else $('settings').hidden=true;renderSettings();};
+$('saved').onclick=()=>openRoom(rooms.find(room=>room.id==='saved'));
+$('roomAvatar').onclick=()=>{
+ const body=$('infoBody');body.replaceChildren();
+ const title=document.createElement('div');title.className='profile';title.textContent=selected.name+' · '+selected.type;body.append(title);
+ body.append(...['成员','群话题','共享媒体','通知'].map(name=>button(name,()=>{title.textContent=selected.name+' · '+name;})));
+ $('info').hidden=false;
+};
+$('subscribe').onclick=()=>{subscribed=!subscribed;renderChat();};
+$('openMenu').onclick=()=>{
+ const menu=$('menu');menu.hidden=!menu.hidden;
+ menu.replaceChildren(...['置顶会话','静音会话','归档会话'].map(label=>button(label,()=>{
+  if(label==='归档会话'){selected.archived=true;$('app').dataset.screen='list';renderList();}
+  else {selected.preview=label==='静音会话'?'已静音 · '+selected.preview:'已置顶 · '+selected.preview;renderList();}
+  menu.hidden=true;
+ })));
+};
+$('attach').onclick=()=>{
+ const menu=$('menu');menu.hidden=!menu.hidden;menu.replaceChildren(...['图片和文件','引用源码'].map(label=>button(label,()=>{menu.hidden=true;})));
+};
+$('draft').oninput=()=>drafts.set(selected.id,$('draft').value);
+$('composer').onsubmit=event=>{
+ event.preventDefault();const text=$('draft').value.trim();if(!text)return;
+ sent.set(selected.id,[...(sent.get(selected.id)||[]),text]);drafts.delete(selected.id);renderChat();
+};
+document.querySelectorAll('.close').forEach(control=>control.onclick=()=>control.closest('aside,section').hidden=true);
+document.addEventListener('keydown',event=>{if(event.key==='Escape')for(const id of ['menu','info','settings','drawer'])$(id).hidden=true;});
+renderList();renderChat();
+</script>
+</body>
+</html>

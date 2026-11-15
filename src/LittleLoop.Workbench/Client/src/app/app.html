@@ -1,0 +1,99 @@
+<header><strong>LittleLoop</strong><span>开发工作台</span></header>
+@if (!connected()) {
+  <form class="connect" (ngSubmit)="connect()">
+    <h1>连接本机工作台</h1>
+    <label for="token">访问令牌</label>
+    <input id="token" name="token" type="password" [(ngModel)]="token" required>
+    <button [disabled]="busy() || !token">连接</button>
+  </form>
+}
+@if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+@if (connected()) {
+  <main>
+    <section class="chat" aria-label="对话">
+      <h1>源码对话</h1>
+      <div class="conversation">
+        @for (message of state().messages; track message.id) {
+          <article>
+            <strong>{{ message.role === 'user' ? '你' : 'LittleLoop' }}</strong>
+            <p>{{ message.text }}</p>
+            @if (message.source; as source) {
+              <details><summary>{{ source.path }} · {{ source.start }}–{{ source.end }}</summary>
+                <small>SHA-256 {{ source.sha256 }}</small><pre>{{ source.text }}</pre>
+              </details>
+            }
+            @if (message.role === 'user') {
+              <button class="secondary" (click)="anchor = message">安排开发任务</button>
+              @for (task of state().tasks; track task.id) {
+                @if (task.messageId === message.id) {
+                  <button class="secondary task-link" (click)="select(task.id)">{{ task.goal }} · {{ status(task.status) }}</button>
+                }
+              }
+            }
+          </article>
+        } @empty { <p class="muted">选择文件和行号后，就可以围绕这段源码提问。</p> }
+      </div>
+      @if (anchor) {
+        <form (ngSubmit)="schedule()">
+          <label for="goal">开发目标和验收条件</label>
+          <p class="muted">关联问题 · {{ anchor.text }}</p>
+          <textarea id="goal" name="goal" [(ngModel)]="goal" maxlength="6000" required></textarea>
+          <div class="actions"><button [disabled]="busy() || !goal.trim()">加入后台队列</button>
+            <button class="secondary" type="button" (click)="anchor = undefined">取消</button></div>
+        </form>
+      } @else {
+        <form (ngSubmit)="ask()">
+          <label for="path">源码文件</label>
+          <select id="path" name="path" [(ngModel)]="path" (ngModelChange)="preview.set(null)" required>
+            <option value="">选择项目文件</option>
+            @for (path of paths(); track path) { <option [value]="path">{{ path }}</option> }
+          </select>
+          <div class="actions">
+            <label>起始行 <input name="start" type="number" min="1" [(ngModel)]="start" required></label>
+            <label>结束行 <input name="end" type="number" min="1" [(ngModel)]="end" required></label>
+            <button type="button" class="secondary" [disabled]="busy() || !path" (click)="inspect()">预览</button>
+          </div>
+          @if (preview(); as source) { <pre>{{ source.text }}</pre> }
+          <label for="question">问题</label>
+          <textarea id="question" name="question" [(ngModel)]="question" maxlength="4000" required></textarea>
+          <button [disabled]="busy() || !path || !question.trim()">发送问题</button>
+        </form>
+      }
+    </section>
+    <aside aria-label="后台执行">
+      <h2>后台执行</h2>
+      @for (job of state().tasks; track job.id) {
+        <button class="job secondary" [class.active]="selected() === job.id" (click)="select(job.id)">
+          <span>{{ job.goal }}</span><small>{{ status(job.status) }}</small>
+        </button>
+        @if (selected() === job.id && job.error) { <p role="alert">{{ job.error }}</p> }
+      } @empty { <p class="muted">从对话中安排任务后，进度会显示在这里。</p> }
+      @if (execution(); as run) {
+        @if (run.approval; as pending) {
+          <section class="approval">
+            <h3>等待授权</h3><p>{{ pending.method }}</p><pre>{{ format(pending.parameters) }}</pre>
+            <div class="actions">
+              <button [disabled]="busy()" (click)="decide(pending.nonce, 'accept')">允许本次</button>
+              <button class="secondary" [disabled]="busy()" (click)="decide(pending.nonce, 'decline')">拒绝</button>
+            </div>
+          </section>
+        }
+        @for (change of entries(run.changes); track change[0]) {
+          <details open><summary>代码改动 · {{ change[0] }}</summary><pre>{{ change[1] }}</pre></details>
+        }
+        @for (receipt of run.receipts; track $index) {
+          <details open><summary>{{ receipt.id }} · 退出码 {{ receipt.exitCode }}</summary>
+            <pre>{{ receipt.standardOutput }}{{ receipt.standardError }}</pre>
+          </details>
+        }
+        @for (turn of run.turns; track $index) {
+          @if (turn.report || turn.issues.length) {
+            <details><summary>执行报告 · {{ turn.status }}</summary><pre>{{ turn.report }}</pre>
+              @for (issue of turn.issues; track issue) { <p>{{ issue }}</p> }
+            </details>
+          }
+        }
+      }
+    </aside>
+  </main>
+}

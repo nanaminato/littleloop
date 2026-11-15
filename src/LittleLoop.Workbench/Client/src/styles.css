@@ -1,0 +1,3 @@
+* { box-sizing: border-box; }
+:root { --line: #d5dfe7; --muted: #4e6474; }
+body { margin: 0; font-family: "Atkinson Hyperlegible Next", system-ui, sans-serif; color: #172c3b; background: #edf3f7; }

@@ -1,0 +1,141 @@
+<section class="panel" [attr.aria-label]="label('设置','Settings')">
+  <header>
+    @if (page()) { <button (click)="open('')" [attr.aria-label]="label('返回设置上级','Back to settings')">‹</button> }
+    <h2>{{ title() }}</h2><button (click)="close.emit()" [attr.aria-label]="label('关闭设置','Close settings')">×</button>
+  </header>
+  @if (error()) { <p role="alert" class="error">{{ error() }}</p> }
+  @if (done()) { <p role="status" class="done">{{ done() }}</p> }
+  @switch (page()) {
+    @case ('') {
+      <div class="profile"><span class="avatar">@if (account().profile.avatarVersion) { <img [src]="ownAvatar()" [alt]="label('我的头像','My avatar')"> }
+        @else { {{ (account().profile.displayName || user()).slice(0,1).toUpperCase() }} }</span>
+        <div><strong>{{ account().profile.displayName || user() }}</strong><small>@{{ user() }}</small></div>
+      </div>
+      @for (section of navigation; track section[0]) {
+        <button class="row" (click)="open(section[0])">{{ label(section[1], section[2]) }} <span aria-hidden="true">›</span></button>
+      }
+    }
+    @case ('profile') {
+      <div class="fields">
+        <label for="profile-avatar">{{ label('头像图片','Profile picture') }}</label>
+        <input id="profile-avatar" type="file" accept="image/png,image/jpeg,image/webp" (change)="uploadAvatar($event)" [disabled]="busy()">
+        @if (account().profile.avatarVersion) { <button [disabled]="busy()" (click)="removeAvatar()">{{ label('移除头像','Remove avatar') }}</button> }
+      </div>
+      <form (ngSubmit)="saveProfile()">
+        <label for="profile-name">{{ label('显示名','Display name') }}</label><input id="profile-name" name="displayName" maxlength="60" [(ngModel)]="name">
+        <label for="profile-bio">{{ label('个人简介','Bio') }}</label><textarea id="profile-bio" name="bio" maxlength="240" [(ngModel)]="bio"></textarea>
+        <button class="primary" [disabled]="busy()">{{ label('保存资料','Save profile') }}</button>
+      </form>
+      <form (ngSubmit)="rename()">
+        <label for="profile-username">{{ label('用户名','Username') }}</label>
+        <input id="profile-username" name="username" [(ngModel)]="username" minlength="3" maxlength="32" required>
+        <button class="primary" [disabled]="busy() || username.trim() === user()">{{ label('保存用户名','Save username') }}</button>
+      </form>
+    }
+    @case ('notifications') {
+      <div class="fields">
+        <label><input type="checkbox" [checked]="account().notifications.direct" [disabled]="busy()" (change)="notifications('direct',$any($event.target).checked)"> {{ label('私聊通知','Direct messages') }}</label>
+        <label><input type="checkbox" [checked]="account().notifications.groups" [disabled]="busy()" (change)="notifications('groups',$any($event.target).checked)"> {{ label('群聊和话题通知','Groups and topics') }}</label>
+        <label><input type="checkbox" [checked]="account().notifications.channels" [disabled]="busy()" (change)="notifications('channels',$any($event.target).checked)"> {{ label('频道通知','Channels') }}</label>
+        <label><input type="checkbox" [checked]="account().notifications.preview" [disabled]="busy()" (change)="notifications('preview',$any($event.target).checked)"> {{ label('消息预览','Message preview') }}</label>
+        <label><input type="checkbox" [checked]="account().notifications.sound" [disabled]="busy()" (change)="notifications('sound',$any($event.target).checked)"> {{ label('应用内提示音','In-app sound') }}</label>
+        @if (push(); as state) {
+          <h3>{{ label('后台推送','Background push') }}</h3>
+          <p>{{ state.subscribed ? label('此设备已订阅','This device is subscribed') : label('此设备未订阅','This device is not subscribed') }}</p>
+          @if (state.subscribed) { <button [disabled]="busy()" (click)="disablePush()">{{ label('关闭此设备推送','Disable push on this device') }}</button> }
+          @else { <button [disabled]="busy() || !state.publicKey" (click)="enablePush()">{{ label('启用此设备推送','Enable push on this device') }}</button> }
+        }
+        <h3>{{ label('已静音会话','Muted conversations') }}</h3>
+        @for (room of rooms(); track room.id) { @if (room.muted) { <div>{{ room.title }}</div> } }
+      </div>
+    }
+    @case ('privacy') {
+      <div class="fields"><label><input type="checkbox" [checked]="account().privacy.groupInvites" [disabled]="busy()" (change)="privacy($any($event.target).checked)"> {{ label('允许加入他人创建的新群','Allow invitations to new groups') }}</label></div>
+      <form (ngSubmit)="changeBlock(blockTarget,true)">
+        <label for="block-target">{{ label('屏蔽名单','Blocked accounts') }}</label>
+        <input id="block-target" name="blockTarget" [(ngModel)]="blockTarget" maxlength="32" required [placeholder]="label('用户名','Username')">
+        <button class="primary" [disabled]="busy() || !blockTarget.trim()">{{ label('屏蔽用户','Block account') }}</button>
+        @for (person of blocks(); track person.username) {
+          <div class="folder-row"><span>{{ person.displayName }} · @{{ person.username }}</span>
+            <button type="button" [disabled]="busy()" (click)="changeBlock(person.username,false)">{{ label('解除屏蔽','Unblock') }}</button></div>
+        }
+      </form>
+      <form (ngSubmit)="password()">
+        <label for="current-password">{{ label('当前密码','Current password') }}</label><input id="current-password" name="current" type="password" autocomplete="current-password" [(ngModel)]="current" required>
+        <label for="new-password">{{ label('新密码','New password') }}</label><input id="new-password" name="next" type="password" autocomplete="new-password" [(ngModel)]="next" minlength="10" maxlength="128" required>
+        <button class="primary" [disabled]="busy() || !current || next.length < 10">{{ label('修改密码','Change password') }}</button>
+      </form>
+    }
+    @case ('devices') {
+      <div class="fields">
+        @for (device of devices(); track device.id) {
+          <article><strong>{{ device.current ? label('当前设备','Current device') : label('其他设备','Other device') }}</strong>
+            <small>{{ device.created | date:'short' }}</small><p>{{ device.agent }}</p>
+            @if (!device.current) { <button [disabled]="busy()" (click)="revoke(device.id)">{{ label('结束此会话','End this session') }}</button> }
+          </article>
+        }
+        @if (devices().length > 1) { <button [disabled]="busy()" (click)="revoke()">{{ label('结束其他会话','End other sessions') }}</button> }
+      </div>
+    }
+    @case ('appearance') {
+      <div class="fields">
+        <label>{{ label('主题','Theme') }} <select [attr.aria-label]="label('主题','Theme')" [ngModel]="device().theme" (ngModelChange)="changeDevice('theme',$event)">
+          <option value="system">{{ label('跟随系统','System') }}</option><option value="light">{{ label('浅色','Light') }}</option><option value="dark">{{ label('深色','Dark') }}</option>
+        </select></label>
+        <label>{{ label('强调色','Accent color') }} <select [attr.aria-label]="label('强调色','Accent color')" [ngModel]="device().accent" (ngModelChange)="changeDevice('accent',$event)"><option value="blue">{{ label('蓝','Blue') }}</option><option value="purple">{{ label('紫','Purple') }}</option><option value="teal">{{ label('青','Teal') }}</option></select></label>
+        <label>{{ label('聊天背景','Chat background') }} <select [attr.aria-label]="label('聊天背景','Chat background')" [ngModel]="device().background" (ngModelChange)="changeDevice('background',$event)"><option value="mint">{{ label('薄荷','Mint') }}</option><option value="sand">{{ label('沙色','Sand') }}</option><option value="plain">{{ label('纯色','Plain') }}</option></select></label>
+        <label>{{ label('文字大小','Text size') }} <select [attr.aria-label]="label('文字大小','Text size')" [ngModel]="device().scale" (ngModelChange)="changeDevice('scale',$event)"><option value="small">{{ label('小','Small') }}</option><option value="normal">{{ label('默认','Default') }}</option><option value="large">{{ label('大','Large') }}</option></select></label>
+        <label><input type="checkbox" [checked]="device().sendOnEnter" (change)="changeDevice('sendOnEnter',$any($event.target).checked)"> {{ label('Enter 发送','Send with Enter') }}</label>
+        <label><input type="checkbox" [checked]="device().animations" (change)="changeDevice('animations',$any($event.target).checked)"> {{ label('界面动画','Animations') }}</label>
+      </div>
+    }
+    @case ('storage') {
+      <div class="fields">
+        <label><input type="checkbox" [checked]="device().autoImages" (change)="changeDevice('autoImages',$any($event.target).checked)"> {{ label('自动加载图片','Load images automatically') }}</label>
+        <button (click)="clearPreviews.emit();done.set(label('已清除手动图片预览','Image previews cleared'))">{{ label('清除手动预览','Clear manual previews') }}</button>
+        <p>{{ label('文件通过消息中的下载按钮保存。','Use the download button on a message to save its file.') }}</p>
+      </div>
+    }
+    @case ('folders') {
+      <div class="fields">
+        @for (folder of account().folders; track folder.name; let index = $index) {
+          <div class="folder-row"><button (click)="editFolder(index)">{{ folder.name }}</button>
+            <button [disabled]="busy() || index === 0" (click)="moveFolder(index,-1)" [attr.aria-label]="label('上移','Move up')">↑</button>
+            <button [disabled]="busy() || index === account().folders.length - 1" (click)="moveFolder(index,1)" [attr.aria-label]="label('下移','Move down')">↓</button>
+            <button [disabled]="busy()" (click)="removeFolder(index)">{{ label('删除','Delete') }}</button></div>
+        }
+        @if (replacingFolder !== null) { <button (click)="editFolder(null)">{{ label('新建文件夹','New folder') }}</button> }
+      </div>
+      <form (ngSubmit)="saveFolder()">
+        <label for="folder-name">{{ label('文件夹名称','Folder name') }}</label><input id="folder-name" name="folderName" maxlength="30" [(ngModel)]="folderName" required>
+        <label for="folder-kind">{{ label('会话类型','Conversation type') }}</label>
+        <select id="folder-kind" name="folderType" [(ngModel)]="folderType">
+          <option value="all">{{ label('全部','All') }}</option><option value="direct">{{ label('私聊','Direct') }}</option>
+          <option value="group">{{ label('群和话题','Groups and topics') }}</option><option value="channel">{{ label('频道','Channels') }}</option><option value="unread">{{ label('未读','Unread') }}</option>
+        </select>
+        <label for="folder-include">{{ label('额外包含','Also include') }}</label>
+        <select id="folder-include" name="included" multiple [(ngModel)]="included">@for (room of rooms(); track room.id) { <option [value]="room.id">{{ room.title }}</option> }</select>
+        <label for="folder-exclude">{{ label('排除','Exclude') }}</label>
+        <select id="folder-exclude" name="excluded" multiple [(ngModel)]="excluded">@for (room of rooms(); track room.id) { <option [value]="room.id">{{ room.title }}</option> }</select>
+        <button class="primary" [disabled]="busy() || !folderName.trim()">{{ label('保存文件夹','Save folder') }}</button>
+      </form>
+    }
+    @case ('language') {
+      <div class="fields"><label>{{ label('界面语言','Interface language') }} <select [attr.aria-label]="label('界面语言','Interface language')" [ngModel]="device().language" (ngModelChange)="changeDevice('language',$event)">
+        <option value="system">{{ label('跟随系统','System') }}</option><option value="zh">简体中文</option><option value="en">English</option>
+      </select></label></div>
+    }
+    @case ('integrations') {
+      <div class="fields">
+        @for (adapter of adapters(); track adapter) { <strong>{{ adapter === 'source_review' ? label('源码审阅','Source review') : adapter }}</strong> }
+        <p>{{ label('请从群或话题菜单管理机器人。审批权限由部署管理员配置。','Manage bots from the group or topic menu. Deployment administrators configure approvals.') }}</p>
+      </div>
+    }
+    @case ('about') {
+      <div class="fields"><strong>LittleLoop Chat</strong>
+        <p>{{ label('Enter 可在聊天设置中配置；Shift+Enter 换行；Esc 关闭菜单。','Configure Enter in Chat settings. Shift+Enter adds a line. Esc closes menus.') }}</p>
+        <button (click)="logout.emit()">{{ label('退出登录','Log out') }}</button>
+      </div>
+    }
+  }
+</section>

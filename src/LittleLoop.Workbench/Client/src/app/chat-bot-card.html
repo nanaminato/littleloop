@@ -1,0 +1,37 @@
+@if (card().source; as source) {
+  <details>
+    <summary>{{ t('源码引用') }} · {{ source.path }}:{{ source.start }}–{{ source.end }}</summary>
+    <small>SHA-256 {{ source.sha256 }}</small><pre>{{ source.text }}</pre>
+  </details>
+}
+@if (work(); as item) {
+  <section class="task" [attr.data-work]="item.id" [attr.aria-label]="t('LittleLoop 任务')">
+    <strong>{{ card().kind === 'question' ? t('源码问答') : t('开发任务') }} · {{ label(item.status) }}</strong>
+    <small class="provider">{{ item.provider === 'source_review' ? t('源码审阅') : 'LittleLoop' }}</small>
+    @if (item.error) { <p>{{ t(item.error) }}</p> }
+    @if (item.output) { <details open><summary>{{ t('审阅结果') }}</summary><pre>{{ item.output }}</pre></details> }
+    @if (item.execution; as run) {
+      @if (item.canApprove && run.approval; as approval) {
+        <div class="approval">
+          <strong>{{ t('等待审批') }}</strong><pre>{{ format(approval.parameters) }}</pre>
+          <button type="button" [disabled]="busy()" (click)="decide(approval.nonce, 'accept')">{{ t('允许本次') }}</button>
+          <button type="button" [disabled]="busy()" (click)="decide(approval.nonce, 'decline')">{{ t('拒绝') }}</button>
+        </div>
+      }
+      @if (error()) { <p role="alert">{{ error() }}</p> }
+      @for (patch of pairs(run.changes); track patch[0]) {
+        <details><summary>{{ t('代码补丁') }} · {{ patch[0] }}</summary><pre>{{ patch[1] }}</pre></details>
+      }
+      @for (receipt of run.receipts; track $index) {
+        <details><summary>{{ receipt.id }} · {{ t('退出码') }} {{ receipt.exitCode }}</summary><pre>{{ receipt.standardOutput }}{{ receipt.standardError }}</pre></details>
+      }
+      @for (turn of run.turns; track $index) {
+        @if (turn.issues.length > 0 || turn.report) {
+          <details><summary>{{ t('执行报告') }}</summary><pre>{{ turn.report }}</pre>
+          @for (issue of turn.issues; track issue) { <p>{{ issue }}</p> }
+          </details>
+        }
+      }
+    }
+  </section>
+}
