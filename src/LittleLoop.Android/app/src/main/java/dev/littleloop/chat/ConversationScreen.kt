@@ -2,8 +2,11 @@ package dev.littleloop.chat
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
+import android.text.format.Formatter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -159,7 +162,7 @@ internal fun ConversationScreen(
     Column(Modifier.fillMaxSize()) {
         ChatTopBar(
             title = room.title,
-            subtitle = roomTypeLabel(room.type),
+            subtitle = roomTypeLabel(room.type).takeUnless { room.type == "saved" || it == room.title },
             back = onBack,
             actions = {
                 TextButton(onClick = onSearch, modifier = Modifier.semantics {
@@ -328,28 +331,34 @@ internal fun ConversationScreen(
         }
 
         if (room.canPost) {
-            Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 10.dp, tonalElevation = 3.dp) {
+            Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 1.dp) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !state.busy) {
                         Text("＋", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                     }
-                    OutlinedTextField(
-                        draft,
-                        { if (it.length <= 4000) draft = it },
-                        Modifier.weight(1f),
-                        placeholder = { Text(stringResource(R.string.conv_message_hint)) },
-                        shape = MaterialTheme.shapes.extraLarge,
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { if (it.length <= 4000) draft = it },
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = 12.dp),
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         maxLines = 4,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                        decorationBox = { inner ->
+                            Box {
+                                if (draft.isEmpty()) Text(stringResource(R.string.conv_message_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                inner()
+                            }
+                        },
                     )
                     val outgoing = draft
                     val quoted = replyTo
                     val outgoingFile = file
-                    FilledIconButton(
+                    IconButton(
                         onClick = {
                             chat.send(room.id, outgoing, quoted, outgoingFile) {
                                 if (draft == outgoing) draft = ""
@@ -360,7 +369,7 @@ internal fun ConversationScreen(
                         enabled = (draft.isNotBlank() || file != null) && !state.busy,
                         modifier = Modifier.size(48.dp),
                     ) {
-                        Text("➤", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleMedium)
+                        Text("➤", style = MaterialTheme.typography.titleLarge)
                     }
                 }
             }
@@ -450,6 +459,7 @@ private fun MessageBubble(
     discussionSummary: ChannelDiscussionSummary?,
     onComments: (() -> Unit)?,
 ) {
+    val context = LocalContext.current
     val actionsLabel = stringResource(R.string.status_message_actions)
     val broadcast = room.type == "channel"
     val own = !broadcast && message.sender == state.username
@@ -538,8 +548,21 @@ private fun MessageBubble(
                 } else {
                     if (message.text.isNotBlank()) Text(message.text, style = MaterialTheme.typography.bodyLarge)
                     message.attachment?.let { attachment ->
-                        TextButton(onClick = onPreview) {
-                            Text("▣ ${attachment.name}", maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Surface(
+                            onClick = onPreview,
+                            color = Color.Transparent,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.widthIn(max = 260.dp),
+                        ) {
+                            Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Box(Modifier.size(42.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = .12f), CircleShape), contentAlignment = Alignment.Center) {
+                                    Text("↓", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge)
+                                }
+                                Column(Modifier.weight(1f, fill = false)) {
+                                    Text(attachment.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                                    Text(Formatter.formatShortFileSize(context, attachment.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
                         }
                     }
                     message.card?.let {
