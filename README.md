@@ -105,3 +105,5 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 [好友申请和群成员管理](docs/39-chat-friends-and-group-members.md)覆盖网页版和 Android，群成员变更会同步到话题。
 
 [Android 好友与群成员管理重构](docs/45-android-social-refactor.md)说明组件与状态分离、共享权限及原生回归结果。
+
+[Android 会话列表与新建会话重构](docs/46-android-home-refactor.md)说明首页与频道目录的状态分离、创建权限和模拟器回归。

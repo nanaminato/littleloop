@@ -2123,6 +2123,51 @@
       "references": [
         "REF-ANDROID-SOCIAL-REFACTOR"
       ]
+    },
+    {
+      "id": "INTENT-ANDROID-HOME-REFACTOR",
+      "type": "intent",
+      "title": "Separate Android conversation lists and creation components from business state",
+      "body": "User explicitly requested Android conversation list and new conversation refactoring with component/state separation, shared permissions, unchanged behavior, existing tests and actual emulator regression on 2026-11-15.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested Android conversation list and new conversation refactoring with component/state separation, shared permissions, unchanged behavior, existing tests and actual emulator regression on 2026-11-15.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-HOME-REFACTOR",
+      "type": "module",
+      "title": "Android home lists and creation components, state and shared permissions",
+      "body": "Thin routes assemble stateless home, channel directory and creation forms. Account-scoped search controllers preserve room order and filtering; typed creation drafts are scoped by account, form and parent. Shared creation and subscription rules are checked again against current state at submission. Existing repository and server contracts remain unchanged; empty groups and all member roles creating topics are preserved.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-HOME-REFACTOR"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-HOME-REFACTOR"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-HOME-REFACTOR",
+      "type": "evidence",
+      "title": "Android home refactor unit and native emulator regression",
+      "body": "Build, 24 JVM tests and lint passed (0 errors, 39 warnings). Existing 64 UI states across four sizes, 22 actual operations/state checks, 5 filtering/access/account edge cases and 2 final APK shortcuts passed. Four group roles created topics; empty groups and later invitations succeeded; offline creation was disabled without losing the draft.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/android-home-refactor/regression-summary.json records counts, configurations and both APK hashes. Selector errors were corrected and affected checks rerun/resumed. Actual offline testing reconnects only the test emulator ADB transport because removing forwarding alone leaves established sockets alive. Final APK differs only by unused import cleanup and received edge, shortcut and subscription/offline continuation checks. Emulator environment restored. Physical devices, push, bot UI and server-wide behavior were not re-audited; see docs/46."
+      },
+      "references": [
+        "REF-ANDROID-HOME-REFACTOR"
+      ]
     }
   ],
   "relations": [
@@ -3001,6 +3046,24 @@
       "type": "supports",
       "source": "EVIDENCE-ANDROID-SOCIAL-REFACTOR",
       "target": "MOD-ANDROID-SOCIAL-REFACTOR"
+    },
+    {
+      "id": "REL-ANDROID-HOME-REFACTOR-INTENT",
+      "type": "implements",
+      "source": "MOD-ANDROID-HOME-REFACTOR",
+      "target": "INTENT-ANDROID-HOME-REFACTOR"
+    },
+    {
+      "id": "REL-ANDROID-HOME-REFACTOR-SPACES",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-HOME-REFACTOR",
+      "target": "MOD-ANDROID-CHAT-SPACES"
+    },
+    {
+      "id": "REL-ANDROID-HOME-REFACTOR-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-HOME-REFACTOR",
+      "target": "MOD-ANDROID-HOME-REFACTOR"
     }
   ],
   "references": [
@@ -3583,6 +3646,13 @@
       "kind": "project_file",
       "target": "docs/45-android-social-refactor.md",
       "purpose": "Social component/state boundaries, shared permissions and actual emulator regression evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-HOME-REFACTOR",
+      "kind": "project_file",
+      "target": "docs/46-android-home-refactor.md",
+      "purpose": "Home and creation state/component boundaries, shared policies and actual emulator regression evidence",
       "tracking": "live"
     }
   ],

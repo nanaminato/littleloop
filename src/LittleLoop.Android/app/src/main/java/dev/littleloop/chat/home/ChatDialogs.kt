@@ -14,37 +14,34 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun CreateRoom(busy: Boolean, error: String?, cancel: () -> Unit, confirm: (String, String, String) -> Unit) {
-    var group by rememberSaveable { mutableStateOf(false) }
-    var title by rememberSaveable { mutableStateOf("") }
-    var members by rememberSaveable { mutableStateOf("") }
+internal fun CreateRoomDialog(
+    group: Boolean, title: String, members: String, error: String?, canSubmit: Boolean,
+    onGroup: (Boolean) -> Unit, onTitle: (String) -> Unit, onMembers: (String) -> Unit,
+    cancel: () -> Unit, confirm: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = cancel,
         title = { Text(stringResource(R.string.home_new_chat)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(!group, { group = false }, { Text(stringResource(R.string.home_direct)) })
-                    FilterChip(group, { group = true }, { Text(stringResource(R.string.home_group)) })
+                    FilterChip(!group, { onGroup(false) }, { Text(stringResource(R.string.home_direct)) })
+                    FilterChip(group, { onGroup(true) }, { Text(stringResource(R.string.home_group)) })
                 }
                 if (group) {
                     OutlinedTextField(
-                        title, { if (it.length <= 100) title = it }, Modifier.fillMaxWidth(),
+                        title, onTitle, Modifier.fillMaxWidth(),
                         label = { Text(stringResource(R.string.home_group_name)) },
                         singleLine = true, shape = MaterialTheme.shapes.medium,
                     )
                 }
                 OutlinedTextField(
-                    members, { members = it }, Modifier.fillMaxWidth(),
+                    members, onMembers, Modifier.fillMaxWidth(),
                     label = { Text(stringResource(if (group) R.string.home_members_hint else R.string.home_peer_hint)) },
                     supportingText = if (group) { { Text(stringResource(R.string.home_members_optional)) } } else null,
                     singleLine = true, shape = MaterialTheme.shapes.medium,
@@ -54,8 +51,8 @@ internal fun CreateRoom(busy: Boolean, error: String?, cancel: () -> Unit, confi
         },
         confirmButton = {
             TextButton(
-                onClick = { confirm(if (group) "group" else "direct", title, members) },
-                enabled = !busy && (if (group) title.isNotBlank() else members.isNotBlank()),
+                onClick = confirm,
+                enabled = canSubmit,
             ) { Text(stringResource(R.string.action_create)) }
         },
         dismissButton = { TextButton(onClick = cancel) { Text(stringResource(R.string.action_cancel)) } },

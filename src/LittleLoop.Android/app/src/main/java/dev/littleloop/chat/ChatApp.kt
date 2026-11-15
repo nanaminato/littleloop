@@ -124,7 +124,7 @@ internal fun ChatApp(
                 back = { showChannels = false },
                 actions = { TextButton(onClick = { createSpace = true }) { Text(stringResource(R.string.channels_new)) } },
             ) {
-                ChannelDirectory(state, subscribe = chat::subscribe) {
+                ChannelDirectory(chat, state) {
                     chat.select(it)
                     showChannels = false
                 }
@@ -135,7 +135,7 @@ internal fun ChatApp(
                 back = { showTopics = false },
                 actions = { TextButton(onClick = { createSpace = true }) { Text(stringResource(R.string.topics_new)) } },
             ) {
-                val topics = state.rooms.filter { it.parentId == room.id && it.type == "topic" && !it.archived }
+                val topics = state.rooms.topics(room.id)
                 if (topics.isEmpty()) EmptyState("·", stringResource(R.string.topics_empty))
                 LazyColumn(Modifier.weight(1f)) {
                     items(topics, key = Room::id) { topic ->
@@ -160,13 +160,11 @@ internal fun ChatApp(
         }
     }
 
-    if (create && state.username.isNotEmpty()) CreateRoom(state.busy, state.error, { create = false }) { type, title, members ->
-        chat.create(type, title, members) { create = false }
-    }
+    if (create && state.username.isNotEmpty()) CreateRoom(chat, state) { create = false }
     if (createSpace && (showChannels || showTopics && room?.type == "group")) {
         val parentId = room?.id.takeIf { showTopics && !showChannels }
-        CreateChatSpace(parentId != null, state, { createSpace = false }) { title ->
-            chat.createSpace(parentId, title) { createSpace = false; showChannels = false; showTopics = false }
+        CreateChatSpace(chat, state, parentId, { createSpace = false }) {
+            createSpace = false; showChannels = false; showTopics = false
         }
     }
 }
