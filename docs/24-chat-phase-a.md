@@ -1,6 +1,6 @@
 # 阶段 A · 多人聊天
 
-聊天入口是 LittleLoop.Chat，默认 http://127.0.0.1:5190/chat。它和旧工作台共用 Angular 构建，分别由独立 ASP.NET Core 进程提供入口。
+聊天入口是 LittleLoop.Chat，默认监听 `http://0.0.0.0:5190`（所有 IPv4 网络接口）。本机访问 http://127.0.0.1:5190/chat；同一局域网的手机访问 `http://<电脑局域网 IP>:5190/chat`。可通过 `Chat__Url` 覆盖监听地址。它和旧工作台共用 Angular 构建，分别由独立 ASP.NET Core 进程提供入口。
 
 ## 启动
 

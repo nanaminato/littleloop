@@ -1,0 +1,50 @@
+:host { display: contents; }
+.drawer {
+  position: absolute; inset: 0 auto 0 0; width: min(320px, 88%); z-index: 50;
+  display: flex; flex-direction: column; overflow: auto;
+  background: var(--paper); box-shadow: 24px 0 70px rgba(10, 26, 38, .28);
+  animation: drawer-in .22s cubic-bezier(.2, .8, .2, 1) both;
+}
+.drawer-top {
+  display: flex; align-items: center; gap: 9px; padding: 14px 12px 10px;
+}
+.drawer-top strong { flex: 1; font-size: .98rem; letter-spacing: -.01em; }
+.drawer-top .icon { border-radius: 50%; color: var(--ink); }
+.profile {
+  display: flex; align-items: center; gap: 12px; margin: 2px 12px 12px; padding: 14px;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(260px 110px at 20% 0%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 72%),
+    var(--paper-tint);
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--line));
+}
+.profile .avatar { width: 52px; height: 52px; font-size: 1.2rem; }
+.profile-copy { display: grid; gap: 1px; min-width: 0; }
+.profile-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-copy small { color: var(--muted); font-size: .8rem; }
+
+.drawer-nav { display: grid; gap: 2px; padding: 0 8px; }
+.drawer-item {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 10px 12px; border-radius: var(--radius-md); font-size: .92rem;
+}
+.item-icon {
+  width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--paper-tint); color: var(--accent); font-size: .95rem; flex: none;
+}
+
+.language-box { margin: 14px 12px 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper-soft); }
+.language-box h3 { margin: 0 0 7px; font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.language-options { display: flex; gap: 5px; }
+.language-options button {
+  flex: 1; min-height: 34px; padding: 4px 8px; border-radius: 999px; font-size: .8rem;
+  border: 1px solid var(--line); background: var(--paper); color: var(--muted);
+}
+.language-options button[aria-pressed=true] {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.connection { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 16px 18px; color: var(--muted); font-size: .78rem; }
+.connection .status-dot { box-shadow: none; }
+
+@keyframes drawer-in { from { transform: translateX(-18px); opacity: .4; } to { transform: none; opacity: 1; } }

@@ -1,0 +1,114 @@
+<nav [attr.aria-label]="store.t('会话列表')">
+  <header class="sidebar-top">
+    <button type="button" class="icon menu-button" [attr.aria-label]="store.t('主菜单')" (click)="store.drawer.set(true)">☰</button>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">L</span>
+      <span class="brand-text"><strong>LittleLoop</strong><small>{{ store.t('会话列表') }}</small></span>
+    </div>
+    <span class="status-dot" [class.online]="store.connection() === '已连接'" [class.offline]="store.connection() === '已断开'"
+      [attr.title]="store.t(store.connection())"></span>
+  </header>
+
+  <form class="search-bar" (ngSubmit)="store.toggleSearch(false); store.search()">
+    <span class="search-icon" aria-hidden="true">⌕</span>
+    <input id="search" name="search" [attr.aria-label]="store.t('搜索消息')" [placeholder]="store.t('搜索')"
+      [(ngModel)]="store.searchTerm" maxlength="100" autocomplete="off">
+    <button type="button" class="search-submit" [attr.aria-label]="store.t('搜索')" [disabled]="store.busy() || !store.searchTerm.trim()">→</button>
+  </form>
+
+  <div class="folder-tabs" [attr.aria-label]="store.t('会话文件夹')">
+    <button type="button" [attr.aria-pressed]="!store.folder()" (click)="store.folder.set('')">{{ store.t('全部会话') }}</button>
+    @for (item of store.accountPrefs().folders; track item.name) {
+      <button type="button" [attr.aria-pressed]="store.folder() === item.name" (click)="store.folder.set(item.name)">{{ item.name }}</button>
+    }
+  </div>
+
+  <button type="button" class="archive-row" (click)="store.showArchive.set(!store.showArchive())">
+    <span class="row-icon" aria-hidden="true">▤</span>
+    <span>{{ store.showArchive() ? store.t('返回会话列表') : store.t('已归档') }}</span>
+    @if (store.showArchive()) { <span class="row-trailing" aria-hidden="true">→</span> }
+  </button>
+
+  @if (!store.inRoomSearch() && store.searchResults(); as results) {
+    <section class="results" [attr.aria-label]="store.t('搜索结果')">
+      <div class="results-head"><strong>{{ store.t('搜索结果') }}</strong><button type="button" class="quiet" (click)="store.searchResults.set(null)">{{ store.t('关闭搜索结果') }}</button></div>
+      @for (result of results; track result.roomId + ':' + result.sequence) {
+        <button type="button" class="search-result" (click)="store.openResult(result)">
+          <strong>{{ store.roomTitle(result.roomId) }}</strong>
+          <small>{{ result.text || result.attachment?.name }}</small>
+        </button>
+      } @empty { <p class="list-empty">{{ store.t('没有匹配的消息。') }}</p> }
+    </section>
+  }
+
+  @if (store.directory(); as channels) {
+    <section class="channel-directory" [attr.aria-label]="store.t('频道目录')">
+      <div class="section-head"><strong>{{ store.t('频道目录') }}</strong><button type="button" class="quiet" (click)="store.directory.set(null)">{{ store.t('收起') }}</button></div>
+      @for (channel of channels; track channel.id) {
+        <article class="channel-entry" [attr.data-channel]="channel.id">
+          <span class="avatar" data-kind="channel" aria-hidden="true">{{ store.initial(channel.title) }}</span>
+          <div class="channel-entry-body">
+            <strong class="channel-title">{{ channel.title }}</strong>
+            <div class="channel-actions">
+              @if (channel.subscribed) { <button type="button" class="quiet" (click)="store.select(channel.id)">{{ store.t('打开频道') }}</button> }
+              @if (!channel.owner) { <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.subscribe(channel)">{{ channel.subscribed ? store.t('取消订阅') : store.t('订阅频道') }}</button> }
+            </div>
+          </div>
+        </article>
+      } @empty { <p class="list-empty">{{ store.t('还没有频道。') }}</p> }
+    </section>
+  }
+
+  @if (store.channelForm()) {
+    <form class="channel-create" (ngSubmit)="store.createChannel()">
+      <div class="section-head"><strong>{{ store.t('创建频道') }}</strong><button type="button" class="quiet" (click)="store.channelForm.set(false)">{{ store.t('取消') }}</button></div>
+      <label for="channel-title">{{ store.t('频道名称') }}</label>
+      <input id="channel-title" name="channelTitle" [(ngModel)]="store.channelTitle" maxlength="100" required>
+      <button class="primary" [disabled]="store.busy() || !store.channelTitle.trim()">{{ store.t('创建频道') }}</button>
+    </form>
+  }
+
+  <div class="room-list">
+    @for (room of store.visibleRooms(); track room.id) {
+      <button class="room" [class.selected]="room.id === store.selected()" (click)="store.select(room.id)"
+        [attr.data-room]="room.id" [attr.aria-current]="room.id === store.selected()">
+        <span class="avatar" [attr.data-kind]="room.type" aria-hidden="true">
+          @if (room.avatarName && room.avatarVersion) { <img [src]="store.avatarUrl(room.avatarName, room.avatarVersion)" alt=""> }
+          @else { {{ store.initial(store.roomName(room)) }} }
+        </span>
+        <span class="room-body">
+          <span class="room-title"><strong>{{ store.roomName(room) }}</strong>
+            @if (room.pinned) { <span class="room-pin" [attr.title]="store.t('已置顶')" [attr.aria-label]="store.t('已置顶')">⌖</span> }
+            @if (room.muted) { <span class="room-mute" [attr.title]="store.t('已静音')" [attr.aria-label]="store.t('已静音')">◌</span> }
+          </span>
+          <small>{{ store.roomPreview(room) || store.roomType(room) }}</small>
+        </span>
+        <span class="room-meta">
+          @if (room.lastSent) { <time>{{ store.dateLabel(room.lastSent, true) }}</time> }
+          @if (room.unread > 0) {
+            <b class="unread" [class.silent]="room.muted" [attr.aria-label]="room.unread + ' ' + store.t('条未读')">{{ room.unread > 99 ? '99+' : room.unread }}</b>
+          }
+        </span>
+      </button>
+    } @empty { <p class="list-empty">{{ store.t('还没有会话。') }}</p> }
+  </div>
+
+  <details #newChat class="new-chat popover">
+    <summary class="fab" [attr.aria-label]="store.t('新建会话')">✎</summary>
+    <form (ngSubmit)="store.createRoom(newChat)">
+      <strong class="form-title">{{ store.t('新建会话') }}</strong>
+      <label for="kind">{{ store.t('类型') }}</label>
+      <select name="kind" id="kind" [(ngModel)]="store.kind">
+        <option value="direct">{{ store.t('私聊') }}</option>
+        <option value="group">{{ store.t('群聊') }}</option>
+      </select>
+      @if (store.kind === 'group') {
+        <label for="title">{{ store.t('群名称') }}</label>
+        <input id="title" name="title" [(ngModel)]="store.title" maxlength="100" required>
+      }
+      <label for="members">{{ store.t('成员账号') }}</label>
+      <input id="members" name="members" [(ngModel)]="store.members" [attr.placeholder]="store.t('多个账号用逗号分隔')" required>
+      <button class="primary" [disabled]="store.busy()">{{ store.t('创建会话') }}</button>
+    </form>
+  </details>
+</nav>

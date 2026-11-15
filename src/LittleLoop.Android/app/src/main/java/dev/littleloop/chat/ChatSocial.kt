@@ -20,6 +20,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 
 data class ChatFriend(val id: String, val username: String, val displayName: String, val state: String)
@@ -29,24 +30,43 @@ data class ChatMember(val username: String, val displayName: String, val robot: 
 internal fun FriendsPanel(chat: ChatRepository, state: ChatState, openChat: () -> Unit) {
     var username by rememberSaveable { mutableStateOf("") }
     val enabled = state.connected && !state.busy
-    SocialUsername(username, { username = it }, "好友用户名", "添加好友", enabled) {
+    SocialUsername(
+        username, { username = it },
+        stringResource(R.string.friends_username),
+        stringResource(R.string.friends_add),
+        enabled,
+    ) {
         chat.requestFriend(username) { username = "" }
     }
     SocialError(state.error)
-    LazyColumn {
-        if (state.friends.isEmpty()) item { Text("暂无好友或申请", Modifier.padding(16.dp)) }
+    LazyColumn(Modifier.fillMaxWidth()) {
+        if (state.friends.isEmpty()) item {
+            EmptyState("♧", stringResource(R.string.friends_empty))
+        }
         items(state.friends, key = { it.id }) { friend ->
-            SocialRow(friend.displayName, friend.username) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                RoomAvatar(friend.displayName, "direct", 40.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(friend.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text("@${friend.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 when (friend.state) {
                     "incoming" -> {
-                        TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, true) }) { Text("接受") }
-                        TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, false) }) { Text("拒绝") }
+                        TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, true) }) { Text(stringResource(R.string.friends_accept)) }
+                        TextButton(enabled = enabled, onClick = { chat.respondFriend(friend, false) }) { Text(stringResource(R.string.friends_decline)) }
                     }
-                    "outgoing" -> Text("等待对方接受")
-                    "friend" -> TextButton(enabled = enabled,
-                        onClick = { chat.create("direct", "", friend.username, openChat) }) { Text("发起私聊") }
+                    "outgoing" -> Text(stringResource(R.string.friends_pending), style = MaterialTheme.typography.bodySmall)
+                    "friend" -> TextButton(
+                        enabled = enabled,
+                        onClick = { chat.create("direct", "", friend.username, openChat) },
+                    ) { Text(stringResource(R.string.friends_direct)) }
                 }
             }
+            HorizontalDivider(Modifier.padding(start = 68.dp))
         }
     }
 }
@@ -58,60 +78,87 @@ internal fun GroupMembersPanel(chat: ChatRepository, state: ChatState, room: Roo
     var operation by rememberSaveable(room.id) { mutableStateOf("") }
     val enabled = state.connected && !state.busy
     if (room.canManage) {
-        SocialUsername(username, { username = it }, "成员用户名", "邀请成员", enabled) {
+        SocialUsername(
+            username, { username = it },
+            stringResource(R.string.social_member_username),
+            stringResource(R.string.social_invite),
+            enabled,
+        ) {
             chat.changeMember(room.id, username, "invite") { username = "" }
         }
     }
     SocialError(state.error)
-    LazyColumn {
-        if (state.membersRoom == room.id) items(state.members, key = { it.username }) { member ->
-            SocialRow(member.displayName, member.username) {
-                if (member.owner) Text("群主")
-                if (room.canManage && !member.owner && !member.robot) {
-                    TextButton(enabled = enabled, onClick = { target = member.username; operation = "remove" }) { Text("移除") }
-                    TextButton(enabled = enabled, onClick = { target = member.username; operation = "transfer" }) { Text("转让群主") }
+    LazyColumn(Modifier.fillMaxWidth()) {
+        if (state.membersRoom == room.id) {
+            items(state.members, key = { it.username }) { member ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    RoomAvatar(member.displayName, "direct", 40.dp)
+                    Column(Modifier.weight(1f)) {
+                        Text(member.displayName, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (member.owner) "@${member.username} · ${stringResource(R.string.social_owner)}" else "@${member.username}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (room.canManage && !member.owner && !member.robot) {
+                        TextButton(enabled = enabled, onClick = { target = member.username; operation = "remove" }) {
+                            Text(stringResource(R.string.action_remove))
+                        }
+                        TextButton(enabled = enabled, onClick = { target = member.username; operation = "transfer" }) {
+                            Text(stringResource(R.string.social_transfer))
+                        }
+                    }
                 }
+                HorizontalDivider(Modifier.padding(start = 68.dp))
             }
         }
     }
     val pending = target
     if (room.canManage && pending != null) {
-        val title = if (operation == "remove") "移除成员" else "转让群主"
-        AlertDialog(onDismissRequest = { target = null }, title = { Text(title) }, text = { Text("@$pending") },
-            dismissButton = { TextButton(onClick = { target = null }) { Text("取消") } },
-            confirmButton = { TextButton(enabled = enabled, onClick = {
-                chat.changeMember(room.id, pending, operation) { target = null }
-            }) { Text("确认") } })
+        val title = if (operation == "remove") stringResource(R.string.social_remove_member) else stringResource(R.string.social_transfer)
+        AlertDialog(
+            onDismissRequest = { target = null },
+            title = { Text(title) },
+            text = { Text("@$pending") },
+            dismissButton = { TextButton(onClick = { target = null }) { Text(stringResource(R.string.action_cancel)) } },
+            confirmButton = {
+                TextButton(enabled = enabled, onClick = {
+                    chat.changeMember(room.id, pending, operation) { target = null }
+                }) { Text(stringResource(R.string.social_confirm)) }
+            },
+        )
     }
 }
 
 @Composable
 private fun SocialUsername(value: String, update: (String) -> Unit, label: String, action: String,
                            enabled: Boolean, submit: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(value, { if (it.length <= 32) update(it) }, Modifier.weight(1f),
-            label = { Text(label) }, singleLine = true)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedTextField(
+            value, { if (it.length <= 32) update(it) }, Modifier.weight(1f),
+            label = { Text(label) }, singleLine = true, shape = MaterialTheme.shapes.medium,
+        )
         TextButton(enabled = enabled && value.isNotBlank(), onClick = submit) { Text(action) }
     }
 }
 
 @Composable
-private fun SocialRow(name: String, username: String, actions: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(name)
-            Text("@$username", style = MaterialTheme.typography.bodySmall)
-        }
-        actions()
-    }
-    HorizontalDivider()
-}
-
-@Composable
 private fun SocialError(error: String?) {
-    if (error != null) {
-        Text(error, Modifier.padding(horizontal = 14.dp), color = MaterialTheme.colorScheme.error)
+    if (error != null && error != "Offline") {
+        Text(
+            error,
+            Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }

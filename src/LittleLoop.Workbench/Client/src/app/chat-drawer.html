@@ -1,0 +1,52 @@
+<button type="button" class="backdrop" [attr.aria-label]="store.t('关闭主菜单')" (click)="store.drawer.set(false)"></button>
+<aside class="drawer" [attr.aria-label]="store.t('主菜单')">
+  <header class="drawer-top">
+    <span class="brand-mark" aria-hidden="true">L</span>
+    <strong>LittleLoop</strong>
+    <button type="button" class="icon" [attr.aria-label]="store.t('关闭主菜单')" (click)="store.drawer.set(false)">×</button>
+  </header>
+
+  <div class="profile">
+    <span class="avatar">
+      @if (store.accountPrefs().profile.avatarVersion; as version) { <img [src]="store.avatarUrl(store.user(), version)" alt=""> }
+      @else { {{ store.initial(store.displayedName()) }} }
+    </span>
+    <div class="profile-copy"><strong>{{ store.displayedName() }}</strong><small>@{{ store.user() }}</small></div>
+  </div>
+
+  <nav class="drawer-nav">
+    <button type="button" class="drawer-item" (click)="store.drawer.set(false); store.saved()">
+      <span class="item-icon" aria-hidden="true">★</span><span>{{ store.t('个人收藏') }}</span>
+    </button>
+    @if (store.bot().canOperate) {
+      @for (provider of store.bot().providers; track provider) {
+        <button type="button" class="drawer-item" [disabled]="store.busy()" (click)="store.drawer.set(false); store.directBot(provider)">
+          <span class="item-icon" aria-hidden="true">◆</span><span>{{ store.botName(provider) }}</span>
+        </button>
+      }
+    }
+    <button type="button" class="drawer-item" (click)="store.select(''); store.drawer.set(false); store.showChannels()">
+      <span class="item-icon" aria-hidden="true">◎</span><span>{{ store.t('浏览频道') }}</span>
+    </button>
+    <button type="button" class="drawer-item" (click)="store.select(''); store.drawer.set(false); store.channelForm.set(!store.channelForm())">
+      <span class="item-icon" aria-hidden="true">＋</span><span>{{ store.t('新建频道') }}</span>
+    </button>
+    <button type="button" class="drawer-item" (click)="store.openFriends()">
+      <span class="item-icon" aria-hidden="true">♧</span><span>{{ store.t('好友') }}</span>
+    </button>
+    <button type="button" class="drawer-item" (click)="store.openSettings()">
+      <span class="item-icon" aria-hidden="true">⚙</span><span>{{ store.t('设置') }}</span>
+    </button>
+  </nav>
+
+  <section class="language-box">
+    <h3>{{ store.t('界面语言') }}</h3>
+    <div class="language-options" role="group" [attr.aria-label]="store.t('界面语言')">
+      <button type="button" [attr.aria-pressed]="store.devicePrefs().language === 'zh'" (click)="store.setLanguage('zh')">中文</button>
+      <button type="button" [attr.aria-pressed]="store.devicePrefs().language === 'en'" (click)="store.setLanguage('en')">EN</button>
+      <button type="button" [attr.aria-pressed]="store.devicePrefs().language === 'system'" (click)="store.setLanguage('system')">{{ store.t('自动') }}</button>
+    </div>
+  </section>
+
+  <small class="connection" role="status"><span class="status-dot" [class.online]="store.connection() === '已连接'" [class.offline]="store.connection() === '已断开'"></span>{{ store.t(store.connection()) }}</small>
+</aside>

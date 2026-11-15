@@ -56,7 +56,9 @@ class ChatRepository(context: Context) {
     internal val bot = BotChat(api)
     private val outbox = ChatLocalStore(context)
     private val files = context.contentResolver
-    private val local = context.getSharedPreferences("chat_preferences", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val strings get() = Localization.localized(appContext)
+    private val local = context.getSharedPreferences(Localization.PREFERENCES, Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val serial = Mutex()
     private val invalidations = Channel<Unit>(Channel.CONFLATED)
@@ -68,6 +70,7 @@ class ChatRepository(context: Context) {
     var origin = local.getString("origin", "") ?: ""
         private set
     val theme = MutableStateFlow(local.getString("theme", "system") ?: "system")
+    val language = MutableStateFlow(Localization.saved(context))
     val state = MutableStateFlow(ChatState(resuming = api.session != null))
     private var directoryOpen = false
     private var friendsOpen = false
@@ -108,6 +111,11 @@ class ChatRepository(context: Context) {
     }
 
     fun theme(value: String) { theme.value = value; local.edit().putString("theme", value).apply() }
+
+    fun language(value: String) {
+        language.value = value
+        local.edit().putString(Localization.KEY, value).apply()
+    }
 
     fun login(base: String, name: String, password: String) = action {
         api.login(base, name.trim(), password)
@@ -180,7 +188,7 @@ class ChatRepository(context: Context) {
         scope.launch {
             if (!push.acceptsLink(owner)) return@launch
             val opened = runCatching { jump(room, sequence, work, owner) }.getOrDefault(false)
-            if (!opened && push.acceptsLink(owner)) state.update { it.copy(error = "原消息目前不可访问") }
+            if (!opened && push.acceptsLink(owner)) state.update { it.copy(error = strings.getString(R.string.error_message_unavailable)) }
         }
     }
 
@@ -190,7 +198,7 @@ class ChatRepository(context: Context) {
         val sequence = room.pinnedMessage ?: return
         scope.launch {
             try {
-                if (!jump(room.id, sequence)) state.update { it.copy(error = "置顶消息不可访问") }
+                if (!jump(room.id, sequence)) state.update { it.copy(error = strings.getString(R.string.error_pinned_unavailable)) }
             } catch (e: IOException) { failed(e) }
         }
     }
@@ -282,8 +290,8 @@ class ChatRepository(context: Context) {
         if ((text.isBlank() && file == null) || text.length > 4000) return@action
         val bytes = file?.let {
             withContext(Dispatchers.IO) {
-                files.openInputStream(it.uri)?.use { input -> input.readLimitedAttachment() }
-                    ?: throw IllegalArgumentException("无法读取所选附件")
+                files.openInputStream(it.uri)?.use { input -> input.readLimitedAttachment(strings.resources) }
+                    ?: throw IllegalArgumentException(strings.getString(R.string.error_attachment_unreadable))
             }
         }
         outbox.enqueue(key, PendingMessage(UUID.randomUUID().toString(), room, text, replyTo, fileName = file?.name), bytes)
@@ -299,13 +307,13 @@ class ChatRepository(context: Context) {
         SelectedAttachment(uri, safe.ifBlank { "attachment" })
     }
 
-    suspend fun readAttachment(room: String, sequence: Long) = api.download(room, sequence)
+    suspend fun readAttachment(room: String, sequence: Long) = api.download(room, sequence, strings.resources)
 
     suspend fun saveAttachment(room: String, sequence: Long, target: Uri) {
         val bytes = readAttachment(room, sequence)
         withContext(Dispatchers.IO) {
             files.openOutputStream(target, "wt")?.use { it.write(bytes) }
-                ?: throw IOException("无法写入下载位置")
+                ?: throw IOException(strings.getString(R.string.error_write_download))
         }
     }
 
@@ -541,7 +549,8 @@ class ChatRepository(context: Context) {
         Room(it.getString("id"), it.getString("title"), it.getString("type"), it.getLong("latest"),
             it.getLong("unread"), it.getLong("read"), it.getBoolean("muted"), it.getBoolean("archived"),
             it.getBoolean("canPost"), it.optString("preview"), it.optLong("revision"),
-            it.optLong("pinnedMessage").takeIf { sequence -> sequence > 0 }, it.stringOrNull("parentId"), it.optBoolean("canManage"))
+            it.optLong("pinnedMessage").takeIf { sequence -> sequence > 0 }, it.stringOrNull("parentId"), it.optBoolean("canManage"),
+            it.optBoolean("previewDeleted"))
     }
 
     private suspend fun messages(path: String) = decodeMessages(api.request(path))
@@ -564,15 +573,15 @@ class ChatRepository(context: Context) {
             api.clear()
             realtime.disconnect()
             push.sessionChanged()
-            state.value = ChatState(error = "Session expired")
+            state.value = ChatState(error = strings.getString(R.string.error_session_expired))
             if (key != null) outbox.clear(key)
         } else {
             val message = when (error) {
                 is ChatRequestException -> when (error.status) {
                     400 -> (runCatching { JSONTokener(error.body).nextValue() }.getOrNull() as? String)
-                        ?.take(240) ?: "请检查输入内容"
-                    403 -> "没有执行此操作的权限"
-                    else -> "请求失败（${error.status}）"
+                        ?.take(240) ?: strings.getString(R.string.error_check_input)
+                    403 -> strings.getString(R.string.error_forbidden)
+                    else -> strings.getString(R.string.error_request_failed, error.status)
                 }
                 is IllegalArgumentException -> error.message
                 else -> "Offline"

@@ -1,0 +1,32 @@
+<section class="auth" [attr.aria-label]="store.t('登录聊天')">
+  <div class="auth-hero">
+    <span class="brand-mark" aria-hidden="true">L</span>
+    <h1>LittleLoop</h1>
+    <p>{{ store.t('思考、协作，一步步来。') }}</p>
+    <ul>
+      <li>{{ store.t('私聊、群和话题在同一处。') }}</li>
+      <li>{{ store.t('消息与开发任务保持关联。') }}</li>
+      <li>{{ store.t('历史记录可随时继续。') }}</li>
+    </ul>
+  </div>
+  <form class="auth-card" (ngSubmit)="store.authenticate()">
+    <header>
+      <h2>{{ store.mode === 'login' ? store.t('登录聊天') : store.t('创建账号') }}</h2>
+      <p>{{ store.mode === 'login' ? store.t('登录你的聊天账户') : store.t('使用邀请码创建新账号。') }}</p>
+    </header>
+    <label for="name">{{ store.t('账号') }}</label>
+    <input id="name" name="name" [(ngModel)]="store.name" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="password">{{ store.t('密码') }}</label>
+    <input id="password" name="password" type="password" [(ngModel)]="store.password" autocomplete="current-password" required>
+    @if (store.mode === 'register') {
+      <label for="invite">{{ store.t('邀请码') }}</label>
+      <input id="invite" name="invite" type="password" [(ngModel)]="store.invite" autocomplete="off" required>
+    }
+    <button class="primary" [disabled]="store.busy()">
+      {{ store.mode === 'login' ? store.t('登录') : store.t('注册并登录') }}
+    </button>
+    <button type="button" class="quiet switch" (click)="store.mode = store.mode === 'login' ? 'register' : 'login'">
+      {{ store.mode === 'login' ? store.t('使用邀请码注册') : store.t('返回登录') }}
+    </button>
+  </form>
+</section>

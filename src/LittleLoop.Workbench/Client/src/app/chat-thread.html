@@ -1,0 +1,169 @@
+<section class="conversation" [attr.aria-label]="store.t('消息')">
+  @if (store.currentRoom(); as room) {
+    <header class="conversation-header">
+      <button type="button" class="icon back" [attr.aria-label]="store.t('返回会话')" (click)="store.select('')">‹</button>
+      <button type="button" class="avatar header-avatar" [attr.data-kind]="room.type" [attr.aria-label]="store.t('打开会话详情')" (click)="store.openDetails()">
+        @if (room.avatarName && room.avatarVersion) { <img [src]="store.avatarUrl(room.avatarName, room.avatarVersion)" alt=""> }
+        @else { {{ store.initial(store.roomName(room)) }} }
+      </button>
+      <div class="heading">
+        <h2>{{ store.roomName(room) }}</h2>
+        <small>{{ store.roomType(room) }}@if (room.parentId) { · {{ store.roomTitle(room.parentId) }} }</small>
+      </div>
+      <button type="button" class="icon" [attr.aria-label]="store.t('会话内搜索')" (click)="store.toggleSearch(!store.inRoomSearch())">⌕</button>
+      <button type="button" class="icon" [attr.aria-label]="store.t('会话详情')" (click)="store.openDetails()">ⓘ</button>
+      <details class="popover header-menu">
+        <summary class="icon" [attr.aria-label]="store.t('会话菜单')">⋮</summary>
+        <div class="menu-sheet" [attr.aria-label]="store.t('会话设置')" (click)="$any($event.currentTarget).parentElement.open = false">
+          <button type="button" class="quiet" (click)="store.preference(room, 'pinned')">{{ room.pinned ? store.t('取消置顶') : store.t('置顶会话') }}</button>
+          <button type="button" class="quiet" (click)="store.preference(room, 'archived')">{{ room.archived ? store.t('取消归档') : store.t('归档会话') }}</button>
+          <button type="button" class="quiet" (click)="store.preference(room, 'muted')">{{ room.muted ? store.t('取消静音') : store.t('静音会话') }}</button>
+          @if (room.type === 'group') {
+            <button type="button" class="quiet" (click)="store.topicForm.set(!store.topicForm())">{{ store.t('新建话题') }}</button>
+          }
+          @if (room.parentId) { <button type="button" class="quiet" (click)="store.select(room.parentId)">{{ store.t('返回群聊') }}</button> }
+          @if (store.bot().canOperate && (room.type === 'group' || room.type === 'topic')) {
+            <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.installBot(!store.botInstalled())">{{ store.botInstalled() ? store.t('停用机器人') : store.t('加入机器人') }}</button>
+            @if (store.botInstalled() && store.roomProviders().length < store.bot().providers.length) {
+              <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.installBot(true)">{{ store.t('更新机器人') }}</button>
+            }
+          }
+          @if (store.bot().canOperate && store.botInstalled()) {
+            <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.openSources()">{{ store.sources() === null ? store.t('引用源码提问') : store.t('关闭源码提问') }}</button>
+          }
+        </div>
+      </details>
+    </header>
+
+    @if (room.type === 'group') {
+      <div class="toolbar topics" [attr.aria-label]="store.t('群话题')">
+        <span class="topics-label">{{ store.t('群话题') }}</span>
+        @for (topic of store.rooms(); track topic.id) {
+          @if (topic.parentId === room.id) { <button type="button" class="topic-chip" (click)="store.select(topic.id)">{{ topic.title }}</button> }
+        }
+      </div>
+    }
+
+    @if (store.inRoomSearch()) {
+      <form class="inline-panel search-panel" (ngSubmit)="store.search()">
+        <input id="room-search" name="searchTerm" [(ngModel)]="store.searchTerm" [attr.aria-label]="store.t('搜索本会话')" [placeholder]="store.t('搜索本会话')">
+        <button class="primary" [disabled]="!store.searchTerm.trim()">{{ store.t('搜索') }}</button>
+      </form>
+      @if (store.searchResults(); as results) {
+        <div class="results-inline" [attr.aria-label]="store.t('会话搜索结果')">
+          @for (result of results; track result.sequence) {
+            <button type="button" class="quiet" (click)="store.openResult(result)">{{ result.text || result.attachment?.name }}</button>
+          } @empty { <p>{{ store.t('没有匹配的消息。') }}</p> }
+        </div>
+      }
+    }
+
+    @if (store.topicForm()) {
+      <form class="inline-panel" (ngSubmit)="store.createTopic()">
+        <label for="topic-title">{{ store.t('话题名称') }}</label>
+        <input id="topic-title" name="topicTitle" [(ngModel)]="store.topicTitle" maxlength="100" required>
+        <button class="primary" [disabled]="store.busy()">{{ store.t('创建话题') }}</button>
+      </form>
+    }
+
+    @if (store.sources(); as paths) {
+      <form class="inline-panel bot-form" (ngSubmit)="store.askBot()" [attr.aria-label]="store.t('源码提问')">
+        <div class="form-head"><strong>{{ store.t('源码提问') }}</strong><button type="button" class="quiet" (click)="store.sources.set(null)">{{ store.t('关闭源码提问') }}</button></div>
+        <label for="question-provider">{{ store.t('问答机器人') }}</label>
+        <select id="question-provider" name="provider" [(ngModel)]="store.provider" required>
+          @for (name of store.roomProviders(); track name) { <option [value]="name">{{ store.botName(name) }}</option> }
+        </select>
+        <label for="bot-source">{{ store.t('源码文件') }}</label>
+        <select id="bot-source" name="sourcePath" [(ngModel)]="store.sourcePath" required>
+          <option value="">{{ store.t('选择文件') }}</option>
+          @for (path of paths; track path) { <option [value]="path">{{ path }}</option> }
+        </select>
+        <div class="toolbar">
+          <label>{{ store.t('起始行') }} <input type="number" name="sourceStart" [(ngModel)]="store.sourceStart" min="1" required></label>
+          <label>{{ store.t('结束行') }} <input type="number" name="sourceEnd" [(ngModel)]="store.sourceEnd" min="1" required></label>
+        </div>
+        <label for="bot-question">{{ store.t('问题') }}</label>
+        <textarea id="bot-question" name="question" [(ngModel)]="store.question" maxlength="4000" required></textarea>
+        <button class="primary" [disabled]="store.busy() || !store.provider || !store.sourcePath || !store.question.trim()">{{ store.t('提交源码提问') }}</button>
+      </form>
+    }
+
+    @if (store.taskAnchor(); as anchor) {
+      <form class="inline-panel bot-form" (ngSubmit)="store.queueTask()" [attr.aria-label]="store.t('安排开发任务')">
+        <div class="form-head"><strong>{{ store.t('来源消息') }} #{{ anchor.sequence }}</strong><button type="button" class="quiet" (click)="store.taskAnchor.set(null)">{{ store.t('取消安排') }}</button></div>
+        <label for="task-provider">{{ store.t('任务机器人') }}</label>
+        <select id="task-provider" name="provider" [(ngModel)]="store.provider" required>
+          @for (name of store.roomProviders(); track name) { <option [value]="name">{{ store.botName(name) }}</option> }
+        </select>
+        <label for="bot-goal">{{ store.t('任务目标和验收') }}</label>
+        <textarea id="bot-goal" name="goal" [(ngModel)]="store.goal" maxlength="6000" required></textarea>
+        <button class="primary" [disabled]="store.busy() || !store.provider || !store.goal.trim()">{{ store.t('提交开发任务') }}</button>
+      </form>
+    }
+
+    @if (store.currentRoom()?.pinnedMessage; as sequence) {
+      <button class="pinned-bar" type="button" (click)="store.jump(sequence)">
+        <span aria-hidden="true">⌖</span> {{ store.t('已置顶消息') }} #{{ sequence }}
+      </button>
+    }
+
+    @if (store.connection() !== '已连接') {
+      <p class="connection-banner" role="status">{{ store.t(store.connection()) }}</p>
+    }
+
+    <div class="timeline" aria-live="polite" (scroll)="store.closeMessageMenus()">
+      @if (store.more()) {
+        <button type="button" class="load-earlier" (click)="store.older()">{{ store.t('加载更早消息') }}</button>
+      }
+      @for (message of store.messages(); track message.sequence; let index = $index) {
+        @if (store.day(message.sentAt) && (index === 0 || store.day(message.sentAt) !== store.day(store.messages()[index - 1].sentAt))) {
+          <div class="date-divider"><span>{{ message.sentAt ? store.dateLabel(message.sentAt) : '' }}</span></div>
+        }
+        <chat-message [message]="message" [previous]="previous(index)" />
+      } @empty {
+        <div class="timeline-empty">
+          <span aria-hidden="true">✦</span>
+          <p>{{ store.t('开始聊天吧。') }}</p>
+        </div>
+      }
+    </div>
+
+    @if (room.canPost) {
+      <form class="composer" (ngSubmit)="store.send()">
+        @if (store.reply(); as target) {
+          <div class="composer-context">
+            <span class="context-mark" aria-hidden="true">↩</span>
+            <span class="context-text">{{ store.t('回复') }} {{ target.sender }} · #{{ target.sequence }}</span>
+            <button type="button" class="quiet" (click)="store.reply.set(null)">{{ store.t('取消回复') }}</button>
+          </div>
+        }
+        @if (store.pending()[store.selected()]; as item) {
+          <div class="composer-context pending">
+            <span class="context-text">{{ store.t('待确认') }} · {{ item.text }}</span>
+            <button type="button" class="quiet" (click)="store.send(true)" [disabled]="store.busy()">{{ store.t('重试发送') }}</button>
+          </div>
+        } @else {
+          @if (store.attachment(); as file) {
+            <div class="composer-context">
+              <span class="context-mark" aria-hidden="true">📎</span>
+              <span class="context-text">{{ file.name }}</span>
+              <button type="button" class="quiet" (click)="store.attachment.set(null)">{{ store.t('移除附件') }}</button>
+            </div>
+          }
+          <div class="composer-row">
+            <button type="button" class="icon attachment-button" [attr.aria-label]="store.t('添加图片或文件')" (click)="attachmentInput.click()" [disabled]="store.busy()">＋</button>
+            <input #attachmentInput id="attachment" class="upload-input" type="file" tabindex="-1" (change)="store.upload($event)" [disabled]="store.busy()">
+            <div class="composer-field">
+              <textarea id="message" name="message" [attr.aria-label]="store.t('消息内容')" [placeholder]="store.t('写消息…')"
+                [(ngModel)]="store.text" (keydown)="store.composerKey($event)" maxlength="4000" rows="1"></textarea>
+              @if (store.text.length > 3500) { <small class="counter">{{ store.text.length }}/4000</small> }
+            </div>
+            <button class="icon send" [attr.aria-label]="store.t('发送')" [disabled]="store.busy() || (!store.text.trim() && !store.attachment())">➤</button>
+          </div>
+        }
+      </form>
+    } @else {
+      <p class="read-only">{{ store.t('此频道仅发布者可发消息。') }}</p>
+    }
+  }
+</section>

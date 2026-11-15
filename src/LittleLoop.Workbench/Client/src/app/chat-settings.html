@@ -70,7 +70,7 @@
       <div class="fields">
         @for (device of devices(); track device.id) {
           <article><strong>{{ device.current ? label('当前设备','Current device') : label('其他设备','Other device') }}</strong>
-            <small>{{ device.created | date:'short' }}</small><p>{{ device.agent }}</p>
+            <small>{{ date(device.created) }}</small><p>{{ device.agent }}</p>
             @if (!device.current) { <button [disabled]="busy()" (click)="revoke(device.id)">{{ label('结束此会话','End this session') }}</button> }
           </article>
         }

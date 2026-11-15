@@ -18,6 +18,13 @@ android {
         compose = true
         buildConfig = true
     }
+    bundle {
+        language {
+            // The app offers an in-app language switch, so every release APK/AAB
+            // must contain both the English and Simplified-Chinese resources.
+            enableSplit = false
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

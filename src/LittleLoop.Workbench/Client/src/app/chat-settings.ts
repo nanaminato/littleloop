@@ -1,7 +1,6 @@
-import { Component, input, output, signal } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { Component, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { apiMessage } from './chat-language';
+import { ChatI18n } from './chat-i18n';
 
 export interface Folder { name: string; kind: string; include?: string[] | null; exclude?: string[] | null }
 export interface AccountSettings {
@@ -30,11 +29,12 @@ interface PushState { publicKey: string | null; subscribed: boolean }
 
 @Component({
   selector: 'chat-settings',
-  imports: [FormsModule, DatePipe],
+  imports: [FormsModule],
   templateUrl: './chat-settings.html',
   styleUrl: './chat-settings.css',
 })
 export class ChatSettings {
+  private readonly i18n = inject(ChatI18n);
   readonly user = input.required<string>();
   readonly account = input.required<AccountSettings>();
   readonly device = input.required<DeviceSettings>();
@@ -63,11 +63,12 @@ export class ChatSettings {
   username = ''; blockTarget = '';
   folderName = ''; folderType = 'all'; included: string[] = []; excluded: string[] = [];
   replacingFolder: number | null = null;
-  en() { const value = this.device().language; return value === 'en' || (value === 'system' && navigator.language.startsWith('en')); }
-  label(zh: string, en: string) { return this.en() ? en : zh; }
+  en() { return this.i18n.locale() === 'en'; }  label(zh: string, _en?: string) { return this.i18n.t(zh); }
+  t(value: string) { return this.i18n.t(value); }
+  date(value: string) { return this.i18n.date(value); }
   title() {
     const entry = this.navigation.find(x => x[0] === this.page());
-    return entry ? this.label(entry[1], entry[2]) : this.label('设置', 'Settings');
+    return entry ? this.t(entry[1]) : this.t('设置');
   }
   async open(page: string) {
     this.error.set(''); this.done.set(''); this.page.set(page);
@@ -113,7 +114,7 @@ export class ChatSettings {
       } catch {
         throw new Error(this.label('浏览器推送服务注册失败，请检查网络后重试。', 'The browser push service rejected registration. Check the connection and try again.'));
       }
-      try { await this.request('/push', { ...subscription.toJSON(), language: this.en() ? 'en' : 'zh' }); }
+      try { await this.request('/push', { ...subscription.toJSON(), language: this.i18n.locale() }); }
       catch (error) { if (!active) await subscription.unsubscribe(); throw error; }
       await this.loadPush();
     });
@@ -206,7 +207,7 @@ export class ChatSettings {
       body: body instanceof FormData ? body : JSON.stringify(body),
     } : {});
     if (!response.ok) {
-      throw new Error(apiMessage(await response.text(), response.status, this.en()));
+      throw new Error(this.i18n.apiMessage(await response.text(), response.status));
     }
     return response.status === 204 ? undefined as T : response.json();
   }

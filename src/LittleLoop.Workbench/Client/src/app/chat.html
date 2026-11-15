@@ -1,382 +1,47 @@
-<div class="chat-shell" [attr.data-theme]="devicePrefs().theme" [attr.data-accent]="devicePrefs().accent"
-  [attr.data-wall]="devicePrefs().background" [attr.data-scale]="devicePrefs().scale" [class.no-motion]="!devicePrefs().animations"
-  (pointerdown)="initAudio()">
-@if (error()) { <p class="error" role="alert">{{ error() }}</p> }
-@if (notice(); as notification) {
-  <div class="notice" role="status">
-    <button type="button" (click)="select(notification.id)">{{ t('新消息') }} · {{ notification.title }} @if (notification.preview) { <small>{{ notification.preview }}</small> }</button>
-    <button type="button" class="quiet" (click)="notice.set(null)">{{ t('关闭通知') }}</button>
-  </div>
-}
-@if (!user()) {
-  <form class="auth" (ngSubmit)="authenticate()">
-    <span class="avatar account-avatar" aria-hidden="true">L</span>
-    <h1>{{ mode === 'login' ? t('登录聊天') : t('创建账号') }}</h1>
-    <label for="name">{{ t('账号') }}</label><input id="name" name="name" [(ngModel)]="name" autocomplete="username" required>
-    <label for="password">{{ t('密码') }}</label><input id="password" name="password" type="password" [(ngModel)]="password" required>
-    @if (mode === 'register') {
-      <label for="invite">{{ t('邀请码') }}</label><input id="invite" name="invite" type="password" [(ngModel)]="invite" required>
-    }
-    <button [disabled]="busy()">{{ mode === 'login' ? t('登录') : t('注册并登录') }}</button>
-    <button type="button" class="quiet" (click)="mode = mode === 'login' ? 'register' : 'login'">{{ mode === 'login' ? t('使用邀请码注册') : t('返回登录') }}</button>
-  </form>
-} @else {
-  <main [class.open]="selected()" [class.with-details]="detailsOpen()">
-    <nav [attr.aria-label]="t('会话列表')">
-      <div class="sidebar-top">
-        <button type="button" class="icon" [attr.aria-label]="lang('主菜单','Main menu')" (click)="drawer.set(true)">☰</button>
-        <form class="search-bar" (ngSubmit)="toggleSearch(false);search()">
-          <input id="search" name="search" [attr.aria-label]="lang('搜索消息','Search messages')" [placeholder]="lang('搜索','Search')" [(ngModel)]="searchTerm" maxlength="100">
-          <button class="icon" [attr.aria-label]="lang('搜索','Search')" [disabled]="busy() || !searchTerm.trim()">⌕</button>
-        </form>
-      </div>
-      <div class="folder-tabs" [attr.aria-label]="lang('会话文件夹','Chat folders')">
-        <button type="button" [attr.aria-pressed]="!folder()" (click)="folder.set('')">{{ lang('全部','All chats') }}</button>
-        @for (item of accountPrefs().folders; track item.name) {
-          <button type="button" [attr.aria-pressed]="folder() === item.name" (click)="folder.set(item.name)">{{ item.name }}</button>
-        }
-      </div>
-      <button type="button" class="archive-row quiet" (click)="showArchive.set(!showArchive())">
-        <span aria-hidden="true">▤</span> {{ showArchive() ? lang('返回会话列表','All chats') : lang('已归档','Archived chats') }}
+<div class="chat-shell" [attr.data-theme]="store.devicePrefs().theme" [attr.data-accent]="store.devicePrefs().accent"
+  [attr.data-wall]="store.devicePrefs().background" [attr.data-scale]="store.devicePrefs().scale"
+  [class.no-motion]="!store.devicePrefs().animations" (pointerdown)="store.initAudio()">
+  @if (store.error()) { <p class="error" role="alert">{{ store.error() }}</p> }
+  @if (store.notice(); as notification) {
+    <div class="notice" role="status">
+      <button type="button" class="notice-body" (click)="store.select(notification.id)">
+        <strong>{{ store.t('新消息') }} · {{ notification.title }}</strong>
+        @if (notification.preview) { <small>{{ notification.preview }}</small> }
       </button>
-      @if (!inRoomSearch() && searchResults(); as results) {
-        <div class="results" [attr.aria-label]="t('搜索结果')">
-          @for (result of results; track result.roomId + ':' + result.sequence) {
-            <button type="button" class="room quiet" (click)="openResult(result)">{{ roomTitle(result.roomId) }} · {{ result.text || result.attachment?.name }}</button>
-          } @empty { <p>{{ t('没有匹配的消息。') }}</p> }
-          <button type="button" class="quiet" (click)="searchResults.set(null)">{{ t('关闭搜索结果') }}</button>
-        </div>
-      }
-      @if (directory(); as channels) {
-        <section [attr.aria-label]="t('频道目录')">
-          @for (channel of channels; track channel.id) {
-            <div class="toolbar channel-entry" [attr.data-channel]="channel.id">
-              <span>{{ channel.title }}</span>
-              @if (channel.subscribed) { <button type="button" class="quiet" (click)="select(channel.id)">{{ t('打开频道') }}</button> }
-              @if (!channel.owner) { <button type="button" class="quiet" [disabled]="busy()" (click)="subscribe(channel)">{{ channel.subscribed ? t('取消订阅') : t('订阅频道') }}</button> }
-            </div>
-          } @empty { <p class="muted">{{ t('还没有频道。') }}</p> }
+      <button type="button" class="quiet" (click)="store.notice.set(null)">{{ store.t('关闭通知') }}</button>
+    </div>
+  }
+  @if (!store.user()) {
+    <chat-auth />
+  } @else {
+    <main [class.open]="store.selected()" [class.with-details]="store.detailsOpen()">
+      <chat-sidebar />
+      @if (store.selected()) {
+        <chat-thread />
+      } @else {
+        <section class="empty" [attr.aria-label]="store.t('会话列表')">
+          <div class="empty-card">
+            <span class="empty-mark" aria-hidden="true">L</span>
+            <h1>LittleLoop</h1>
+            <p>{{ store.t('选择一个会话，或开始新对话。') }}</p>
+          </div>
         </section>
       }
-      @if (channelForm()) {
-        <form class="bot-form" (ngSubmit)="createChannel()">
-          <label for="channel-title">{{ t('频道名称') }}</label><input id="channel-title" name="channelTitle" [(ngModel)]="channelTitle" maxlength="100" required>
-          <button [disabled]="busy()">{{ t('创建频道') }}</button>
-        </form>
+      @if (store.detailsOpen() ? store.currentRoom() : null; as room) {
+        <chat-info [room]="room" />
       }
-      <div class="room-list">
-        @for (room of visibleRooms(); track room.id) {
-          <button class="room" [class.selected]="room.id === selected()" (click)="select(room.id)" [attr.data-room]="room.id" [attr.aria-current]="room.id === selected()">
-            <span class="avatar" [attr.data-kind]="room.type" aria-hidden="true">
-              @if (room.avatarName && room.avatarVersion) { <img [src]="avatarUrl(room.avatarName, room.avatarVersion)" alt=""> }
-              @else { {{ initial(roomName(room)) }} }
-            </span>
-            <span class="room-body"><strong>{{ roomName(room) }}</strong><small>{{ roomPreview(room) || roomType(room) }}</small></span>
-            <span class="room-meta">
-              @if (room.lastSent) { <time>{{ dateLabel(room.lastSent, true) }}</time> }
-              <span class="room-badges">
-                @if (room.pinned) { <span [attr.title]="t('已置顶')" [attr.aria-label]="t('已置顶')">⌖</span> }
-                @if (room.muted) { <span [attr.title]="t('已静音')" [attr.aria-label]="t('已静音')">◌</span> }
-                @if (room.unread > 0) { <b class="unread" [class.silent]="room.muted" [attr.aria-label]="room.unread + ' ' + t('条未读')">{{ room.unread }}</b> }
-              </span>
-            </span>
-          </button>
-        } @empty { <p class="muted list-empty">{{ lang('还没有会话。','No chats here yet.') }}</p> }
+    </main>
+    @if (store.drawer()) { <chat-drawer /> }
+    @if (store.friendsOpen()) { <chat-friends /> }
+    @if (store.settingsOpen()) {
+      <div class="settings-overlay">
+        <button type="button" class="backdrop" [attr.aria-label]="store.t('关闭设置面板')" (click)="store.settingsOpen.set(false)"></button>
+        <chat-settings [user]="store.user()" [account]="store.accountPrefs()" [device]="store.devicePrefs()"
+          [rooms]="store.rooms()" [adapters]="store.bot().providers" (close)="store.settingsOpen.set(false)"
+          (deviceChange)="store.changeDevice($event)" (accountChange)="store.refreshAccount()"
+          (clearPreviews)="store.manuallyLoaded.set(store.emptyPreviewSet)" (logout)="store.logout()" />
       </div>
-      <details #newChat class="new-chat popover">
-        <summary class="fab" [attr.aria-label]="lang('新建会话','New chat')">✎</summary>
-        <form (ngSubmit)="createRoom(newChat)">
-          <label for="kind">{{ t('类型') }}</label>
-          <select name="kind" id="kind" [(ngModel)]="kind"><option value="direct">{{ t('私聊') }}</option><option value="group">{{ t('群聊') }}</option></select>
-          @if (kind === 'group') { <label for="title">{{ t('群名称') }}</label><input id="title" name="title" [(ngModel)]="title" maxlength="100" required> }
-          <label for="members">{{ t('成员账号') }}</label>
-          <input id="members" name="members" [(ngModel)]="members" [attr.placeholder]="t('多个账号用逗号分隔')" required>
-          <button [disabled]="busy()">{{ t('创建会话') }}</button>
-        </form>
-      </details>
-    </nav>
-    @if (selected()) {
-      <section class="conversation" [attr.aria-label]="t('消息')">
-        <div class="conversation-header">
-          <button type="button" class="icon back" [attr.aria-label]="lang('返回会话','Back to chats')" (click)="select('')">‹</button>
-          @for (room of rooms(); track room.id) {
-            @if (room.id === selected()) {
-              <button type="button" class="avatar header-avatar" [attr.data-kind]="room.type" [attr.aria-label]="lang('打开会话详情','Open chat info')" (click)="openDetails()">{{ initial(roomName(room)) }}</button>
-              <div class="heading"><h2>{{ roomName(room) }}</h2><small>{{ roomType(room) }}</small></div>
-              <button type="button" class="icon" [attr.aria-label]="lang('会话内搜索','Search in chat')" (click)="toggleSearch(!inRoomSearch())">⌕</button>
-              <details class="popover header-menu">
-                <summary class="icon" [attr.aria-label]="lang('会话菜单','Chat menu')">⋮</summary>
-                <div class="menu-sheet" [attr.aria-label]="t('会话设置')" (click)="$any($event.currentTarget).parentElement.open = false">
-                <button type="button" class="quiet" (click)="preference(room, 'pinned')">{{ room.pinned ? t('取消置顶') : t('置顶会话') }}</button>
-                <button type="button" class="quiet" (click)="preference(room, 'archived')">{{ room.archived ? t('取消归档') : t('归档会话') }}</button>
-                <button type="button" class="quiet" (click)="preference(room, 'muted')">{{ room.muted ? t('取消静音') : t('静音会话') }}</button>
-                @if (room.type === 'group') {
-                  <button type="button" class="quiet" (click)="topicForm.set(!topicForm())">{{ t('新建话题') }}</button>
-                }
-                @if (room.parentId) { <button type="button" class="quiet" (click)="select(room.parentId)">{{ t('返回群聊') }}</button> }
-                @if (bot().canOperate && (room.type === 'group' || room.type === 'topic')) {
-                  <button type="button" class="quiet" [disabled]="busy()" (click)="installBot(!botInstalled())">{{ botInstalled() ? t('停用机器人') : t('加入机器人') }}</button>
-                  @if (botInstalled() && roomProviders().length < bot().providers.length) {
-                    <button type="button" class="quiet" [disabled]="busy()" (click)="installBot(true)">{{ t('更新机器人') }}</button>
-                  }
-                }
-                @if (bot().canOperate && botInstalled()) {
-                  <button type="button" class="quiet" [disabled]="busy()" (click)="openSources()">{{ sources() === null ? t('引用源码提问') : t('关闭源码提问') }}</button>
-                }
-                </div>
-              </details>
-              @if (room.type === 'group') {
-                <div class="toolbar topics" [attr.aria-label]="t('群话题')">
-                  @for (topic of rooms(); track topic.id) {
-                    @if (topic.parentId === room.id) { <button type="button" class="quiet" (click)="select(topic.id)">{{ topic.title }}</button> }
-                  }
-                </div>
-              }
-            }
-          }
-        </div>
-        @if (inRoomSearch()) {
-          <form class="bot-form search-bar" (ngSubmit)="search()">
-            <input id="room-search" name="searchTerm" [(ngModel)]="searchTerm" [attr.aria-label]="lang('搜索本会话','Search this chat')">
-            <button [disabled]="!searchTerm.trim()">{{ lang('搜索','Search') }}</button>
-          </form>
-          @if (searchResults(); as results) {
-            <div class="results in-chat" [attr.aria-label]="t('会话搜索结果')">
-              @for (result of results; track result.sequence) { <button type="button" class="quiet" (click)="openResult(result)">{{ result.text || result.attachment?.name }}</button> }
-              @empty { <p>{{ t('没有匹配的消息。') }}</p> }
-            </div>
-          }
-        }
-        @if (topicForm()) {
-          <form class="bot-form" (ngSubmit)="createTopic()">
-            <label for="topic-title">{{ t('话题名称') }}</label><input id="topic-title" name="topicTitle" [(ngModel)]="topicTitle" maxlength="100" required>
-            <button [disabled]="busy()">{{ t('创建话题') }}</button>
-          </form>
-        }
-        @if (sources(); as paths) {
-          <form class="bot-form" (ngSubmit)="askBot()" [attr.aria-label]="t('源码提问')">
-            <label for="question-provider">{{ t('问答机器人') }}</label>
-            <select id="question-provider" name="provider" [(ngModel)]="provider" required>
-              @for (name of roomProviders(); track name) { <option [value]="name">{{ botName(name) }}</option> }
-            </select>
-            <label for="bot-source">{{ t('源码文件') }}</label>
-            <select id="bot-source" name="sourcePath" [(ngModel)]="sourcePath" required>
-              <option value="">{{ t('选择文件') }}</option>
-              @for (path of paths; track path) { <option [value]="path">{{ path }}</option> }
-            </select>
-            <div class="toolbar">
-              <label>{{ t('起始行') }} <input type="number" name="sourceStart" [(ngModel)]="sourceStart" min="1" required></label>
-              <label>{{ t('结束行') }} <input type="number" name="sourceEnd" [(ngModel)]="sourceEnd" min="1" required></label>
-            </div>
-            <label for="bot-question">{{ t('问题') }}</label><textarea id="bot-question" name="question" [(ngModel)]="question" maxlength="4000" required></textarea>
-            <button [disabled]="busy() || !provider || !sourcePath || !question.trim()">{{ t('提交源码提问') }}</button>
-          </form>
-        }
-        @if (taskAnchor(); as anchor) {
-          <form class="bot-form" (ngSubmit)="queueTask()" [attr.aria-label]="t('安排开发任务')">
-            <strong>{{ t('来源消息') }} #{{ anchor.sequence }}</strong>
-            <label for="task-provider">{{ t('任务机器人') }}</label>
-            <select id="task-provider" name="provider" [(ngModel)]="provider" required>
-              @for (name of roomProviders(); track name) { <option [value]="name">{{ botName(name) }}</option> }
-            </select>
-            <label for="bot-goal">{{ t('任务目标和验收') }}</label><textarea id="bot-goal" name="goal" [(ngModel)]="goal" maxlength="6000" required></textarea>
-            <button [disabled]="busy() || !provider || !goal.trim()">{{ t('提交开发任务') }}</button>
-            <button type="button" class="quiet" (click)="taskAnchor.set(null)">{{ t('取消安排') }}</button>
-          </form>
-        }
-        @if (currentRoom()?.pinnedMessage; as sequence) {
-          <button class="quiet" type="button" (click)="jump(sequence)">{{ lang('已置顶消息', 'Pinned message') }} #{{ sequence }}</button>
-        }
-        <div class="timeline" aria-live="polite">
-          @if (more()) { <button type="button" class="quiet" (click)="older()">{{ t('加载更早消息') }}</button> }
-          @for (message of messages(); track message.sequence; let index = $index) {
-            @if (day(message.sentAt) && (index === 0 || day(message.sentAt) !== day(messages()[index - 1].sentAt))) {
-              <div class="date-divider">{{ message.sentAt ? dateLabel(message.sentAt) : '' }}</div>
-            }
-            <article [class.mine]="message.sender === user()" [class.continued]="index > 0 && message.sender === messages()[index - 1].sender && day(message.sentAt) === day(messages()[index - 1].sentAt)" [attr.data-sequence]="message.sequence">
-              <strong class="sender">{{ message.sender === user() ? displayedName() : message.sender }}</strong>
-              @if (message.replyTo) { <button type="button" class="quiet reply" (click)="jump(message.replyTo)">{{ t('回复') }} #{{ message.replyTo }}</button> }
-              @if (message.deleted) {
-                <p [id]="'message-' + message.sequence" class="muted">{{ t('消息已删除') }}</p>
-              } @else {
-                @if (message.forwardedFrom) { <small>{{ t('转发自') }} {{ message.forwardedFrom }}</small> }
-                <p [id]="'message-' + message.sequence">{{ message.text }}</p>
-                @if (message.card; as card) { <chat-bot-card [card]="card" [english]="english()" /> }
-                @if (message.attachment; as file) {
-                  @if (file.mime.startsWith('image/')) {
-                    @if (showImage(message)) { <img [src]="attachmentUrl(message)" [alt]="file.name" loading="lazy"> }
-                    @else { <button type="button" class="quiet" (click)="loadImage(message)">{{ lang('加载图片','Load image') }}</button> }
-                  }
-                  <a [href]="attachmentUrl(message) + '?download=true'">{{ t('下载') }} {{ file.name }}</a>
-                }
-                @if (message.edited) { <small class="muted">{{ t('已编辑') }}</small> }
-                <div class="bubble-footer">
-                  @if (message.sentAt) { <time>{{ dateLabel(message.sentAt, true) }}</time> }
-                  @if (message.sender === user()) { <span [attr.aria-label]="lang('已发送','Sent')">✓</span> }
-                  <details class="popover message-menu">
-                    <summary class="icon" [attr.aria-label]="lang('消息操作','Message actions')">⋯</summary>
-                    <div class="menu-sheet" (click)="$any($event.currentTarget).parentElement.open = false">
-                  @if (currentRoom()?.canPost) { <button type="button" class="quiet reply" (click)="reply.set(message)">{{ lang('回复','Reply') }}</button> }
-                  @if (message.text) { <button type="button" class="quiet reply" (click)="copyMessage(message.text)">{{ lang('复制','Copy') }}</button> }
-                  <button type="button" class="quiet reply" (click)="beginForward(message)">{{ t('转发') }}</button>
-                  @if (currentRoom()?.canPost) {
-                    <button type="button" class="quiet reply" (click)="pinMessage(message)">
-                      {{ currentRoom()?.pinnedMessage === message.sequence ? lang('取消置顶消息', 'Unpin message') : lang('置顶消息', 'Pin message') }}
-                    </button>
-                  }
-                  @if (bot().canOperate && botInstalled() && message.card?.kind !== 'task') {
-                    <button type="button" class="quiet reply" (click)="beginTask(message)">{{ t('安排开发任务') }}</button>
-                  }
-                  @if (message.sender === user() && !message.card) {
-                    <button type="button" class="quiet reply" (click)="beginEdit(message)">{{ t('编辑') }}</button>
-                    <button type="button" class="quiet reply" (click)="removing.set(message)">{{ t('删除') }}</button>
-                  }
-                    </div>
-                  </details>
-                </div>
-                @if (editing()?.sequence === message.sequence) {
-                  <form (ngSubmit)="saveEdit()">
-                    <label for="edit-text">{{ t('编辑内容') }}</label><textarea id="edit-text" name="editText" [(ngModel)]="editText" maxlength="4000"></textarea>
-                    <button [disabled]="busy()">{{ t('保存修改') }}</button><button type="button" class="quiet" (click)="editing.set(null)">{{ t('取消编辑') }}</button>
-                  </form>
-                }
-                @if (removing()?.sequence === message.sequence) {
-                  <div class="toolbar"><button type="button" [disabled]="busy()" (click)="deleteMessage()">{{ t('确认删除') }}</button>
-                    <button type="button" class="quiet" (click)="removing.set(null)">{{ t('取消删除') }}</button></div>
-                }
-                @if (forwarding()?.sequence === message.sequence) {
-                  <form (ngSubmit)="forward()">
-                    <label for="forward-room">{{ t('转发到') }}</label>
-                    <select id="forward-room" name="forwardRoom" [(ngModel)]="forwardRoom">
-                      <option value="">{{ t('选择会话') }}</option>
-                      @for (room of rooms(); track room.id) { <option [value]="room.id">{{ roomName(room) }}</option> }
-                    </select>
-                    <div class="toolbar"><button [disabled]="!forwardRoom || busy()">{{ t('确认转发') }}</button>
-                      <button type="button" [disabled]="busy()" (click)="forward(true)">{{ t('存到个人收藏') }}</button>
-                      <button type="button" class="quiet" (click)="forwarding.set(null)">{{ t('取消转发') }}</button></div>
-                  </form>
-                }
-              }
-            </article>
-          } @empty { <p class="muted">{{ t('开始聊天吧。') }}</p> }
-        </div>
-        @if (currentRoom()?.canPost) {
-        <form class="composer" (ngSubmit)="send()">
-          @if (reply(); as target) {
-            <span>{{ t('回复') }} {{ target.sender }} · #{{ target.sequence }}</span>
-            <button type="button" class="quiet" (click)="reply.set(null)">{{ t('取消回复') }}</button>
-          }
-          @if (pending()[selected()]; as item) {
-            <p>{{ t('待确认') }} · {{ item.text }}</p><button type="button" (click)="send(true)" [disabled]="busy()">{{ t('重试发送') }}</button>
-          } @else {
-            @if (attachment(); as file) {
-              <div class="attachment-chip"><span>{{ file.name }}</span><button type="button" class="quiet" (click)="attachment.set(null)">{{ lang('移除附件','Remove attachment') }}</button></div>
-            }
-            <div class="composer-row">
-              <button type="button" class="icon attachment-button" [attr.aria-label]="lang('添加图片或文件','Add a photo or file')" (click)="attachmentInput.click()" [disabled]="busy()">＋</button>
-              <input #attachmentInput id="attachment" class="upload-input" type="file" tabindex="-1" (change)="upload($event)" [disabled]="busy()">
-              <textarea id="message" name="message" [attr.aria-label]="lang('消息内容','Message')" [placeholder]="lang('写消息…','Write a message…')" [(ngModel)]="text" (keydown)="composerKey($event)" maxlength="4000" rows="1"></textarea>
-              <button class="icon send" [attr.aria-label]="lang('发送','Send')" [disabled]="busy() || (!text.trim() && !attachment())">➤</button>
-            </div>
-          }
-        </form>
-        } @else { <p class="muted">{{ t('此频道仅发布者可发消息。') }}</p> }
-      </section>
-    } @else { <section class="empty"><p>{{ lang('选择一个会话，或开始新对话。','Select a chat or start a new conversation.') }}</p></section> }
-    @if (detailsOpen() ? currentRoom() : null; as room) {
-      <aside class="details-panel" [attr.aria-label]="lang('会话详情','Chat info')">
-        <div class="panel-top"><button class="icon" type="button" [attr.aria-label]="lang('关闭会话详情','Close chat info')" (click)="detailsOpen.set(false)">×</button><strong>{{ lang('会话详情','Chat info') }}</strong></div>
-        <div class="profile"><span class="avatar">{{ initial(roomName(room)) }}</span><strong>{{ roomName(room) }}</strong></div>
-        <button type="button" class="wide quiet" (click)="preference(room,'muted')">{{ room.muted ? lang('取消静音','Unmute') : lang('静音会话','Mute chat') }}</button>
-        @if (room.type === 'group') {
-          <h3>{{ lang('群话题','Topics') }}</h3>
-          @for (topic of rooms(); track topic.id) { @if (topic.parentId === room.id) { <button type="button" class="wide quiet" (click)="select(topic.id)">{{ topic.title }}</button> } }
-        }
-        <h3>{{ room.type === 'channel' ? lang('发布者','Publisher') : lang('成员','Members') }}</h3>
-        @if (currentRoom()?.canManage) {
-          <form class="inline-form" (ngSubmit)="changeMember('invite')">
-            <input name="memberUsername" [(ngModel)]="memberUsername" [attr.aria-label]="lang('成员用户名','Member username')" [placeholder]="lang('成员用户名','Member username')" required maxlength="32">
-            <button type="submit" [disabled]="busy() || !memberUsername.trim()">{{ lang('邀请成员','Invite member') }}</button>
-          </form>
-        }
-        @for (member of detailMembers(); track member.name) {
-          <div class="member">
-            <span class="avatar">{{ initial(member.displayName) }}</span>
-            <span>{{ member.displayName }} <small>@{{ member.name }}</small>
-              @if (member.owner) { <small>{{ lang('群主','Owner') }}</small> }
-            </span>
-            @if (currentRoom()?.canManage && !member.owner && !member.robot) {
-              <button type="button" class="quiet" [disabled]="busy()" (click)="changeMember('remove', member.name)">{{ lang('移除','Remove') }}</button>
-              <button type="button" class="quiet" [disabled]="busy()" (click)="changeMember('transfer', member.name)">{{ lang('转让群主','Transfer ownership') }}</button>
-            }
-          </div>
-        }
-        <h3>{{ lang('当前加载的共享媒体','Shared media in loaded history') }}</h3>
-        @for (message of messages(); track message.sequence) {
-          @if (message.attachment; as file) { <a class="wide" [href]="attachmentUrl(message) + '?download=true'">{{ file.name }}</a> }
-        }
-      </aside>
     }
-  </main>
-  @if (drawer()) {
-    <button type="button" class="backdrop" [attr.aria-label]="lang('关闭主菜单','Close main menu')" (click)="drawer.set(false)"></button>
-    <aside class="drawer" [attr.aria-label]="lang('主菜单','Main menu')">
-      <div class="profile"><span class="avatar">
-        @if (accountPrefs().profile.avatarVersion; as version) { <img [src]="avatarUrl(user(),version)" alt=""> }
-        @else { {{ initial(displayedName()) }} }
-      </span><div><strong>{{ displayedName() }}</strong><small>@{{ user() }}</small></div></div>
-      <button type="button" class="wide quiet" (click)="drawer.set(false);saved()">{{ lang('个人收藏','Saved messages') }}</button>
-      @if (bot().canOperate) {
-        @for (provider of bot().providers; track provider) {
-          <button type="button" class="wide quiet" [disabled]="busy()" (click)="drawer.set(false);directBot(provider)">{{ botName(provider) }} {{ lang('私聊','direct chat') }}</button>
-        }
-      }
-      <button type="button" class="wide quiet" (click)="select('');drawer.set(false);showChannels()">{{ lang('浏览频道','Browse channels') }}</button>
-      <button type="button" class="wide quiet" (click)="select('');drawer.set(false);channelForm.set(!channelForm())">{{ lang('新建频道','New channel') }}</button>
-      <button type="button" class="wide quiet" (click)="openFriends()">{{ lang('好友','Friends') }}</button>
-      <button type="button" class="wide quiet" (click)="openSettings()">{{ lang('设置','Settings') }}</button>
-      <small class="connection" role="status">{{ t(connection()) }}</small>
-    </aside>
+    <span class="sr-only" role="status">{{ store.t(store.connection()) }}</span>
   }
-  @if (friendsOpen()) {
-    <div class="settings-overlay">
-      <button type="button" class="backdrop" [attr.aria-label]="lang('关闭好友','Close friends')" (click)="friendsOpen.set(false)"></button>
-      <aside class="details-panel friends-panel" [attr.aria-label]="lang('好友','Friends')">
-        <div class="panel-top"><strong>{{ lang('好友','Friends') }}</strong><button type="button" class="icon" [attr.aria-label]="lang('关闭好友列表','Close friend list')" (click)="friendsOpen.set(false)">×</button></div>
-        <form class="inline-form" (ngSubmit)="requestFriend()">
-          <input name="friendUsername" [(ngModel)]="friendUsername" [attr.aria-label]="lang('好友用户名','Friend username')" [placeholder]="lang('好友用户名','Friend username')" maxlength="32" required>
-          <button type="submit" [disabled]="busy() || !friendUsername.trim()">{{ lang('添加好友','Add friend') }}</button>
-        </form>
-        @if (error()) { <p role="alert">{{ error() }}</p> }
-        @for (friend of friends(); track friend.id) {
-          <div class="member">
-            <span class="avatar">{{ initial(friend.displayName) }}</span>
-            <span>{{ friend.displayName }} <small>@{{ friend.username }}</small></span>
-            @switch (friend.state) {
-              @case ('incoming') {
-                <button class="quiet" type="button" [disabled]="busy()" (click)="respondFriend(friend, true)">{{ lang('接受','Accept') }}</button>
-                <button class="quiet" type="button" [disabled]="busy()" (click)="respondFriend(friend, false)">{{ lang('拒绝','Decline') }}</button>
-              }
-              @case ('outgoing') { <small>{{ lang('等待对方接受','Request sent') }}</small> }
-              @case ('friend') {
-                <button class="quiet" type="button" [disabled]="busy()" (click)="directFriend(friend)">{{ lang('发起私聊','Start private chat') }}</button>
-              }
-            }
-          </div>
-        } @empty {
-          <p>{{ lang('暂无好友或申请','No friends or requests yet') }}</p>
-        }
-      </aside>
-    </div>
-  }
-  @if (settingsOpen()) {
-    <div class="settings-overlay">
-      <button type="button" class="backdrop" [attr.aria-label]="lang('关闭设置面板','Dismiss settings panel')" (click)="settingsOpen.set(false)"></button>
-      <chat-settings [user]="user()" [account]="accountPrefs()" [device]="devicePrefs()" [rooms]="rooms()" [adapters]="bot().providers"
-        (close)="settingsOpen.set(false)" (deviceChange)="changeDevice($event)" (accountChange)="refreshAccount()"
-        (clearPreviews)="manuallyLoaded.set(emptyPreviewSet)" (logout)="logout()" />
-    </div>
-  }
-  <span class="sr-only" role="status">{{ t(connection()) }}</span>
-}
 </div>

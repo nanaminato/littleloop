@@ -20,13 +20,14 @@ class ChatNotificationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        val strings = Localization.localized(this)
         notifications.createNotificationChannels(listOf(
-            NotificationChannel("connection", "后台消息连接", NotificationManager.IMPORTANCE_LOW),
-            NotificationChannel("messages", "新聊天消息", NotificationManager.IMPORTANCE_DEFAULT),
-            NotificationChannel("silent_messages", "静默聊天消息", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel("connection", strings.getString(R.string.notification_channel_connection), NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel("messages", strings.getString(R.string.notification_channel_messages), NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel("silent_messages", strings.getString(R.string.notification_channel_silent), NotificationManager.IMPORTANCE_LOW),
         ))
-        startForeground(6001, notification("connection", null).setContentTitle("LittleLoop")
-            .setContentText("后台消息连接已启用").setOngoing(true).build())
+        startForeground(6001, notification("connection", null).setContentTitle(strings.getString(R.string.app_name))
+            .setContentText(strings.getString(R.string.notification_connection_text)).setOngoing(true).build())
         val seen = chat.state.value.rooms.associateBy(Room::id).toMutableMap()
         chat.listening(true)
         scope.launch {
@@ -47,7 +48,7 @@ class ChatNotificationService : Service() {
                         room.latest > previous.latest && room.unread > previous.unread)
                     if (!chat.foreground && newMessage && !room.muted && settings?.optBoolean(category, true) != false) {
                         val preview = if (settings?.optBoolean("preview", true) == false || room.preview.isBlank())
-                            "你有一条新消息" else room.preview
+                            Localization.localized(this@ChatNotificationService).getString(R.string.notification_new_message) else room.preview
                         val channel = if (settings?.optBoolean("sound", true) == false) "silent_messages" else "messages"
                         notifications.notify(room.id, 1, notification(channel, room.id).setContentTitle(room.title)
                             .setContentText(preview).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).build())

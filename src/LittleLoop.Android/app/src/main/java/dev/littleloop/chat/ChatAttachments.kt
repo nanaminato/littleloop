@@ -1,5 +1,7 @@
 package dev.littleloop.chat
 
+import android.content.Context
+import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -12,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -19,22 +23,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal fun InputStream.readLimitedAttachment(): ByteArray {
+internal fun InputStream.readLimitedAttachment(resources: Resources): ByteArray {
     val output = ByteArrayOutputStream()
     val buffer = ByteArray(16_384)
     while (true) {
         val count = read(buffer)
         if (count < 0) break
-        require(output.size() + count <= MAX_ATTACHMENT_BYTES) { "文件大小不能超过 5 MiB" }
+        require(output.size() + count <= MAX_ATTACHMENT_BYTES) { resources.getString(R.string.attach_too_large) }
         output.write(buffer, 0, count)
     }
-    require(output.size() > 0) { "无法发送空文件" }
+    require(output.size() > 0) { resources.getString(R.string.attach_empty) }
     return output.toByteArray()
 }
 
 @Composable
 internal fun AttachmentDialog(chat: ChatRepository, room: String, message: ChatMessage, dismiss: () -> Unit) {
     val file = message.attachment ?: return
+    val context = LocalContext.current
+    val savedLabel = stringResource(R.string.attach_saved)
+    val unavailableLabel = stringResource(R.string.attach_unavailable)
+    val readFailedLabel = stringResource(R.string.attach_read_failed)
     val scope = rememberCoroutineScope()
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var text by remember { mutableStateOf<String?>(null) }
@@ -45,7 +53,7 @@ internal fun AttachmentDialog(chat: ChatRepository, room: String, message: ChatM
         if (uri != null) scope.launch {
             loading = true
             status = runCatching { chat.saveAttachment(room, message.sequence, uri) }
-                .fold({ "已保存附件" }, { attachmentError(it) })
+                .fold({ savedLabel }, { attachmentError(it, unavailableLabel, readFailedLabel) })
             loading = false
         }
     }
@@ -57,7 +65,7 @@ internal fun AttachmentDialog(chat: ChatRepository, room: String, message: ChatM
                 if (file.image) bitmap = withContext(Dispatchers.Default) { decodePreview(bytes) }
                     ?: error("Unsupported image")
                 else text = bytes.decodeToString(endIndex = minOf(bytes.size, 32_768)).take(12_000)
-            }.onFailure { status = attachmentError(it) }
+            }.onFailure { status = attachmentError(it, unavailableLabel, readFailedLabel) }
             loading = false
         }
     }
@@ -66,18 +74,17 @@ internal fun AttachmentDialog(chat: ChatRepository, room: String, message: ChatM
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("${file.size} B · ${file.mime}")
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            bitmap?.let { Image(it.asImageBitmap(), "图片预览", Modifier.fillMaxWidth()) }
+            bitmap?.let { Image(it.asImageBitmap(), stringResource(R.string.attach_preview), Modifier.fillMaxWidth()) }
             text?.let { Text(it) }
             status?.let { Text(it) }
         }
     }, confirmButton = {
-        TextButton(onClick = { destination.launch(file.name) }, enabled = !loading) { Text("下载") }
-    }, dismissButton = { TextButton(onClick = dismiss) { Text("关闭") } })
+        TextButton(onClick = { destination.launch(file.name) }, enabled = !loading) { Text(stringResource(R.string.action_download)) }
+    }, dismissButton = { TextButton(onClick = dismiss) { Text(stringResource(R.string.action_close)) } })
 }
 
-private fun attachmentError(error: Throwable): String =
-    if (error is ChatRequestException && error.status in setOf(401, 403, 404)) "附件当前不可访问"
-    else "无法读取或保存附件，请重试"
+private fun attachmentError(error: Throwable, unavailable: String, failed: String): String =
+    if (error is ChatRequestException && error.status in setOf(401, 403, 404)) unavailable else failed
 
 private fun decodePreview(bytes: ByteArray): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

@@ -36,7 +36,8 @@ data class Session(val base: HttpUrl, val cookie: String) {
 }
 data class Room(val id: String, val title: String, val type: String, val latest: Long, val unread: Long,
                 val read: Long, val muted: Boolean, val archived: Boolean, val canPost: Boolean, val preview: String,
-                val revision: Long, val pinnedMessage: Long?, val parentId: String?, val canManage: Boolean = false)
+                val revision: Long, val pinnedMessage: Long?, val parentId: String?, val canManage: Boolean = false,
+                val previewDeleted: Boolean = false)
 data class ChatChannel(val id: String, val title: String, val subscribed: Boolean, val owner: Boolean)
 data class ChatMessage(val sequence: Long, val clientId: String, val sender: String, val text: String,
                        val deleted: Boolean, val sentAt: String, val replyTo: Long?, val attachment: ChatAttachment?,
@@ -160,13 +161,13 @@ class ChatApi(private val storage: SessionStorage) {
             }
         }
 
-    suspend fun download(room: String, sequence: Long): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun download(room: String, sequence: Long, resources: android.content.res.Resources): ByteArray = withContext(Dispatchers.IO) {
         val current = session ?: throw ChatRequestException(401, "")
         val request = build(current.base, current.cookie, "/rooms/$room/messages/$sequence/attachment", null)
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw ChatRequestException(response.code, "")
-            val body = response.body ?: throw IOException("附件无内容")
-            body.byteStream().use { it.readLimitedAttachment() }
+            val body = response.body ?: throw IOException("empty attachment")
+            body.byteStream().use { it.readLimitedAttachment(resources) }
         }
     }
 

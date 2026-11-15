@@ -1,0 +1,89 @@
+<aside class="details-panel" [attr.aria-label]="store.t('会话详情')">
+  <div class="panel-top">
+    <strong>{{ store.t('会话详情') }}</strong>
+    <button class="icon close" type="button" [attr.aria-label]="store.t('关闭会话详情')" (click)="store.detailsOpen.set(false)">×</button>
+  </div>
+
+  <div class="profile-card">
+    <span class="avatar" [attr.data-kind]="room().type">
+      @if (room().avatarName && room().avatarVersion) { <img [src]="store.avatarUrl(room().avatarName!, room().avatarVersion!)" alt=""> }
+      @else { {{ store.initial(store.roomName(room())) }} }
+    </span>
+    <div class="profile-copy">
+      <strong>{{ store.roomName(room()) }}</strong>
+      <small>{{ store.roomType(room()) }}@if (room().parentId) { · {{ store.roomTitle(room().parentId!) }} }</small>
+    </div>
+  </div>
+
+  <div class="quick-actions">
+    <button type="button" class="wide quiet" (click)="store.preference(room(), 'muted')">
+      {{ room().muted ? store.t('取消静音') : store.t('静音会话') }}
+    </button>
+    <button type="button" class="wide quiet" (click)="store.preference(room(), 'pinned')">
+      {{ room().pinned ? store.t('取消置顶') : store.t('置顶会话') }}
+    </button>
+    <button type="button" class="wide quiet" (click)="store.preference(room(), 'archived')">
+      {{ room().archived ? store.t('取消归档') : store.t('归档会话') }}
+    </button>
+  </div>
+
+  @if (room().type === 'group') {
+    <section class="panel-section">
+      <h3>{{ store.t('群话题') }}</h3>
+      <div class="topic-list">
+        @for (topic of store.rooms(); track topic.id) {
+          @if (topic.parentId === room().id) {
+            <button type="button" class="wide quiet" (click)="store.select(topic.id)">
+              <span class="topic-dot" aria-hidden="true"></span>{{ topic.title }}
+              @if (topic.unread > 0) { <b class="tiny-unread">{{ topic.unread }}</b> }
+            </button>
+          }
+        } @empty { <p class="empty-copy">{{ store.t('暂无话题') }}</p> }
+      </div>
+    </section>
+  }
+
+  <section class="panel-section">
+    <h3>{{ room().type === 'channel' ? store.t('发布者') : store.t('成员') }}</h3>
+    @if (store.currentRoom()?.canManage) {
+      <form class="invite-form" (ngSubmit)="store.changeMember('invite')">
+        <input name="memberUsername" [(ngModel)]="store.memberUsername" [attr.aria-label]="store.t('成员用户名')"
+          [placeholder]="store.t('成员用户名')" required maxlength="32">
+        <button type="submit" [disabled]="store.busy() || !store.memberUsername.trim()">{{ store.t('邀请成员') }}</button>
+      </form>
+    }
+    <div class="member-list">
+      @for (member of store.detailMembers(); track member.name) {
+        <div class="member">
+          <span class="avatar member-avatar" aria-hidden="true">{{ store.initial(member.displayName) }}</span>
+          <span class="member-copy">
+            <strong>{{ member.displayName }}</strong>
+            <small>@{{ member.name }} @if (member.owner) { · {{ store.t('群主') }} }</small>
+          </span>
+          @if (store.currentRoom()?.canManage && !member.owner && !member.robot) {
+            <details class="popover member-menu">
+              <summary class="icon" [attr.aria-label]="store.t('成员操作')">⋯</summary>
+              <div class="menu-sheet" (click)="$any($event.currentTarget).parentElement.open = false">
+                <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.changeMember('remove', member.name)">{{ store.t('移除') }}</button>
+                <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.changeMember('transfer', member.name)">{{ store.t('转让群主') }}</button>
+              </div>
+            </details>
+          }
+        </div>
+      } @empty { <p class="empty-copy">{{ store.t('还没有成员。') }}</p> }
+    </div>
+  </section>
+
+  <section class="panel-section">
+    <h3>{{ store.t('当前加载的共享媒体') }}</h3>
+    <div class="shared-media">
+      @for (message of store.messages(); track message.sequence) {
+        @if (message.attachment; as file) {
+          <a class="media-link" [href]="store.attachmentUrl(message) + '?download=true'">
+            <span aria-hidden="true">▣</span><span>{{ file.name }}</span>
+          </a>
+        }
+      } @empty { <p class="empty-copy">{{ store.t('暂无共享媒体') }}</p> }
+    </div>
+  </section>
+</aside>

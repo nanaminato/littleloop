@@ -11,7 +11,7 @@ using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 6 * 1024 * 1024);
-if (builder.Configuration["Chat:Url"] is null) builder.WebHost.UseUrls("http://127.0.0.1:5190");
+if (builder.Configuration["Chat:Url"] is null) builder.WebHost.UseUrls("http://0.0.0.0:5190");
 else builder.WebHost.UseUrls(builder.Configuration["Chat:Url"]!);
 var config = builder.Configuration;
 string Required(string key) => config[key] ?? throw new InvalidOperationException("Set " + key);

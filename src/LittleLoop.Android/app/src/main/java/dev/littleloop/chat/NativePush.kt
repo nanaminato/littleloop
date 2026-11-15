@@ -28,6 +28,7 @@ internal class NativePush(private val context: Context, private val api: ChatApi
     private val preferences = context.getSharedPreferences("fcm_device", Context.MODE_PRIVATE)
     private val seen = context.getSharedPreferences("fcm_notices", Context.MODE_PRIVATE)
     private val notifications get() = context.getSystemService(NotificationManager::class.java)
+    private val strings get() = Localization.localized(context)
     private val lock = Any()
     val configured: Boolean get() = FirebaseApp.getApps(context).isNotEmpty()
     val enabled = MutableStateFlow(isEnabled(api.session))
@@ -48,7 +49,7 @@ internal class NativePush(private val context: Context, private val api: ChatApi
     suspend fun setEnabled(value: Boolean) {
         val session = api.session ?: throw ChatRequestException(401, "")
         if (value) {
-            check(configured) { "此安装包尚未配置 Firebase" }
+            check(configured) { strings.getString(R.string.error_firebase_missing) }
             register(session)
             synchronized(lock) {
                 if (api.session !== session) return
@@ -68,7 +69,7 @@ internal class NativePush(private val context: Context, private val api: ChatApi
     // HTTP v1 targets a registration token in Message.token.
     @Suppress("DEPRECATION")
     private suspend fun register(session: Session) {
-        val project = FirebaseApp.getInstance().options.projectId ?: error("Firebase 项目标识未配置")
+        val project = FirebaseApp.getInstance().options.projectId ?: error(strings.getString(R.string.error_firebase_project))
         val server = JSONObject(api.request("/settings/fcm", expected = session)).stringOrNull("project")
         if (server != project) throw ChatRequestException(if (server == null) 404 else 400, "")
         val token = withContext(Dispatchers.IO) {
@@ -118,7 +119,8 @@ internal class NativePush(private val context: Context, private val api: ChatApi
             val normalId = if (work == null) "fcm_messages" else "fcm_approvals"
             val channelId = if (notice.optBoolean("sound", true)) normalId else "${normalId}_silent"
             notifications.createNotificationChannel(NotificationChannel(channelId,
-                if (work == null) "云推送 · 聊天消息" else "云推送 · 待审批",
+                if (work == null) strings.getString(R.string.notification_cloud_message)
+                else strings.getString(R.string.notification_cloud_work),
                 if (channelId == normalId) NotificationManager.IMPORTANCE_DEFAULT else NotificationManager.IMPORTANCE_LOW).apply {
                 if (channelId != normalId) setSound(null, null)
             })

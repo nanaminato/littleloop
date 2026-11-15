@@ -1,0 +1,41 @@
+<div class="friends-overlay">
+  <button type="button" class="backdrop" [attr.aria-label]="store.t('关闭好友')" (click)="store.friendsOpen.set(false)"></button>
+  <aside class="friends-panel" [attr.aria-label]="store.t('好友')">
+    <div class="panel-top">
+      <strong>{{ store.t('好友') }}</strong>
+      <button type="button" class="icon" [attr.aria-label]="store.t('关闭好友列表')" (click)="store.friendsOpen.set(false)">×</button>
+    </div>
+    <form class="inline-form" (ngSubmit)="store.requestFriend()">
+      <input name="friendUsername" [(ngModel)]="store.friendUsername" [attr.aria-label]="store.t('好友用户名')"
+        [placeholder]="store.t('好友用户名')" maxlength="32" required>
+      <button type="submit" [disabled]="store.busy() || !store.friendUsername.trim()">{{ store.t('添加好友') }}</button>
+    </form>
+    @if (store.error()) { <p class="friends-error" role="alert">{{ store.error() }}</p> }
+    <div class="friends-list">
+      @for (friend of store.friends(); track friend.id) {
+        <div class="member">
+          <span class="avatar" aria-hidden="true">{{ store.initial(friend.displayName) }}</span>
+          <span class="member-copy">
+            <strong>{{ friend.displayName }}</strong>
+            <small>@{{ friend.username }}</small>
+          </span>
+          @switch (friend.state) {
+            @case ('incoming') {
+              <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.respondFriend(friend, true)">{{ store.t('接受') }}</button>
+              <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.respondFriend(friend, false)">{{ store.t('拒绝') }}</button>
+            }
+            @case ('outgoing') { <small class="state-copy">{{ store.t('等待对方接受') }}</small> }
+            @case ('friend') {
+              <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.directFriend(friend)">{{ store.t('发起私聊') }}</button>
+            }
+          }
+        </div>
+      } @empty {
+        <div class="friends-empty">
+          <span aria-hidden="true">♧</span>
+          <p>{{ store.t('暂无好友或申请') }}</p>
+        </div>
+      }
+    </div>
+  </aside>
+</div>

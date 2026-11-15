@@ -1,0 +1,102 @@
+<article class="message" [class.mine]="mine()" [class.continued]="continued()" [class.deleted]="message().deleted"
+  [attr.data-sequence]="message().sequence" [attr.data-sender]="message().sender">
+  @if (!mine()) {
+    @if (!continued()) {
+      <span class="avatar sender-avatar" aria-hidden="true">{{ store.initial(message().sender) }}</span>
+    } @else {
+      <span class="avatar-spacer" aria-hidden="true"></span>
+    }
+  }
+  <div class="bubble-wrap">
+    <div class="bubble">
+      @if (!mine() && !continued()) { <strong class="sender">{{ senderName() }}</strong> }
+      @if (message().replyTo) {
+        <button type="button" class="reply-quote quiet" (click)="store.jump(message().replyTo!)">
+          <span aria-hidden="true">↩</span> {{ store.t('回复') }} #{{ message().replyTo }}
+        </button>
+      }
+      @if (message().deleted) {
+        <p [id]="'message-' + message().sequence" class="deleted-text"><em>{{ store.t('消息已删除') }}</em></p>
+      } @else {
+        @if (message().forwardedFrom) { <small class="forwarded">{{ store.t('转发自') }} {{ message().forwardedFrom }}</small> }
+        @if (message().text) { <p [id]="'message-' + message().sequence" class="text">{{ message().text }}</p> }
+        @if (message().card; as card) { <chat-bot-card [card]="card" /> }
+        @if (message().attachment; as file) {
+          @if (file.mime.startsWith('image/')) {
+            @if (store.showImage(message())) {
+              <a class="image-link" [href]="store.attachmentUrl(message())" target="_blank" rel="noopener">
+                <img [src]="store.attachmentUrl(message())" [alt]="file.name" loading="lazy">
+              </a>
+            } @else {
+              <button type="button" class="quiet load-image" (click)="store.loadImage(message())">{{ store.t('加载图片') }}</button>
+            }
+          }
+          <a class="file-link" [href]="store.attachmentUrl(message()) + '?download=true'">
+            <span class="file-icon" aria-hidden="true">▣</span>
+            <span class="file-name">{{ file.name }}</span>
+            <span class="file-action">{{ store.t('下载') }}</span>
+          </a>
+        }
+        @if (message().edited) { <small class="edited">{{ store.t('已编辑') }}</small> }
+        <div class="bubble-footer">
+          @if (message().sentAt) { <time>{{ store.dateLabel(message().sentAt!, true) }}</time> }
+          @if (mine()) { <span class="sent-mark" [attr.aria-label]="store.t('已发送')">✓</span> }
+          <details class="popover message-menu" (toggle)="store.positionMessageMenu($event)">
+            <summary class="icon" [attr.aria-label]="store.t('消息操作')">⋯</summary>
+            <div class="menu-sheet" (click)="$any($event.currentTarget).parentElement.open = false">
+              @if (store.currentRoom()?.canPost) { <button type="button" class="quiet" (click)="store.reply.set(message())">{{ store.t('回复') }}</button> }
+              @if (message().text) { <button type="button" class="quiet" (click)="store.copyMessage(message().text)">{{ store.t('复制') }}</button> }
+              <button type="button" class="quiet" (click)="store.beginForward(message())">{{ store.t('转发') }}</button>
+              @if (store.currentRoom()?.canPost) {
+                <button type="button" class="quiet" (click)="store.pinMessage(message())">
+                  {{ store.currentRoom()?.pinnedMessage === message().sequence ? store.t('取消置顶消息') : store.t('置顶消息') }}
+                </button>
+              }
+              @if (store.bot().canOperate && store.botInstalled() && message().card?.kind !== 'task') {
+                <button type="button" class="quiet" (click)="store.beginTask(message())">{{ store.t('安排开发任务') }}</button>
+              }
+              @if (mine() && !message().card) {
+                <button type="button" class="quiet" (click)="store.beginEdit(message())">{{ store.t('编辑') }}</button>
+                <button type="button" class="quiet" (click)="store.removing.set(message())">{{ store.t('删除') }}</button>
+              }
+            </div>
+          </details>
+        </div>
+      }
+    </div>
+
+    @if (store.editing()?.sequence === message().sequence) {
+      <form class="message-form" (ngSubmit)="store.saveEdit()">
+        <label for="edit-text">{{ store.t('编辑内容') }}</label>
+        <textarea id="edit-text" name="editText" [(ngModel)]="store.editText" maxlength="4000"></textarea>
+        <div class="toolbar">
+          <button class="primary" [disabled]="store.busy()">{{ store.t('保存修改') }}</button>
+          <button type="button" class="quiet" (click)="store.editing.set(null)">{{ store.t('取消编辑') }}</button>
+        </div>
+      </form>
+    }
+    @if (store.removing()?.sequence === message().sequence) {
+      <div class="message-form confirm">
+        <p>{{ store.t('删除后，此消息将在会话中显示为已删除。') }}</p>
+        <div class="toolbar">
+          <button type="button" class="danger" [disabled]="store.busy()" (click)="store.deleteMessage()">{{ store.t('确认删除') }}</button>
+          <button type="button" class="quiet" (click)="store.removing.set(null)">{{ store.t('取消删除') }}</button>
+        </div>
+      </div>
+    }
+    @if (store.forwarding()?.sequence === message().sequence) {
+      <form class="message-form" (ngSubmit)="store.forward()">
+        <label for="forward-room">{{ store.t('转发到') }}</label>
+        <select id="forward-room" name="forwardRoom" [(ngModel)]="store.forwardRoom">
+          <option value="">{{ store.t('选择会话') }}</option>
+          @for (room of store.rooms(); track room.id) { <option [value]="room.id">{{ store.roomName(room) }}</option> }
+        </select>
+        <div class="toolbar">
+          <button class="primary" [disabled]="!store.forwardRoom || store.busy()">{{ store.t('确认转发') }}</button>
+          <button type="button" [disabled]="store.busy()" (click)="store.forward(true)">{{ store.t('存到个人收藏') }}</button>
+          <button type="button" class="quiet" (click)="store.forwarding.set(null)">{{ store.t('取消转发') }}</button>
+        </div>
+      </form>
+    }
+  </div>
+</article>
