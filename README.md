@@ -103,3 +103,5 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 [Android 会话与频道管理重构](docs/44-android-conversation-refactor.md)说明组件、业务状态和共享权限的边界及回归验证。
 
 [好友申请和群成员管理](docs/39-chat-friends-and-group-members.md)覆盖网页版和 Android，群成员变更会同步到话题。
+
+[Android 好友与群成员管理重构](docs/45-android-social-refactor.md)说明组件与状态分离、共享权限及原生回归结果。

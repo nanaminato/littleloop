@@ -32,7 +32,9 @@ def adb(*args):
 def ui():
     for _ in range(4):
         try:
-            raw = adb('shell', 'uiautomator dump /sdcard/android-ui-audit.xml >/dev/null && cat /sdcard/android-ui-audit.xml').decode(errors='replace')
+            # uiautomator can exit successfully without writing a dump while Android is busy.
+            # Remove only our previous dump so a failed read cannot masquerade as current UI.
+            raw = adb('shell', 'rm -f /sdcard/android-ui-audit.xml && uiautomator dump /sdcard/android-ui-audit.xml >/dev/null && cat /sdcard/android-ui-audit.xml').decode(errors='replace')
         except RuntimeError:
             time.sleep(.4)
             continue
@@ -95,7 +97,8 @@ def capture(name, root=None):
 
 def launch(room=None):
     adb('shell','am','force-stop','dev.littleloop.chat')
-    args=['shell','am','start','-W','-n','dev.littleloop.chat/.MainActivity']
+    # Observe the actual window below; am start -W can stall after emulator display changes.
+    args=['shell','am','start','-f','0x10008000','-n','dev.littleloop.chat/.MainActivity']
     if room:args+=['--es','room',room]
     adb(*args)
     if room: return wait(desc='Chat actions')
@@ -106,8 +109,14 @@ def launch(room=None):
     raise AssertionError('Application window did not appear')
 
 def size(width,height,density=320,font='1.0'):
-    adb('shell','wm','size',f'{width}x{height}');adb('shell','wm','density',density)
+    # Rotate a portrait display instead of scaling a portrait taskbar into landscape.
+    # The latter can leave Android's navigation touch region over app controls.
+    landscape = width > height
+    adb('shell','wm','user-rotation','lock',0)
+    adb('shell','wm','size',f'{height}x{width}' if landscape else f'{width}x{height}')
+    adb('shell','wm','density',density)
     adb('shell','settings','put','system','font_scale',font)
+    if landscape: adb('shell','wm','user-rotation','lock',1)
 
 def login(name, origin=BASE):
     root=launch()
@@ -118,7 +127,12 @@ def login(name, origin=BASE):
             back()
         click(text='⚙',root=root);tap(seek('Log out'));root=wait(text='Sign in')
     fields=[n for n in nodes(root) if n.get('class')=='android.widget.EditText']
-    enter(fields[0],origin);adb('shell','input','keyevent',61)
-    adb('shell','input','text',name);adb('shell','input','keyevent',61)
-    adb('shell','input','text',ENV['CHAT_TEST_PASSWORD']);back()
+    # Some emulator IMEs consume Ctrl+A. These are single-line fields: clear them
+    # with ordinary End/Delete events so retries cannot append to saved credentials.
+    def replace_login(value, previous_length):
+        adb('shell','input','keyevent',123,*([67]*(previous_length+1)))
+        adb('shell','input','text',value)
+    tap(fields[0]);replace_login(origin,len(fields[0].get('text','')))
+    adb('shell','input','keyevent',61);replace_login(name,len(fields[1].get('text','')))
+    adb('shell','input','keyevent',61);replace_login(ENV['CHAT_TEST_PASSWORD'],128);back()
     click(text='Sign in');wait(desc='New chat')

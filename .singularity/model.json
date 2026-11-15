@@ -2078,6 +2078,51 @@
       "references": [
         "REF-ANDROID-CONVERSATION-REFACTOR"
       ]
+    },
+    {
+      "id": "INTENT-ANDROID-SOCIAL-REFACTOR",
+      "type": "intent",
+      "title": "Separate Android friend and group membership presentation from business state",
+      "body": "User explicitly requested the same Android refactoring approach for friends and group member management: component/state separation, shared permissions, unchanged functionality, existing tests and actual emulator regression on 2026-11-15.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "User explicitly requested the same Android refactoring approach for friends and group member management: component/state separation, shared permissions, unchanged functionality, existing tests and actual emulator regression on 2026-11-15.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-ANDROID-SOCIAL-REFACTOR",
+      "type": "module",
+      "title": "Android friend and group member components, state holders and shared permissions",
+      "body": "Thin social routes compose stateless friend/member rows, reusable forms and confirmation/join dialogs. Account- and room-scoped state holders own drafts, live member submissions and cancellable join polling, reusing the existing repository. Friend relationships and typed member operations share rules between visible affordances, pending confirmations and submission. Current actor and target roles invalidate stale actions.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-ANDROID-SOCIAL-REFACTOR"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-ANDROID-SOCIAL-REFACTOR"
+      ]
+    },
+    {
+      "id": "EVIDENCE-ANDROID-SOCIAL-REFACTOR",
+      "type": "evidence",
+      "title": "Android social refactor unit and emulator regression",
+      "body": "Build, 16 JVM tests and lint passed (0 errors, 39 warnings). 36 social role/layout checks across four sizes, 16 existing group conversation checks, 27 real friendship/member/state actions, 4 failure/retry checks and 4 existing discussion join checks passed. Dynamic actor/target role changes and approval ownership loss were checked through native UI with backend effects verified.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "data/android-social-refactor/regression-summary.json records results and final APK SHA-256. UI screenshots/XML retained. Interrupted emulator steps were resumed or repeated; the 36-case social matrix was rerun using fresh XML snapshots and real rotation. Test environment restored. Robot target protection has unit coverage; physical phones, push and startup reliability were not revalidated. See docs/45 for scope and harness corrections."
+      },
+      "references": [
+        "REF-ANDROID-SOCIAL-REFACTOR"
+      ]
     }
   ],
   "relations": [
@@ -2938,6 +2983,24 @@
       "type": "supports",
       "source": "EVIDENCE-ANDROID-CONVERSATION-REFACTOR",
       "target": "MOD-ANDROID-CONVERSATION-REFACTOR"
+    },
+    {
+      "id": "REL-ANDROID-SOCIAL-REFACTOR-IMPLEMENTS",
+      "type": "implements",
+      "source": "MOD-ANDROID-SOCIAL-REFACTOR",
+      "target": "INTENT-ANDROID-SOCIAL-REFACTOR"
+    },
+    {
+      "id": "REL-ANDROID-SOCIAL-REFACTOR-DEPENDS",
+      "type": "depends_on",
+      "source": "MOD-ANDROID-SOCIAL-REFACTOR",
+      "target": "MOD-CHAT-SOCIAL"
+    },
+    {
+      "id": "REL-ANDROID-SOCIAL-REFACTOR-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-ANDROID-SOCIAL-REFACTOR",
+      "target": "MOD-ANDROID-SOCIAL-REFACTOR"
     }
   ],
   "references": [
@@ -3513,6 +3576,13 @@
       "kind": "project_file",
       "target": "docs/44-android-conversation-refactor.md",
       "purpose": "Component/state boundaries and actual Android refactor regression evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-ANDROID-SOCIAL-REFACTOR",
+      "kind": "project_file",
+      "target": "docs/45-android-social-refactor.md",
+      "purpose": "Social component/state boundaries, shared permissions and actual emulator regression evidence",
       "tracking": "live"
     }
   ],
