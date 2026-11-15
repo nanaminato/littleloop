@@ -1,6 +1,6 @@
 import { Component, effect, inject, input, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatStore } from './chat-store';
+import { ChatStore } from '../shared/chat-store';
 
 const rights = [
   [1, '发布帖子'], [2, '编辑帖子'], [4, '删除帖子'], [8, '置顶消息'],

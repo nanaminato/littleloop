@@ -1,7 +1,7 @@
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Attachment, ChatMessage, DiscussionSummary } from './chat-model';
-import { ChatStore } from './chat-store';
+import { Attachment, ChatMessage, DiscussionSummary } from '../shared/chat-model';
+import { ChatStore } from '../shared/chat-store';
 
 interface DiscussionThread {
   groupId: string;

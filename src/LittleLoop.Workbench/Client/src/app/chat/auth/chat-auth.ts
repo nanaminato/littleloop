@@ -1,13 +1,13 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatStore } from './chat-store';
+import { ChatStore } from '../shared/chat-store';
 
 @Component({
-  selector: 'chat-friends',
+  selector: 'chat-auth',
   imports: [FormsModule],
-  templateUrl: './chat-friends.html',
-  styleUrl: './chat-friends.css',
+  templateUrl: './chat-auth.html',
+  styleUrl: './chat-auth.css',
 })
-export class ChatFriends {
+export class ChatAuth {
   readonly store = inject(ChatStore);
 }

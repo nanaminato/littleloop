@@ -1,13 +1,13 @@
 import { Component, HostListener, inject } from '@angular/core';
-import { ChatAuth } from './chat-auth';
-import { ChatCreateSpace } from './chat-create-space';
-import { ChatDrawer } from './chat-drawer';
-import { ChatFriends } from './chat-friends';
-import { ChatInfo } from './chat-info';
-import { ChatSettings } from './chat-settings';
-import { ChatSidebar } from './chat-sidebar';
-import { ChatStore } from './chat-store';
-import { ChatThread } from './chat-thread';
+import { ChatAuth } from './auth/chat-auth';
+import { ChatCreateSpace } from './spaces/chat-create-space';
+import { ChatDrawer } from './navigation/drawer/chat-drawer';
+import { ChatFriends } from './friends/chat-friends';
+import { ChatInfo } from './conversation/details/chat-info';
+import { ChatSettings } from './settings/chat-settings';
+import { ChatSidebar } from './navigation/sidebar/chat-sidebar';
+import { ChatStore } from './shared/chat-store';
+import { ChatThread } from './conversation/thread/chat-thread';
 
 @Component({
   selector: 'app-root',

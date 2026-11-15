@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr';
-import { AccountSettings, DeviceSettings, accountDefaults, deviceDefaults } from './chat-settings';
+import { AccountSettings, DeviceSettings, accountDefaults, deviceDefaults } from '../settings/chat-settings';
 import { ChatI18n } from './chat-i18n';
 import {
   Attachment, Channel, ChatMessage, Friend, Member, Notice, Outgoing, Room,

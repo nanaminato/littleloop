@@ -1,6 +1,6 @@
 import { Component, ElementRef, HostListener, afterNextRender, inject, input, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatStore } from './chat-store';
+import { ChatStore } from '../shared/chat-store';
 
 type SpaceKind = 'channel' | 'topic';
 

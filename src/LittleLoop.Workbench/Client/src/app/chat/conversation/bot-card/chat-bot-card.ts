@@ -1,6 +1,6 @@
 import { Component, inject, input, OnDestroy, OnInit, signal } from '@angular/core';
-import { ChatI18n } from './chat-i18n';
-import { MessageCard } from './chat-model';
+import { ChatI18n } from '../../shared/chat-i18n';
+import { MessageCard } from '../../shared/chat-model';
 
 interface Approval { nonce: string; method: string; parameters: unknown }
 interface AgentExecution {

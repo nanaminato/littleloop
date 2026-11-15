@@ -1,9 +1,9 @@
 import { Component, computed, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatBotCard } from './chat-bot-card';
-import { ChatMessage, DiscussionSummary } from './chat-model';
-import { ChatComments } from './chat-comments';
-import { ChatStore } from './chat-store';
+import { ChatBotCard } from '../bot-card/chat-bot-card';
+import { ChatMessage, DiscussionSummary } from '../../shared/chat-model';
+import { ChatComments } from '../../channels/chat-comments';
+import { ChatStore } from '../../shared/chat-store';
 
 @Component({
   selector: 'chat-message',

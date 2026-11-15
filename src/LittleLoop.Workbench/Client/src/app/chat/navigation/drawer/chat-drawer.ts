@@ -1,5 +1,5 @@
 import { Component, inject } from '@angular/core';
-import { ChatStore } from './chat-store';
+import { ChatStore } from '../../shared/chat-store';
 
 @Component({
   selector: 'chat-drawer',

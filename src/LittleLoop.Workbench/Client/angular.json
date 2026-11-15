@@ -51,7 +51,7 @@
             ],
             "styles": [
               "src/styles.css",
-              "src/app/chat-ui.css"
+              "src/app/chat/shared/chat-ui.css"
             ]
           },
           "configurations": {

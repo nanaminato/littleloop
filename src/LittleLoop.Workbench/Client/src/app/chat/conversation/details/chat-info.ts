@@ -1,8 +1,8 @@
 import { Component, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Room } from './chat-model';
-import { ChatChannelSettings } from './chat-channel-settings';
-import { ChatStore } from './chat-store';
+import { Room } from '../../shared/chat-model';
+import { ChatChannelSettings } from '../../channels/chat-channel-settings';
+import { ChatStore } from '../../shared/chat-store';
 
 @Component({
   selector: 'chat-info',

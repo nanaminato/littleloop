@@ -1,6 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatStore } from './chat-store';
+import { ChatStore } from '../../shared/chat-store';
 
 @Component({
   selector: 'chat-sidebar',

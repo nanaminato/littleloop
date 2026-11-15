@@ -1,6 +1,6 @@
 import { Component, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatI18n } from './chat-i18n';
+import { ChatI18n } from '../shared/chat-i18n';
 
 export interface Folder { name: string; kind: string; include?: string[] | null; exclude?: string[] | null }
 export interface AccountSettings {

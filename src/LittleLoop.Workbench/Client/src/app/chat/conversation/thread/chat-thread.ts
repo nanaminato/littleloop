@@ -1,8 +1,8 @@
 import { Component, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ChatMessage, DiscussionSummary } from './chat-model';
-import { ChatStore } from './chat-store';
-import { ChatMessageView } from './chat-message';
+import { ChatMessage, DiscussionSummary } from '../../shared/chat-model';
+import { ChatStore } from '../../shared/chat-store';
+import { ChatMessageView } from '../message/chat-message';
 
 @Component({
   selector: 'chat-thread',
