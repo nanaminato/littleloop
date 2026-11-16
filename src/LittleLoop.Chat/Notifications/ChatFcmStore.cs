@@ -1,3 +1,4 @@
+using System.Data.Common;
 using MySqlConnector;
 
 sealed record FcmDelivery(long Id, string Device, string Token, string User, string Room, long Sequence,
@@ -20,7 +21,7 @@ sealed partial class ChatStore
             ON DUPLICATE KEY UPDATE token=@token,token_hash=SHA2(@token,256),installation_id=@installation
             """, ("device", device), ("token", token), ("installation", installationId));
         try { await save.ExecuteNonQueryAsync(); await tx.CommitAsync(); return true; }
-        catch (MySqlException e) when (e.Number is 1062 or 1213 or 1452) { return false; }
+        catch (DbException e) when (IsConstraintOrBusy(e)) { return false; }
     }
 
     public async Task RemoveFcm(string device, string? expectedToken = null)
@@ -32,7 +33,7 @@ sealed partial class ChatStore
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private static async Task EnqueueFcmMessage(MySqlConnection db, MySqlTransaction tx, string room, long seq, string author)
+    private static async Task EnqueueFcmMessage(DbConnection db, DbTransaction tx, string room, long seq, string author)
     {
         await using var cmd = Command(db, tx, """
             INSERT IGNORE INTO chat_fcm_queue(device_id,room_id,seq,event_key,due,expires)

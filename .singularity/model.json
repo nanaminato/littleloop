@@ -2168,6 +2168,53 @@
       "references": [
         "REF-ANDROID-HOME-REFACTOR"
       ]
+    },
+    {
+      "id": "INTENT-CHAT-COMMITMENTS",
+      "type": "intent",
+      "title": "Advance bounded ordinary-turn work commitments and optional chat SQL adapter",
+      "body": "User explicitly said: 那你进行推进吧，不过你可能没有mysql数据库，或许你可以先添加一个另外sql数据库的适配层（用于chat），然后继续推进。 This authorizes implementation of the discussed bounded chat commitment stage and optional SQL adapter; not deployment, automatic learning or tool privilege expansion.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Explicit user go-ahead for discussed bounded stage and optional chat SQL adapter",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-CHAT-COMMITMENTS",
+      "type": "module",
+      "title": "Bounded chat work commitment experiment and optional SQLite persistence",
+      "body": "AI-derived engineering choice: finite intent grammar and separate immutable commitment ledger, authenticated opt-in direct Chat host, synthetic interruptible executor, bounded account/room anchors and durable versions. Existing Core TaskScheduling and real ChatBot /schedule provider paths remain unchanged. Optional ADO SQLite adapter retains MySQL default; no production migration.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-COMMITMENTS"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-CHAT-SQLITE",
+        "REF-CHAT-COMMITMENTS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-COMMITMENTS",
+      "type": "evidence",
+      "title": "Deterministic synthetic commitment and SQLite verification",
+      "body": "Chat build passed with zero warnings/errors; 36 new Core commitment checks and existing 308 Core checks passed. Real HTTP SQLite test generated accounts/files and passed 77 response/assertion checks on one run (poll count varies): authenticated ordinary turns, duplicates, pause/resume, replace, stale reply and restart. Store/host checks cover concurrent sequences, immutable identity and capacity. No live MySQL, real provider interruption or browser/Android UI acceptance was run.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "Repeat using tests/LittleLoop.CommitmentChecks, tests/LittleLoop.ChatChecks, tests/ChatCommitmentHttp/check.py and tests/LittleLoop.Checks. Initial SDK environment required writable HOME and dotnet on PATH; existing checks were rerun after correcting environment."
+      },
+      "references": [
+        "REF-CHAT-SQLITE",
+        "REF-CHAT-COMMITMENTS"
+      ]
     }
   ],
   "relations": [
@@ -3064,6 +3111,18 @@
       "type": "supports",
       "source": "EVIDENCE-ANDROID-HOME-REFACTOR",
       "target": "MOD-ANDROID-HOME-REFACTOR"
+    },
+    {
+      "id": "REL-CHAT-COMMITMENTS-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-COMMITMENTS",
+      "target": "INTENT-CHAT-COMMITMENTS"
+    },
+    {
+      "id": "REL-CHAT-COMMITMENTS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-COMMITMENTS",
+      "target": "MOD-CHAT-COMMITMENTS"
     }
   ],
   "references": [
@@ -3653,6 +3712,20 @@
       "kind": "project_file",
       "target": "docs/46-android-home-refactor.md",
       "purpose": "Home and creation state/component boundaries, shared policies and actual emulator regression evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-SQLITE",
+      "kind": "project_file",
+      "target": "docs/47-chat-sqlite.md",
+      "purpose": "Optional Chat SQLite adapter",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-COMMITMENTS",
+      "kind": "project_file",
+      "target": "docs/48-chat-commitments.md",
+      "purpose": "Ordinary-turn bounded synthetic commitment stage",
       "tracking": "live"
     }
   ],

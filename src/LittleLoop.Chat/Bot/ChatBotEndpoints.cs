@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using LittleLoop.Tools;
 using MySqlConnector;
@@ -119,7 +120,7 @@ static class ChatBotEndpoints
             }
             catch (ArgumentException e) { return Results.BadRequest(e.Message); }
             catch (InvalidOperationException e) { return Results.Conflict(e.Message); }
-            catch (MySqlException e) when (e.Number == 1062) { return Results.Conflict("任务 ID 已使用。"); }
+            catch (DbException e) when (ChatStore.IsDuplicate(e)) { return Results.Conflict("任务 ID 已使用。"); }
         }
 
         Task<bool> AllowedProvider(Guid room, string? provider) => bot.CanUse(provider)

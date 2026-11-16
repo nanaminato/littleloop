@@ -78,6 +78,8 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 
 [聊天机器人](docs/26-chat-phase-c.md)支持 LittleLoop 私聊和群聊、源码引用、开发任务、逐次审批、执行结果与历史工作台导入。
 
+[Chat SQLite 适配](docs/47-chat-sqlite.md)提供不依赖 MySQL 服务的本地单实例选项，MySQL 仍为默认。[普通消息工作承诺](docs/48-chat-commitments.md)以显式启用的私聊模拟执行器验证接受、修订、暂停、取消、替换和迟到回执边界；尚未连接真实开发工具中断。
+
 [聊天平台扩展](docs/27-chat-phase-d.md)增加源码审阅机器人、群话题和频道订阅广播。
 
 [Telegram 式聊天界面](docs/29-telegram-ui-implementation.md)实现桌面和手机布局、十类设置入口及多设备同步。

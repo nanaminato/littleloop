@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
@@ -14,7 +15,7 @@ sealed record DeviceRevoke(string Id);
 
 sealed partial class ChatStore
 {
-    private static async Task UpgradeSettings(MySqlConnection db)
+    private static async Task UpgradeSettings(DbConnection db)
     {
         await using var cmd = Command(db, null, """
             CREATE TABLE IF NOT EXISTS chat_user_settings (

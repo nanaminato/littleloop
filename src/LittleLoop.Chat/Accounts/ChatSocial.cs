@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
@@ -10,7 +11,7 @@ sealed record GroupMemberChange(string Username, string Operation);
 
 sealed partial class ChatStore
 {
-    private static async Task UpgradeSocial(MySqlConnection db)
+    private static async Task UpgradeSocial(DbConnection db)
     {
         await using var create = Command(db, null, """
             CREATE TABLE IF NOT EXISTS chat_friends (
@@ -21,6 +22,8 @@ sealed partial class ChatStore
             );
             """);
         await create.ExecuteNonQueryAsync();
+        // SQLite starts with the corrected schema; this migrates only historical MySQL schemas.
+        if (db is Microsoft.Data.Sqlite.SqliteConnection) return;
         await using var lookup = Command(db, null, """
             SELECT DISTINCT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
             WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='chat_messages' AND REFERENCED_TABLE_NAME='chat_members'
@@ -102,7 +105,7 @@ sealed partial class ChatStore
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private static async Task<int> GroupModeration(MySqlConnection db, MySqlTransaction tx,
+    private static async Task<int> GroupModeration(DbConnection db, DbTransaction tx,
         string room, string user)
     {
         await using var query = Command(db, tx, """

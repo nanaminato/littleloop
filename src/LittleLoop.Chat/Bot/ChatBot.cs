@@ -114,7 +114,7 @@ sealed class ChatBot : BackgroundService
                 var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
                 {
                     try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }
-                    catch (MySqlConnector.MySqlException e) { log.LogWarning("Could not queue approval notification, MySQL error {Error}.", e.Number); }
+                    catch (System.Data.Common.DbException e) { log.LogWarning("Could not queue approval notification, database error {Error}.", e.ErrorCode); }
                 }, token);
                 await store.SetBotStatus(lease, work, outcome.Status, output: outcome.Report);
             }
