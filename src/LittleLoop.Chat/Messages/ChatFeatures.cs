@@ -57,6 +57,8 @@ sealed partial class ChatStore
             await AddColumn("chat_messages", "card", "JSON NULL");
             await UpgradeBot(db);
             await AddColumn("chat_bot_work", "output", "TEXT NULL");
+            await AddColumn("chat_bot_work", "goal", "JSON NULL");
+            await UpgradeGoals(db);
             await AddColumn("chat_rooms", "parent_id", "CHAR(36) NULL REFERENCES chat_rooms(id)");
             await AddColumn("chat_rooms", "owner_id", "CHAR(36) NULL REFERENCES chat_accounts(id)");
             await AddColumn("chat_messages", "sent_at", "DATETIME(6) NULL");

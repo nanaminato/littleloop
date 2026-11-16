@@ -13,6 +13,10 @@ export const LOCALES: { id: Locale; label: string; dateLocale: string }[] = [
  * instead of showing a raw message id, and keeps the existing UI copy stable.
  */
 const english: Record<string, string> = {
+  "已暂停": "Paused",
+  "已取消": "Cancelled",
+  "等待补充要求": "Waiting for requirements",
+  "回复此任务可补充要求、查询进度、暂停、恢复或取消。": "Reply to this task to add requirements, check progress, pause, resume or cancel.",
   // Channel administration and discussions
   "频道与讨论群": "Channel and discussion group",
   "你已被群组禁言。": "You are muted in this group.",

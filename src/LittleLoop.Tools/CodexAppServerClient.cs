@@ -32,9 +32,34 @@ public sealed class CodexAppServerClient : IAgentSessionClient
         var start = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
+        if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_HOME") is { Length: > 0 } serviceHome)
+        {
+            if (!Path.IsPathFullyQualified(serviceHome)) throw new ArgumentException("LITTLELOOP_CODEX_HOME must be absolute.");
+            ProjectFiles.CheckAncestors(serviceHome);
+            Directory.CreateDirectory(serviceHome);
+            start.Environment["CODEX_HOME"] = serviceHome;
+        }
         start.ArgumentList.Add("app-server"); start.ArgumentList.Add("--stdio");
+        // Keep resumable runtime databases with this host session. The desktop's
+        // personal CODEX_HOME may be read-only to a service or restricted process.
+        string runtime = Path.GetFullPath(Path.Combine(logDirectory, "codex-runtime"));
+        Directory.CreateDirectory(runtime);
+        string temporary = Path.Combine(runtime, "tmp");
+        Directory.CreateDirectory(temporary);
+        // SQLite migrations also create temporary files. Service tokens may not
+        // be able to write the interactive user's inherited TEMP directory.
+        start.Environment["TEMP"] = temporary;
+        start.Environment["TMP"] = temporary;
+        start.Environment["TMPDIR"] = temporary;
+        start.ArgumentList.Add("--config");
+        start.ArgumentList.Add("sqlite_home=" + JsonSerializer.Serialize(runtime));
+        start.ArgumentList.Add("--config");
+        start.ArgumentList.Add("log_dir=" + JsonSerializer.Serialize(Path.Combine(runtime, "logs")));
         start.Environment.Remove("DEEPSEEK_API_KEY");
         foreach (var name in start.Environment.Keys.Where(name => name.StartsWith("Workbench__", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("LITTLELOOP_", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("ChatFcm__", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("GOOGLE_APPLICATION_CREDENTIALS", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("ConnectionStrings__", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("Chat__", StringComparison.OrdinalIgnoreCase) ||
             name.StartsWith("ChatBot__", StringComparison.OrdinalIgnoreCase)).ToArray())

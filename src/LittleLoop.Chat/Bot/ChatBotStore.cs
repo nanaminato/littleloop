@@ -1,13 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LittleLoop.Tools;
+using LittleLoop.Core;
 using MySqlConnector;
 
 sealed record MessageCard(string Kind, SourceCitation? Source = null, Guid? TaskId = null);
 sealed record BotInput(string Text, string? Anchor = null, SourceCitation? Source = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null);
 sealed record BotWork(Guid Id, string Room, string Owner, long Sequence, string Kind, string Status, BotInput Input,
-    string? Error = null, string? Output = null);
+    string? Error = null, string? Output = null, ContinuousGoal? Goal = null);
 sealed record BotInstall(bool Enabled);
 sealed record BotAsk(Guid ClientId, string Text, string Path, int Start, int End, long? ReplyTo, string? Provider);
 sealed record BotSchedule(Guid ClientId, long Sequence, string Goal, string? Provider);
@@ -120,10 +121,11 @@ sealed partial class ChatStore
     private static async Task InsertJob(MySqlConnection db, MySqlTransaction tx, BotWork task)
     {
         await using var cmd = Command(db, tx, """
-            INSERT INTO chat_bot_work(id,room_id,owner_id,seq,kind,status,input,error)
-            VALUES(@id,@room,@user,@seq,@kind,@status,@input,@error)
+            INSERT INTO chat_bot_work(id,room_id,owner_id,seq,kind,status,input,error,goal)
+            VALUES(@id,@room,@user,@seq,@kind,@status,@input,@error,@goal)
             """, ("id", task.Id.ToString()), ("room", task.Room), ("user", task.Owner), ("seq", task.Sequence),
-            ("kind", task.Kind), ("status", task.Status), ("input", ToJson(task.Input)), ("error", task.Error));
+            ("kind", task.Kind), ("status", task.Status), ("input", ToJson(task.Input)), ("error", task.Error),
+            ("goal", task.Goal is null ? null : ToJson(task.Goal)));
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -147,7 +149,7 @@ sealed partial class ChatStore
     {
         await using var cmd = Command(lease, null, """
             UPDATE chat_bot_work SET status='needs-reconciliation', error='进程曾中断，请核对执行记录。'
-            WHERE status='running'
+            WHERE status='running' AND goal IS NULL
             """);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -156,7 +158,7 @@ sealed partial class ChatStore
     {
         BotWork? work;
         await using (var select = Command(lease, null, """
-            SELECT id,room_id,owner_id,seq,kind,status,input,error,output
+            SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal
             FROM chat_bot_work WHERE status='queued' ORDER BY created,id LIMIT 1
             """))
         {
@@ -164,12 +166,15 @@ sealed partial class ChatStore
             work = await reader.ReadAsync() ? ReadWork(reader) : null;
         }
         if (work is null) return null;
-        await using var update = Command(lease, null, "UPDATE chat_bot_work SET status='running' WHERE id=@id AND status='queued'", ("id", work.Id.ToString()));
-        return await update.ExecuteNonQueryAsync() == 1 ? work with { Status = "running" } : null;
+        var goal = work.Goal is null ? null : work.Goal with { Status = "running" };
+        await using var update = Command(lease, null, "UPDATE chat_bot_work SET status='running',goal=@goal WHERE id=@id AND status='queued' AND (goal <=> CAST(@oldgoal AS JSON))",
+            ("id", work.Id.ToString()), ("goal", goal is null ? null : ToJson(goal)), ("oldgoal", work.Goal is null ? null : ToJson(work.Goal)));
+        return await update.ExecuteNonQueryAsync() == 1 ? work with { Status = "running", Goal = goal } : null;
     }
 
     public async Task SetBotStatus(MySqlConnection lease, BotWork work, string state, string? error = null, string? output = null)
     {
+        if (work.Goal is not null) { await FinishGoal(work, state, error, output); return; }
         await using var cmd = Command(lease, null, "UPDATE chat_bot_work SET status=@status,error=@error,output=@output WHERE id=@id AND status='running'",
             ("status", state), ("error", error), ("output", output), ("id", work.Id.ToString()));
         await cmd.ExecuteNonQueryAsync();
@@ -179,7 +184,7 @@ sealed partial class ChatStore
     {
         await using var db = await Open();
         await using var cmd = Command(db, null, """
-            SELECT w.id,w.room_id,w.owner_id,w.seq,w.kind,w.status,w.input,w.error,w.output
+            SELECT w.id,w.room_id,w.owner_id,w.seq,w.kind,w.status,w.input,w.error,w.output,w.goal
             FROM chat_bot_work w JOIN chat_members m ON m.room_id=w.room_id AND m.user_id=@user WHERE w.id=@id
             """, ("user", user), ("id", id.ToString()));
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -188,7 +193,7 @@ sealed partial class ChatStore
 
     private static BotWork ReadWork(MySqlDataReader r) => new(Guid.Parse(r.GetString(0)), r.GetString(1), r.GetString(2),
         r.GetInt64(3), r.GetString(4), r.GetString(5), FromJson<BotInput>(r.GetString(6)), r.IsDBNull(7) ? null : r.GetString(7),
-        r.IsDBNull(8) ? null : r.GetString(8));
+        r.IsDBNull(8) ? null : r.GetString(8), r.IsDBNull(9) ? null : FromJson<ContinuousGoal>(r.GetString(9)));
 
     public async Task AddLegacyRobot(string room, string user, string robot)
     {

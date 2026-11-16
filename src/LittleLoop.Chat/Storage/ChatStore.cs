@@ -182,7 +182,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
     }
 
     public async Task<SendResult?> Send(string user, string name, string room, PostMessage input, ForwardMessage? forward = null,
-        MessageCard? card = null, BotWork? job = null)
+        MessageCard? card = null, BotWork? job = null, string? goalRobot = null)
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -264,6 +264,8 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
             await comment.ExecuteNonQueryAsync();
         }
         if (job is not null) await InsertJob(db, tx, job with { Sequence = seq });
+        if (goalRobot is not null && forward is null && card is null && !string.IsNullOrWhiteSpace(input.Text))
+            await EnqueueGoalMessage(db, tx, room, roomType, user, seq, input, goalRobot);
         if (roomType != "legacy")
         {
             await EnqueuePush(db, tx, room, seq, user);

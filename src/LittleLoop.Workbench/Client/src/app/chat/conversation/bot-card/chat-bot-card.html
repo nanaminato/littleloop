@@ -8,6 +8,11 @@
   <section class="task" [attr.data-work]="item.id" [attr.aria-label]="t('LittleLoop 任务')">
     <strong>{{ card().kind === 'question' ? t('源码问答') : t('开发任务') }} · {{ label(item.status) }}</strong>
     <small class="provider">{{ item.provider === 'source_review' ? t('源码审阅') : 'LittleLoop' }}</small>
+    @if (item.goal; as goal) {
+      <p>{{ goal.objective }} · v{{ goal.version }}</p>
+      @for (requirement of goal.requirements; track $index) { <p>{{ requirement }}</p> }
+      <small>{{ t('回复此任务可补充要求、查询进度、暂停、恢复或取消。') }}</small>
+    }
     @if (item.error) { <p>{{ t(item.error) }}</p> }
     @if (item.output) { <details open><summary>{{ t('审阅结果') }}</summary><pre>{{ item.output }}</pre></details> }
     @if (item.execution; as run) {

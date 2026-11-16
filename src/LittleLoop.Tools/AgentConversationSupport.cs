@@ -96,7 +96,7 @@ public static class AgentConversationSupport
     {
         string file = Path.Combine(folder, "approval.json");
         if (!File.Exists(file)) return null;
-        var approval = JsonSerializer.Deserialize<AgentApprovalRequest>(File.ReadAllText(file), Json);
+        var approval = JsonSerializer.Deserialize<AgentApprovalRequest>(AtomicSnapshot.ReadText(file), Json);
         return approval?.Status == "pending" && !File.Exists(Path.Combine(folder, "answer-" + approval.Nonce + ".json"))
             ? approval : null;
     }

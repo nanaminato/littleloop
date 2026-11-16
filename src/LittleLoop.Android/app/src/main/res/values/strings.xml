@@ -217,6 +217,9 @@
     <string name="bot_failed">Bot request failed (%1$d).</string>
     <string name="bot_offline">Could not reach the bot. Try again.</string>
     <string name="bot_status_queued">Queued</string>
+    <string name="bot_status_paused">Paused</string>
+    <string name="bot_status_cancelled">Cancelled</string>
+    <string name="bot_status_waiting_input">Waiting for requirements</string>
     <string name="bot_status_running">Running</string>
     <string name="bot_status_completed">Completed</string>
     <string name="bot_status_failed">Failed</string>

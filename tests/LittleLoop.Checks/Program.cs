@@ -52,6 +52,7 @@ await PlanningModelChecks.Run();
 await DevelopmentChecks.Run();
 await ProjectDiscoveryChecks.Run();
 await AgentChecks.Run();
+await AtomicSnapshotChecks.Run();
 Console.WriteLine("All checks passed.");
 static void Check(bool condition, string name) { if (!condition) throw new Exception(name); Console.WriteLine($"PASS {name}"); }
 sealed class BrokenPlugin : IDecisionPlugin

@@ -19,6 +19,12 @@
 
 ## 文档
 
+- [持续认知主体目标与阶段提案](docs/47-continuous-agent-goals.md) — 长期能力方向、中间层与近期聊天持续工作闭环；区分已确认意图和候选方案
+- [S1 聊天目标与持续工作](docs/48-chat-continuous-work.md) — 消息接任务、补充要求、暂停恢复、持久调度和验证边界
+- [S1 真实 Codex 验收与部署](docs/49-codex-runtime-deployment.md) — 独立 SQLite/临时目录、真实 HTTP 闭环和现有服务部署记录
+- [S1 持续任务稳定性验证](docs/50-continuous-stability.md) — 多轮真实执行、积压调度、通知去重和故障恢复
+- [S1 24 小时长稳验证](docs/51-continuous-24h.md) — 持续负载、进程资源、日志增长及实际运行状态
+
 - [初版架构与阶段路线](docs/06-design-baseline.md) — 当前设计基线与第一阶段验收
 
 - [总体概念与研究问题](docs/00-vision.md)

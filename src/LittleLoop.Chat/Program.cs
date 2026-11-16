@@ -174,7 +174,9 @@ secured.MapPost("/rooms/{room:guid}/messages", async (Guid room, PostMessage req
         return Results.BadRequest("消息内容、附件或引用无效。");
     try
     {
-        var result = await store.Send(Id(user), user.Identity!.Name!, room.ToString(), request with { ClientId = clientId.ToString() });
+        var chatBot = app.Services.GetService<ChatBot>();
+        var result = await store.Send(Id(user), user.Identity!.Name!, room.ToString(), request with { ClientId = clientId.ToString() },
+            goalRobot: chatBot?.CanOperate(Id(user)) == true ? chatBot.Robot(null).Id : null);
         if (result is null) return Results.NotFound();
         if (result.IsNew) await Push(hub, result.Recipients, room.ToString());
         if (result.Discussion is { } discussion)

@@ -91,6 +91,7 @@ static class ChatBotEndpoints
             object? execution = job.Kind != "question" && seeEvidence && (job.Kind != "legacy" || bot.HasLegacyEvidence)
                 ? AgentConversationSupport.Details(bot.Folder(job), canApprove && job.Status == "running") : null;
             return Results.Ok(new { job.Id, job.Status, job.Error, canApprove, execution,
+                goal = job.Goal,
                 provider = job.Input.Provider ?? ChatStore.BotName, output = seeEvidence ? job.Output : null });
         });
 

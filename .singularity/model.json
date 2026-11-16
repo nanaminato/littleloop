@@ -2168,6 +2168,166 @@
       "references": [
         "REF-ANDROID-HOME-REFACTOR"
       ]
+    },
+    {
+      "id": "INTENT-CHAT-CONTINUOUS-WORK",
+      "type": "intent",
+      "title": "通过聊天接收消息并持续工作",
+      "body": "用户确认的 S1 聊天接任务、目标管理、持续调度、补充要求、暂停恢复已实现，真实 Codex 端到端验收通过并部署现有服务。验证范围限有界开发任务，不代表长期自主运行研究目标已经完成。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-CONTINUOUS-AGENT-GOALS",
+        "REF-CHAT-CONTINUOUS-WORK",
+        "REF-CODEX-RUNTIME-DEPLOYMENT"
+      ],
+      "authorization_basis": "用户明确授权修复 SQLite、真实 Codex 验收和部署；验证状态依据本轮执行证据。",
+      "verification_basis": [
+        "EVIDENCE-CHAT-CONTINUOUS-LIVE"
+      ]
+    },
+    {
+      "id": "GOAL-CONTINUOUS-COLLABORATOR",
+      "type": "goal",
+      "title": "具有持续身份、记忆与目标的数字协作者",
+      "body": "用户接受持续数字协作者方向：社会协作、持续工作、自然对话、工具使用及长期记忆学习；先实施 S1 聊天持续工作。后续阶段能力和研究假设仍需分别实施与验证。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "references": [
+        "REF-CONTINUOUS-AGENT-GOALS",
+        "REF-CHAT-CONTINUOUS-WORK"
+      ],
+      "authorization_basis": "2026-11-16 用户明确确认：可以，就按这个方向推进，先实现第一阶段，打通聊天消息、目标管理和持续调度，让 LittleLoop 能接收任务持续工作，并在对话中补充要求、暂停和恢复。确认方向及 S1 实施，不等于确认全部研究假设、验收阈值或实现通过。"
+    },
+    {
+      "id": "EVIDENCE-CHAT-CONTINUOUS-S1",
+      "type": "evidence",
+      "title": "S1 检查与验证边界",
+      "body": "2026-11-16 311 项核心检查、48 项隔离 MySQL 及后台服务检查通过；Chat/Angular/Android 编译通过。真实 Codex 初始化因 memories_1.sqlite 访问失败，未进入模型任务；未做长时间运行或客户端交互验收。",
+      "actor": "Human",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "本地日志 data/continuous-core-checks.log、data/continuous-chat-checks.log；可复现检查见 tests/LittleLoop.ChatChecks 和 AgentChecks。受控执行器验证后台流程，不代表真实 Codex 闭环通过。"
+      },
+      "references": [
+        "REF-CHAT-CONTINUOUS-WORK"
+      ]
+    },
+    {
+      "id": "CAP-CHAT-CONTINUOUS-S1",
+      "type": "capability",
+      "title": "聊天持续目标管理与调度",
+      "body": "持久收发件箱、版本化聊天目标、后台调度、补充要求、工具边界暂停和原 thread 恢复已实现并通过真实 Codex HTTP 验收，部署现有服务。仍限原有受控开发策略和累计预算，不包含长稳或开放领域自主能力。",
+      "actor": "Human",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-CHAT-CONTINUOUS-WORK",
+        "REF-CONTINUOUS-GOAL-CORE",
+        "REF-CONTINUOUS-GOAL-STORE",
+        "REF-CODEX-RUNTIME-DEPLOYMENT"
+      ],
+      "verification_basis": [
+        "EVIDENCE-CHAT-CONTINUOUS-LIVE"
+      ]
+    },
+    {
+      "id": "TEST-CHAT-CONTINUOUS-S1",
+      "type": "test",
+      "title": "S1 数据库和服务回归",
+      "body": "313 项核心检查、51 项 MySQL/后台服务及真实 Codex 检查通过；最终 Release 的真实 HTTP 闭环涵盖接任务、去重、暂停、旧审批拒绝、补充、重启、原 thread 恢复、实际修改测试与结果回传。未验证长稳或客户端交互。",
+      "actor": "Human",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-CHAT-CONTINUOUS-WORK",
+        "REF-CONTINUOUS-GOAL-CHECKS",
+        "REF-CODEX-RUNTIME-DEPLOYMENT"
+      ],
+      "verification_basis": [
+        "EVIDENCE-CHAT-CONTINUOUS-S1",
+        "EVIDENCE-CHAT-CONTINUOUS-LIVE"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-CONTINUOUS-LIVE",
+      "type": "evidence",
+      "title": "S1 真实 Codex 闭环与现有服务部署",
+      "body": "2026-11-16：313 项核心检查、51 项含真实 Codex 集成检查通过；最终 Release 完成九项真实 HTTP 场景并部署现有 5190 服务。长稳及客户端交互不在本轮验证范围。",
+      "actor": "Human",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "data/continuous-http/6c4753d2/result.json：目标版本 4、原 thread 暂停恢复，code.txt 与补充要求 notes.txt 实际修改、测试退出 0、聊天完成回传。data/continuous-deployment/deployment.json：备份、二进制哈希、主服务登录和 HTTP 检查；部署前后账号/会话/消息/任务 65/309/588/17 一致。"
+      },
+      "references": [
+        "REF-CODEX-RUNTIME-DEPLOYMENT"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-CONTINUOUS-STABILITY",
+      "type": "evidence",
+      "title": "30 分钟真实任务持续验证通过",
+      "body": "2026-11-16：已部署 Release 二进制在隔离环境完成 1812.4 秒、47 个真实目标、94 次轮内重启、1128 次历史状态比较及七项故障恢复检查；92 项集成检查通过。未发现产品状态一致性故障。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "data/continuous-http/31812753/result.json、faults.json、audit.json；data/continuous-http/e7ddedbf/ 验证最终脚本新增状态断言与清理；data/continuous-live-checks.log 含 40 积压目标全部执行一次、版本 4 持久化。主服务 25 分钟 100 次 HTTP 采样成功，最终 PID 31408 和发布哈希不变，测试端口释放。"
+      },
+      "references": [
+        "REF-CONTINUOUS-STABILITY",
+        "REF-CONTINUOUS-HTTP-SOAK",
+        "REF-CONTINUOUS-WORKER-CHECKS"
+      ]
+    },
+    {
+      "id": "TEST-CHAT-CONTINUOUS-STABILITY",
+      "type": "test",
+      "title": "持续任务、积压与重启状态一致性验证",
+      "body": "依据用户继续稳定性验证并直接修复问题的要求，增加同数据库同会话多轮真实任务、跨分页完成通知唯一性、暂停补充、原 thread 恢复、终态历史比较、执行中断后禁止未知重放，以及停机期间积压 80 条控制消息的检查。30 分钟是本轮工程验证范围，不是人类确认的最终长稳阈值；24 小时/7 天、高负载泄漏及外部基础设施故障尚未验收。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-CONTINUOUS-STABILITY"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-CONTINUOUS-STABILITY",
+        "REF-CONTINUOUS-HTTP-SOAK",
+        "REF-CONTINUOUS-WORKER-CHECKS"
+      ]
+    },
+    {
+      "id": "TEST-CHAT-CONTINUOUS-24H",
+      "type": "test",
+      "title": "24 小时持续任务及资源稳定性验证",
+      "body": "用户明确要求完整 24 小时并在发现问题后修复重验。2026-11-16 21:07:46 +08:00 已启动隔离真实 Codex 运行，目标为 86400 秒，约每 5 分钟任务、每 72 轮重启，采样服务/子进程内存句柄和日志增长。短时预检通过，完整 24 小时仍在运行，不能标记通过。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {},
+      "references": [
+        "REF-CONTINUOUS-24H",
+        "REF-CONTINUOUS-HTTP-SOAK"
+      ]
     }
   ],
   "relations": [
@@ -3064,6 +3224,42 @@
       "type": "supports",
       "source": "EVIDENCE-ANDROID-HOME-REFACTOR",
       "target": "MOD-ANDROID-HOME-REFACTOR"
+    },
+    {
+      "id": "REL-CONTINUOUS-RESEARCH",
+      "type": "decomposes",
+      "source": "GOAL-RESEARCH",
+      "target": "GOAL-CONTINUOUS-COLLABORATOR"
+    },
+    {
+      "id": "REL-CONTINUOUS-S1-IMPLEMENTS",
+      "type": "implements",
+      "source": "CAP-CHAT-CONTINUOUS-S1",
+      "target": "INTENT-CHAT-CONTINUOUS-WORK"
+    },
+    {
+      "id": "REL-CONTINUOUS-S1-TEST",
+      "type": "verifies",
+      "source": "TEST-CHAT-CONTINUOUS-S1",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "id": "REL-CONTINUOUS-S1-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-CONTINUOUS-S1",
+      "target": "TEST-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "id": "REL-CONTINUOUS-STABILITY-VERIFIES",
+      "type": "verifies",
+      "source": "TEST-CHAT-CONTINUOUS-STABILITY",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "id": "REL-CONTINUOUS-24H-VERIFIES",
+      "type": "verifies",
+      "source": "TEST-CHAT-CONTINUOUS-24H",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
     }
   ],
   "references": [
@@ -3653,6 +3849,76 @@
       "kind": "project_file",
       "target": "docs/46-android-home-refactor.md",
       "purpose": "Home and creation state/component boundaries, shared policies and actual emulator regression evidence",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-AGENT-GOALS",
+      "kind": "project_file",
+      "target": "docs/47-continuous-agent-goals.md",
+      "purpose": "目标、阶段、中间层和验收提案",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-CONTINUOUS-WORK",
+      "kind": "project_file",
+      "target": "docs/48-chat-continuous-work.md",
+      "purpose": "S1 使用、存储、暂停恢复和验证边界",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-GOAL-CORE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/ContinuousGoal.cs",
+      "purpose": "目标状态转移与有限领域意图路由",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-GOAL-STORE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Chat/Bot/ChatGoalStore.cs",
+      "purpose": "持久消息、目标事务与结果发件箱",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-GOAL-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.ChatChecks/Program.cs",
+      "purpose": "MySQL 与后台服务可复现检查",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CODEX-RUNTIME-DEPLOYMENT",
+      "kind": "project_file",
+      "target": "docs/49-codex-runtime-deployment.md",
+      "purpose": "真实 Codex S1 验收、目录修复与部署证据",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-STABILITY",
+      "kind": "project_file",
+      "target": "docs/50-continuous-stability.md",
+      "purpose": "持续验证方法、时长和实测边界",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-HTTP-SOAK",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/http_e2e.py",
+      "purpose": "真实 Codex 多轮 HTTP、暂停补充恢复和进程中断验证",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-WORKER-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.ChatChecks/WorkerChecks.cs",
+      "purpose": "真实 MySQL 与受控执行器的积压任务重启检查",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CONTINUOUS-24H",
+      "kind": "project_file",
+      "target": "docs/51-continuous-24h.md",
+      "purpose": "24 小时运行协议、资源监测和未完成验收状态",
       "tracking": "live"
     }
   ],

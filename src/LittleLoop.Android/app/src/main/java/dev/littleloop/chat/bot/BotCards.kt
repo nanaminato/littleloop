@@ -300,6 +300,9 @@ private fun providerName(name: String) = if (name == "source_review") stringReso
 private fun workLabel(status: String) = when (status) {
     "queued" -> stringResource(R.string.bot_status_queued)
     "running" -> stringResource(R.string.bot_status_running)
+    "paused", "suspended" -> stringResource(R.string.bot_status_paused)
+    "cancelled" -> stringResource(R.string.bot_status_cancelled)
+    "waiting-input" -> stringResource(R.string.bot_status_waiting_input)
     "completed" -> stringResource(R.string.bot_status_completed)
     "failed" -> stringResource(R.string.bot_status_failed)
     "refused" -> stringResource(R.string.bot_status_refused)

@@ -217,6 +217,9 @@
     <string name="bot_failed">机器人请求失败（%1$d）</string>
     <string name="bot_offline">无法连接机器人，请重试</string>
     <string name="bot_status_queued">排队中</string>
+    <string name="bot_status_paused">已暂停</string>
+    <string name="bot_status_cancelled">已取消</string>
+    <string name="bot_status_waiting_input">等待补充要求</string>
     <string name="bot_status_running">执行中</string>
     <string name="bot_status_completed">已完成</string>
     <string name="bot_status_failed">失败</string>

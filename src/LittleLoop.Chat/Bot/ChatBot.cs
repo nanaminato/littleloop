@@ -22,7 +22,8 @@ sealed class ChatBot : BackgroundService
     public bool CanUse(string? provider) => adapters.ContainsKey(provider ?? ChatStore.BotName);
     public bool SupportsApproval(string? provider) => CanUse(provider) && adapters[provider ?? ChatStore.BotName].SupportsApproval;
 
-    public ChatBot(ChatStore store, IHubContext<ChatHub> hub, IConfiguration config, ILogger<ChatBot> log)
+    public ChatBot(ChatStore store, IHubContext<ChatHub> hub, IConfiguration config, ILogger<ChatBot> log,
+        IChatRobotAdapter[]? configuredAdapters = null)
     {
         this.store = store;
         this.hub = hub;
@@ -38,7 +39,7 @@ sealed class ChatBot : BackgroundService
         if (!Path.IsPathFullyQualified(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new InvalidOperationException("Keep agent state outside project.");
         Directory.CreateDirectory(directory);
-        IChatRobotAdapter[] configured = [new LittleLoopChatAdapter(policy, directory), new SourceReviewChatAdapter()];
+        IChatRobotAdapter[] configured = configuredAdapters ?? [new LittleLoopChatAdapter(policy, directory), new SourceReviewChatAdapter()];
         adapters = configured.ToDictionary(adapter => adapter.Name, StringComparer.Ordinal);
         operators = Names(config["ChatBot:Operators"]);
         approvers = Names(config["ChatBot:Approvers"]);
@@ -78,11 +79,37 @@ sealed class ChatBot : BackgroundService
         await using var lease = await store.AcquireBotLease();
         await using var workspace = new FileStream(Path.Combine(directory, "chat-worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         await store.RecoverBotWork(lease);
+        await store.RecoverContinuousGoals();
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(600));
-        while (await timer.WaitForNextTickAsync(token))
+        Task? active = null;
+        try
         {
-            var work = await store.ClaimBotWork(lease);
-            if (work is null) continue;
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                for (int i = 0; i < 32 && await store.ProcessGoalMessage(Robot(null).Id, CanOperate); i++) { }
+                for (int i = 0; i < 32 && await store.NextGoalNotice() is { } notice; i++)
+                {
+                    var robot = Robot(null);
+                    try
+                    {
+                        var sent = await store.Send(robot.Id, robot.Name, notice.Room, new(notice.Id, notice.Text, notice.ReplyTo),
+                            card: notice.TaskId is null ? null : new("task", TaskId: notice.TaskId));
+                        if (sent is not null) await Notify(sent.Recipients, notice.Room);
+                    }
+                    catch (Exception e) when (e is DirectMessageBlockedException or GroupSilencedException or ChannelWriteDeniedException)
+                    { log.LogInformation("Goal notice {Notice} suppressed by conversation permissions.", notice.Id); }
+                    await store.CompleteGoalNotice(notice.Id);
+                }
+                if (active is { IsCompleted: false }) continue;
+                if (active is not null) await active;
+                var next = await store.ClaimBotWork(lease);
+                active = next is null ? null : ExecuteWork(next);
+            }
+        }
+        finally { if (active is not null) await active; }
+
+        async Task ExecuteWork(BotWork work)
+        {
             try
             {
                 var provider = work.Input.Provider ?? ChatStore.BotName;
@@ -91,7 +118,7 @@ sealed class ChatBot : BackgroundService
                 if (!(await store.BotRoom(work.Room, work.Owner)).Installed || !await store.RobotIsMember(work.Room, robot.Id))
                 {
                     await store.SetBotStatus(lease, work, "disabled");
-                    continue;
+                    return;
                 }
                 if (work.Kind == "question")
                 {
@@ -103,20 +130,21 @@ sealed class ChatBot : BackgroundService
                     if (result is null) throw new InvalidOperationException("Robot reply was not stored.");
                     await Notify(result.Recipients, work.Room);
                     await store.SetBotStatus(lease, work, "completed");
-                    continue;
+                    return;
                 }
 
-                if (work.Input.Source is { } cited && Cite(cited.Path, cited.Start, cited.End).Sha256 != cited.Sha256)
+                if (work.Input.Source is { } cited && !File.Exists(Path.Combine(Folder(work), "agent.json")) &&
+                    Cite(cited.Path, cited.Start, cited.End).Sha256 != cited.Sha256)
                 {
                     await store.SetBotStatus(lease, work, "stale-source", "文件已变化，请重新引用后安排任务。");
-                    continue;
+                    return;
                 }
                 var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
                 {
                     try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }
                     catch (MySqlConnector.MySqlException e) { log.LogWarning("Could not queue approval notification, MySQL error {Error}.", e.Number); }
-                }, token);
-                await store.SetBotStatus(lease, work, outcome.Status, output: outcome.Report);
+                }, token, work.Goal is null ? null : _ => store.GoalShouldYield(work));
+                await store.SetBotStatus(lease, work, outcome.Status == "suspended" ? "disabled" : outcome.Status, output: outcome.Report);
             }
             catch (Exception e) when (!token.IsCancellationRequested)
             {
@@ -124,7 +152,7 @@ sealed class ChatBot : BackgroundService
                 if (work.Kind == "question")
                 {
                     await store.SetBotStatus(lease, work, "failed", "源码问答未完成。");
-                    continue;
+                    return;
                 }
                 await store.SetBotStatus(lease, work, "needs-reconciliation", "任务已停止，请核对执行记录。");
             }
@@ -133,7 +161,9 @@ sealed class ChatBot : BackgroundService
 
     public async Task<ChatMessage?> Queue(string room, string user, string name, Guid id, long? anchor, string kind, BotInput input)
     {
-        var work = new BotWork(id, room, user, 0, kind, "queued", input);
+        var goal = kind == "task" && (input.Provider is null or ChatStore.BotName)
+            ? LittleLoop.Core.ContinuousGoal.Create(input.Text) : null;
+        var work = new BotWork(id, room, user, 0, kind, goal?.Status ?? "queued", input, Goal: goal);
         var result = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),
             card: new(kind, kind == "question" ? input.Source : null, id), job: work);
         if (result is not null && result.IsNew) await Notify(result.Recipients, room);

@@ -100,6 +100,23 @@ internal static class AgentChecks
         Check(!toolAgent.Replies.Single().GetProperty("success").GetBoolean() &&
             new LearningSession(Path.Combine(parent, "tool-wait", "tools-learning.json")).Read().Episodes.Length == 0,
             "wait policy persists dynamic command approval and honors user decline without execution");
+        bool pause = false;
+        string suspendFolder = Path.Combine(parent, "tool-suspend");
+        var suspendHost = new AgentDelegationHost(suspendFolder, (_, _) => { pause = true; return Task.CompletedTask; },
+            _ => Task.FromResult(pause));
+        suspendHost.Create(new("unused", project, ApprovalMode: "wait", MaxRepairs: 0, AttachDocumentation: false, Development: policy));
+        var suspendedAgent = new FakeAgent(project, dynamicTool: true);
+        var suspended = await suspendHost.RunAsync("Run bounded test", CancellationToken.None, suspendedAgent);
+        Check(suspended.Status == "suspended" && suspendedAgent.Methods.Contains("turn/interrupt") && suspendedAgent.Replies.Count == 0,
+            "pause while awaiting approval interrupts turn before pending tool executes");
+        Check(new LearningSession(Path.Combine(suspendFolder, "tools-learning.json")).Read().Episodes.Length == 0 &&
+            File.ReadAllText(Path.Combine(suspendFolder, "approval.json")).Contains("expired"),
+            "pause retains tool budget and invalidates stale approval");
+        pause = false;
+        var resumedAgent = new FakeAgent(project);
+        await suspendHost.RunAsync("Continue with additional constraints", CancellationToken.None, resumedAgent);
+        Check(resumedAgent.Methods[0] == "thread/resume" && suspendHost.Read().Turns.Length == 2,
+            "resume keeps same thread and cumulative turn budget");
         await Call("project_patch", new { path = "code.cs", sha256 = hash, oldText = "old", newText = "again" });
         denied = await Call("project_command", new { command = "ungranted" });
         Check(!denied.GetProperty("success").GetBoolean(), "dynamic command cannot select ungranted executable");
@@ -121,6 +138,7 @@ internal static class AgentChecks
         {
             Methods.Add(method);
             if (method.StartsWith("thread/")) return Task.FromResult(Element(new { thread = new { id = "thread-1" } }));
+            if (method == "turn/interrupt") return Task.FromResult(Element(new { }));
             turn++; string id = "turn-" + turn;
             if (disconnect) throw new IOException("lost response after submission");
             if (dynamicTool) queue.Writer.TryWrite(Element(new { id = 72, method = "item/tool/call",

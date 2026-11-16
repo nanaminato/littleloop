@@ -235,8 +235,7 @@ public sealed partial class LearningSession(string path)
     private LearningState Load()
     {
         // Read an immutable old-or-new snapshot while writers atomically replace the path.
-        using var snapshot = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        var state = JsonSerializer.Deserialize<LearningState>(snapshot, Json)
+        var state = JsonSerializer.Deserialize<LearningState>(AtomicSnapshot.ReadText(path), Json)
             ?? throw new InvalidDataException("Empty learning state.");
         if (state.Format != 1 || state.Revision < 0 || state.Episodes is null)
             throw new InvalidDataException("Unsupported or invalid learning state.");
@@ -300,7 +299,7 @@ public sealed partial class LearningSession(string path)
                 JsonSerializer.Serialize(stream, state, Json);
                 stream.Flush(true);
             }
-            File.Move(temporary, path, true);
+            AtomicSnapshot.Replace(temporary, path);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

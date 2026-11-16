@@ -7,13 +7,14 @@ namespace LittleLoop.Tools;
 public sealed record AgentTurnRecord(string DecisionId, string? TurnId, string Prompt, string Status, string Report, string[] Issues);
 public sealed record AgentHostState(AgentHostPolicy Policy, string? ThreadId, string Status, AgentTurnRecord[] Turns);
 
-public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequest, CancellationToken, Task>? onApproval = null)
+public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequest, CancellationToken, Task>? onApproval = null,
+    Func<CancellationToken, Task<bool>>? shouldYield = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly string root = Path.GetFullPath(directory);
     private string StateFile => Path.Combine(root, "agent.json");
     private string ApprovalFile => Path.Combine(root, "approval.json");
-    public AgentHostState Read() => JsonSerializer.Deserialize<AgentHostState>(File.ReadAllText(StateFile), Json) ?? throw new InvalidDataException("Missing agent state.");
+    public AgentHostState Read() => JsonSerializer.Deserialize<AgentHostState>(AtomicSnapshot.ReadText(StateFile), Json) ?? throw new InvalidDataException("Missing agent state.");
     public void Create(AgentHostPolicy policy)
     {
         policy = policy with { Project = Path.TrimEndingDirectorySeparator(Path.GetFullPath(policy.Project)) };
@@ -36,7 +37,7 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
     {
         if (string.IsNullOrWhiteSpace(task) || task.Length > 32000) throw new ArgumentException("Bounded task required.");
         using var lease = Lease(); var state = Read();
-        if (state.Status is not ("ready" or "completed" or "needs-revision")) throw new ArgumentException("Prior execution is pending/refused/unknown. Inspect it; never replay automatically.");
+        if (state.Status is not ("ready" or "completed" or "needs-revision" or "suspended")) throw new ArgumentException("Prior execution is pending/refused/unknown. Inspect it; never replay automatically.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(state.Policy.TimeoutSeconds)); token = timeout.Token;
         await using var client = testClient ?? new CodexAppServerClient(state.Policy.Executable, state.Policy.Project, root);
         var learning = new LearningSession(Path.Combine(root, "learning.json"));
@@ -66,6 +67,8 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
             string prompt = basePrompt;
             for (int repair = 0; repair <= state.Policy.MaxRepairs; repair++)
             {
+                if (shouldYield is not null && await shouldYield(token))
+                { state = state with { Status = "suspended" }; Save(state); return state; }
                 if (state.Turns.Length >= state.Policy.MaxTurns) { state = state with { Status = "needs-revision" }; Save(state); return state; }
                 string id = "agent-turn-" + (state.Turns.Length + 1);
                 var option = new Proposal("codex.delegate", ChoiceKind.Act, "Delegate bounded project task", 0, .15m, "Collect agent report under configured host policy.", "agent.delegate", 1)
@@ -90,6 +93,7 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
                     var p = message.TryGetProperty("params", out var payload) ? payload : default;
                     if (message.TryGetProperty("id", out var requestId))
                     {
+                        if (await YieldAtBoundary()) return state;
                         bool hostTool = eventName == "item/tool/call" && development is not null;
                         if (hostTool && (state.Policy.ApprovalMode == "auto" || p.GetProperty("tool").GetString() is not ("project_patch" or "project_command")))
                         {
@@ -106,7 +110,11 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
                             if (onApproval is not null) await onApproval(request, token);
                             Console.WriteLine($"Agent {decision}: {ApprovalFile}\nagent-decide \"{root}\" {nonce} accept|decline");
                             string answerPath = Path.Combine(root, "answer-" + nonce + ".json");
-                            while (!File.Exists(answerPath)) await Task.Delay(500, token);
+                            while (!File.Exists(answerPath))
+                            {
+                                if (await YieldAtBoundary()) return state;
+                                await Task.Delay(500, token);
+                            }
                             using var answer = JsonDocument.Parse(await File.ReadAllTextAsync(answerPath, token));
                             if (answer.RootElement.GetProperty("nonce").GetString() != nonce) throw new IOException("Approval response nonce mismatch.");
                             decision = answer.RootElement.GetProperty("decision").GetString()!;
@@ -127,6 +135,7 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
                                 "agent-approval-policy", "Core authorization decision prepared; server acknowledgement remains in event log.", false));
                         }
                         Write(Path.Combine(root, "approval-" + Guid.NewGuid().ToString("N") + ".json"), new { method = eventName, requestId, parameters = p, decision });
+                        if (await YieldAtBoundary()) return state;
                         object response = hostTool
                             ? decision == "accept" ? await development!.InvokeAsync(p, threadId, turnId, token)
                                 : new { success = false, contentItems = new[] { new { type = "inputText", text = "Host or core declined this tool invocation. Explain the missing authorization; do not bypass it." } } }
@@ -151,9 +160,48 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
                     status == "completed" ? ["agent.report.received"] : [], "codex-app-server", $"Thread {threadId}; turn {turnId}; {status}. Report is not device-test proof.\n" + report[..Math.Min(12000, report.Length)], true));
                 learning.Feedback(new("review:" + id, id, null, issues.Length == 0, issues.Length == 0 ? ["agent.report.received"] : [],
                     "host.result.validation", issues.Length == 0 ? development is null ? "Required matrix structure and evidence paths verified; device execution remains unverified." : "Host patch and all required tests verified on final snapshot." : string.Join("; ", issues)));
+                if (shouldYield is not null && await shouldYield(token))
+                { state = state with { Status = "suspended" }; Save(state); return state; }
+                if (development is not null && HasQuestions(report))
+                { state = state with { Status = "needs-revision" }; Save(state); return state; }
                 if (issues.Length == 0) { state = state with { Status = "completed" }; Save(state); return state; }
                 if (status != "completed") break; // No blind re-execution after execution failure.
                 prompt = basePrompt + (development is null ? "\n宿主验收未通过，请仅补全报告，不执行部署或修改项目：\n" : "\n宿主实测验收未通过，请根据以下真实结果调整方案，在已授权范围内修复并重跑测试：\n") + string.Join("\n", issues);
+
+                async Task<bool> YieldAtBoundary()
+                {
+                    if (shouldYield is null || !await shouldYield(token)) return false;
+                    // No host tool is in flight here. Require an acknowledged terminal turn before
+                    // making this session resumable; transport failure follows the unknown path.
+                    await client.CallAsync("turn/interrupt", new { threadId, turnId }, token);
+                    while (true)
+                    {
+                        var stopped = await client.NextAsync(token);
+                        if (stopped.TryGetProperty("id", out var pendingId))
+                        {
+                            var methodName = stopped.GetProperty("method").GetString()!;
+                            var parameters = stopped.GetProperty("params");
+                            object denied = methodName == "item/tool/call"
+                                ? new { success = false, contentItems = new[] { new { type = "inputText", text = "Goal suspended; tool not executed." } } }
+                                : AgentApproval.Supported(methodName) ? AgentApproval.Response(methodName, parameters, false)
+                                : throw new IOException("Unknown request while interrupting.");
+                            await client.ReplyAsync(pendingId, denied, token);
+                        }
+                        if (stopped.GetProperty("method").GetString() == "turn/completed" &&
+                            stopped.GetProperty("params").GetProperty("threadId").GetString() == threadId &&
+                            stopped.GetProperty("params").GetProperty("turn").GetProperty("id").GetString() == turnId) break;
+                    }
+                    record = record with { Status = "suspended", Issues = ["User goal changed or paused at a tool boundary."] };
+                    Replace(record);
+                    learning.Complete(new("result:" + id, id, "codex.delegate", episode.Trace.Decision.Selected.Source,
+                        ExecutionStatus.Failed, [], "chat-goal-control", "Turn interrupted at a tool boundary; previous tool receipts remain authoritative.", true));
+                    if (File.Exists(ApprovalFile))
+                    {
+                        var pending = JsonSerializer.Deserialize<AgentApprovalRequest>(File.ReadAllText(ApprovalFile), Json)!;
+                        if (pending.Status == "pending") Write(ApprovalFile, pending with { Status = "expired" });
+                    }
+                    state = state with { Status = "suspended" }; Save(state); return true;
+                }
             }
             state = state with { Status = "needs-revision" }; Save(state); return state;
         }
@@ -184,6 +232,16 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     private FileStream Lease() => new(Path.Combine(root, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    private static bool HasQuestions(string report)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(report);
+            return document.RootElement.TryGetProperty("questions", out var questions) && questions.ValueKind == JsonValueKind.Array &&
+                questions.EnumerateArray().Any(q => q.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(q.GetString()));
+        }
+        catch (JsonException) { return false; }
+    }
     private void Save(AgentHostState state) => Write(StateFile, state);
     private static bool SourceUnchanged(string project, GuidanceSource source)
     {
@@ -197,7 +255,7 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
         }
         catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { return false; }
     }
-    private static void Write<T>(string path, T value) { File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(value, Json)); File.Move(path + ".tmp", path, true); }
+    private static void Write<T>(string path, T value) { File.WriteAllText(path + ".tmp", JsonSerializer.Serialize(value, Json)); AtomicSnapshot.Replace(path + ".tmp", path); }
     public static string[] ValidateMatrix(string report, string project)
     {
         var issues = new List<string>();
