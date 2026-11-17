@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -14,7 +15,7 @@ sealed record PushIdentity(string PublicKey, string PrivateKey);
 
 sealed partial class ChatStore
 {
-    private static async Task UpgradePush(MySqlConnection db)
+    private static async Task UpgradePush(DbConnection db)
     {
         await using var cmd = Command(db, null, """
             CREATE TABLE IF NOT EXISTS chat_push_devices (
@@ -79,7 +80,7 @@ sealed partial class ChatStore
             ON DUPLICATE KEY UPDATE endpoint=@endpoint,endpoint_hash=SHA2(@endpoint,256),p256dh=@p256dh,auth=@auth,language=@language
             """, ("device", device), ("endpoint", push.Endpoint), ("p256dh", push.Keys.P256dh), ("auth", push.Keys.Auth), ("language", push.Language));
         try { await cmd.ExecuteNonQueryAsync(); await tx.CommitAsync(); return true; }
-        catch (MySqlException e) when (e.Number is 1062 or 1452 or 1213) { return false; }
+        catch (DbException e) when (IsConstraintOrBusy(e)) { return false; }
     }
 
     public async Task DropPush(string device, string? expectedEndpoint = null)
@@ -90,7 +91,7 @@ sealed partial class ChatStore
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private static async Task EnqueuePush(MySqlConnection db, MySqlTransaction tx, string room, long seq, string author)
+    private static async Task EnqueuePush(DbConnection db, DbTransaction tx, string room, long seq, string author)
     {
         await using var cmd = Command(db, tx, """
             INSERT INTO chat_push_queue(device_id,room_id,seq,due,expires)
@@ -247,8 +248,8 @@ sealed class ChatPush(ChatStore store, PushIdentity identity, string subject, IL
                     }
                 }
             }
-            catch (MySqlException e) when (!token.IsCancellationRequested)
-            { log.LogWarning("Push database temporarily unavailable, MySQL error {Error}.", e.Number); }
+            catch (DbException e) when (!token.IsCancellationRequested)
+            { log.LogWarning("Push database temporarily unavailable, database error {Error}.", e.ErrorCode); }
         }
     }
 

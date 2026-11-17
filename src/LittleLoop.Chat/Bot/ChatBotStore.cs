@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LittleLoop.Tools;
@@ -17,6 +18,7 @@ sealed record BotDecision(string Nonce, string Value);
 sealed partial class ChatStore
 {
     public const string BotName = "littleloop";
+    public const string CommitmentBotName = "littleloop_synthetic";
     public const string ReviewBotName = "source_review";
     public const string DeepSeekBotName = "deepseek";
     public const string DeepSeekTestBotName = "deepseek_test";
@@ -24,13 +26,13 @@ sealed partial class ChatStore
     public const string CollaborationBotName = "littleloop_collab";
     public static bool IsProjectTaskOnly(string? name) => name == CollaborationBotName || IsDeepSeekProject(name);
     public static bool IsDeepSeekProject(string? name) => name?.StartsWith(DeepSeekProjectPrefix, StringComparison.Ordinal) == true;
-    public static bool IsRobot(string name) => name is BotName or ReviewBotName or DeepSeekBotName or DeepSeekTestBotName || IsProjectTaskOnly(name);
+    public static bool IsRobot(string name) => name is BotName or CommitmentBotName or ReviewBotName or DeepSeekBotName or DeepSeekTestBotName || IsProjectTaskOnly(name);
     private const string RobotCredential = "!robot:v1";
     private static readonly JsonSerializerOptions BotJson = new(JsonSerializerDefaults.Web);
     internal static string ToJson<T>(T item) => JsonSerializer.Serialize(item, BotJson);
     internal static T FromJson<T>(string raw) => JsonSerializer.Deserialize<T>(raw, BotJson)!;
 
-    private static async Task UpgradeBot(MySqlConnection db)
+    private static async Task UpgradeBot(DbConnection db)
     {
         await using var cmd = Command(db, null, """
             CREATE TABLE IF NOT EXISTS chat_bot_rooms (
@@ -83,7 +85,7 @@ sealed partial class ChatStore
         return await IsMember(db, null, room, robot);
     }
 
-    internal static async Task AddMember(MySqlConnection db, MySqlTransaction tx, string room, string robot)
+    internal static async Task AddMember(DbConnection db, DbTransaction tx, string room, string robot)
     {
         await using var join = Command(db, tx, """
             INSERT INTO chat_members(room_id,user_id) VALUES(@room,@robot)
@@ -92,7 +94,7 @@ sealed partial class ChatStore
         await join.ExecuteNonQueryAsync();
     }
 
-    private static async Task<string[]> MemberIds(MySqlConnection db, MySqlTransaction tx, string room)
+    private static async Task<string[]> MemberIds(DbConnection db, DbTransaction tx, string room)
     {
         await using var select = Command(db, tx, "SELECT user_id FROM chat_members WHERE room_id=@room", ("room", room));
         var recipients = new List<string>();
@@ -124,7 +126,7 @@ sealed partial class ChatStore
         return await reader.ReadAsync() ? Message(reader, room) : null;
     }
 
-    private static async Task InsertJob(MySqlConnection db, MySqlTransaction tx, BotWork task)
+    private static async Task InsertJob(DbConnection db, DbTransaction tx, BotWork task)
     {
         await using var cmd = Command(db, tx, """
             INSERT INTO chat_bot_work(id,room_id,owner_id,seq,kind,status,input,error,goal)
@@ -135,8 +137,19 @@ sealed partial class ChatStore
         await cmd.ExecuteNonQueryAsync();
     }
 
-    public async Task<MySqlConnection> AcquireBotLease()
+    public async Task<DbConnection> AcquireBotLease()
     {
+        if (sqlite)
+        {
+            var fileLock = AcquireSqliteLock("bot");
+            try
+            {
+                var local = await Open();
+                local.Disposed += (_, _) => fileLock.Dispose();
+                return local;
+            }
+            catch { fileLock.Dispose(); throw; }
+        }
         var settings = new MySqlConnectionStringBuilder(connectionString) { Pooling = false };
         var db = new MySqlConnection(settings.ConnectionString);
         try
@@ -151,7 +164,7 @@ sealed partial class ChatStore
         catch { await db.DisposeAsync(); throw; }
     }
 
-    public async Task RecoverBotWork(MySqlConnection lease)
+    public async Task RecoverBotWork(DbConnection lease)
     {
         await using var cmd = Command(lease, null, """
             UPDATE chat_bot_work SET status='needs-reconciliation', error='进程曾中断，请核对执行记录。'
@@ -160,7 +173,7 @@ sealed partial class ChatStore
         await cmd.ExecuteNonQueryAsync();
     }
 
-    public async Task<BotWork?> ClaimBotWork(MySqlConnection lease)
+    public async Task<BotWork?> ClaimBotWork(DbConnection lease)
     {
         BotWork? work;
         await using (var select = Command(lease, null, """
@@ -173,12 +186,13 @@ sealed partial class ChatStore
         }
         if (work is null) return null;
         var goal = work.Goal is null ? null : work.Goal with { Status = "running" };
-        await using var update = Command(lease, null, "UPDATE chat_bot_work SET status='running',goal=@goal WHERE id=@id AND status='queued' AND (goal <=> CAST(@oldgoal AS JSON))",
+        string sameGoal = sqlite ? "goal IS @oldgoal" : "goal <=> CAST(@oldgoal AS JSON)";
+        await using var update = Command(lease, null, $"UPDATE chat_bot_work SET status='running',goal=@goal WHERE id=@id AND status='queued' AND ({sameGoal})",
             ("id", work.Id.ToString()), ("goal", goal is null ? null : ToJson(goal)), ("oldgoal", work.Goal is null ? null : ToJson(work.Goal)));
         return await update.ExecuteNonQueryAsync() == 1 ? work with { Status = "running", Goal = goal } : null;
     }
 
-    public async Task SetBotStatus(MySqlConnection lease, BotWork work, string state, string? error = null, string? output = null)
+    public async Task SetBotStatus(DbConnection lease, BotWork work, string state, string? error = null, string? output = null)
     {
         if (work.Goal is not null) { await FinishGoal(work, state, error, output); return; }
         await using var cmd = Command(lease, null, "UPDATE chat_bot_work SET status=@status,error=@error,output=@output WHERE id=@id AND status='running'",
@@ -197,7 +211,7 @@ sealed partial class ChatStore
         return await reader.ReadAsync() ? ReadWork(reader) : null;
     }
 
-    private static BotWork ReadWork(MySqlDataReader r) => new(Guid.Parse(r.GetString(0)), r.GetString(1), r.GetString(2),
+    private static BotWork ReadWork(DbDataReader r) => new(Guid.Parse(r.GetString(0)), r.GetString(1), r.GetString(2),
         r.GetInt64(3), r.GetString(4), r.GetString(5), FromJson<BotInput>(r.GetString(6)), r.IsDBNull(7) ? null : r.GetString(7),
         r.IsDBNull(8) ? null : r.GetString(8), r.IsDBNull(9) ? null : FromJson<ContinuousGoal>(r.GetString(9)));
 

@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.SignalR;
 using MySqlConnector;
@@ -72,7 +73,7 @@ sealed partial class ChatStore
     }
 
     private static async Task<DiscussionRoomChange?> MirrorChannelPost(
-        MySqlConnection db, MySqlTransaction tx, string channel, long post)
+        DbConnection db, DbTransaction tx, string channel, long post)
     {
         await using var link = Command(db, tx, """
             SELECT group_id FROM chat_channel_discussions WHERE channel_id=@channel FOR SHARE
@@ -99,7 +100,7 @@ sealed partial class ChatStore
     }
 
     private static async Task<long?> FindCommentRoot(
-        MySqlConnection db, MySqlTransaction tx, string room, long reply)
+        DbConnection db, DbTransaction tx, string room, long reply)
     {
         await using var query = Command(db, tx, """
             SELECT t.root_seq,t.closed FROM chat_channel_threads t
@@ -114,7 +115,7 @@ sealed partial class ChatStore
     }
 
     private static async Task<DiscussionRoomChange?> UpdateDiscussionPost(
-        MySqlConnection db, MySqlTransaction tx, string channel, long post, string? text)
+        DbConnection db, DbTransaction tx, string channel, long post, string? text)
     {
         await using var locate = Command(db, tx, """
             SELECT group_id FROM chat_channel_threads WHERE channel_id=@channel AND post_seq=@post
@@ -431,7 +432,7 @@ sealed partial class ChatStore
     }
 
     private static async Task<DiscussionRoomChange> DetachChannelDiscussion(
-        MySqlConnection db, MySqlTransaction tx, string channel, string group)
+        DbConnection db, DbTransaction tx, string channel, string group)
     {
         await using var close = Command(db, tx, """
             UPDATE chat_channel_threads SET closed=TRUE WHERE channel_id=@channel AND group_id=@group;

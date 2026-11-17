@@ -1,3 +1,4 @@
+using System.Data.Common;
 using MySqlConnector;
 
 sealed record Account(string Id, string Name, string Password);
@@ -15,18 +16,17 @@ sealed record MessageChange(string[] Recipients, DiscussionRoomChange? Discussio
 sealed record DiscussionRoomChange(string Room, string[] Recipients);
 sealed record SendResult(ChatMessage Message, string[] Recipients, bool IsNew, DiscussionRoomChange? Discussion = null);
 
-sealed partial class ChatStore(string connection, bool fcmEnabled)
+sealed partial class ChatStore(string connection, bool fcmEnabled, string provider = "MySql")
 {
-    private readonly string connectionString = new MySqlConnectionStringBuilder(connection)
-    {
-        GuidFormat = MySqlGuidFormat.None,
-        UseAffectedRows = false,
-    }.ConnectionString;
+    private readonly bool sqlite = ParseProvider(provider);
+    private readonly string connectionString = ParseProvider(provider)
+        ? SqliteSettings(connection)
+        : new MySqlConnectionStringBuilder(connection) { GuidFormat = MySqlGuidFormat.None, UseAffectedRows = false }.ConnectionString;
 
     public async Task Initialize()
     {
         await using var db = await Open();
-        await using var command = new MySqlCommand("""
+        await using var command = Command(db, null, """
             CREATE TABLE IF NOT EXISTS chat_accounts (
                 id CHAR(36) PRIMARY KEY, name VARCHAR(32) NOT NULL UNIQUE, password VARCHAR(512) NOT NULL
             );
@@ -47,7 +47,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
                 CONSTRAINT fk_chat_message_sender FOREIGN KEY(sender_id) REFERENCES chat_accounts(id),
                 FOREIGN KEY(room_id,reply_to) REFERENCES chat_messages(room_id,seq)
             ) CHARACTER SET utf8mb4;
-            """, db);
+            """);
         await command.ExecuteNonQueryAsync();
         await Upgrade(db);
     }
@@ -58,7 +58,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         return await Find(db, name);
     }
 
-    private static async Task<Account?> Find(MySqlConnection db, string name, MySqlTransaction? tx = null)
+    private static async Task<Account?> Find(DbConnection db, string name, DbTransaction? tx = null)
     {
         await using var cmd = Command(db, tx, "SELECT id,name,password FROM chat_accounts WHERE name=@name", ("name", name));
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -75,7 +75,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
             """,
             ("id", user.Id), ("name", user.Name), ("password", user.Password));
         try { await cmd.ExecuteNonQueryAsync(); await tx.CommitAsync(); return true; }
-        catch (MySqlException e) when (e.Number == 1062) { return false; }
+        catch (DbException e) when (ChatStore.IsDuplicate(e)) { return false; }
     }
 
     public async Task<(string Id, string[] Members)> CreateRoom(Account user, OpenRoom request)
@@ -286,13 +286,12 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
     {
         await using var db = await Open();
         await using var cmd = Command(db, null, """
-            UPDATE chat_members m JOIN chat_rooms r ON r.id=m.room_id
-            SET m.read_to=GREATEST(m.read_to, LEAST(r.latest,@seq)) WHERE m.room_id=@room AND m.user_id=@user
+            UPDATE chat_members SET read_to=GREATEST(read_to, LEAST((SELECT latest FROM chat_rooms WHERE id=@room),@seq)) WHERE room_id=@room AND user_id=@user
             """, ("room", room), ("user", user), ("seq", seq));
         return await cmd.ExecuteNonQueryAsync() != 0;
     }
 
-    private static async Task<bool> IsMember(MySqlConnection db, MySqlTransaction? tx, string room, string user)
+    private static async Task<bool> IsMember(DbConnection db, DbTransaction? tx, string room, string user)
     {
         await using var cmd = Command(db, tx, "SELECT 1 FROM chat_members WHERE room_id=@room AND user_id=@user",
             ("room", room), ("user", user));
@@ -307,7 +306,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
         LEFT JOIN chat_attachments f ON f.id=msg.attachment_id
         """;
 
-    private static ChatMessage Message(MySqlDataReader reader, string room)
+    private static ChatMessage Message(DbDataReader reader, string room)
     {
         bool deleted = reader.GetBoolean(10);
         var attachment = deleted || reader.IsDBNull(5) ? null : new Attachment(reader.GetString(5), reader.GetString(6), reader.GetString(7), reader.GetInt64(8));
@@ -317,20 +316,33 @@ sealed partial class ChatStore(string connection, bool fcmEnabled)
             deleted || reader.IsDBNull(14) ? null : FromJson<MessageCard>(reader.GetString(14)), ReadTimestamp(reader, 15), reader.GetBoolean(16));
     }
 
-    private static DateTime? ReadTimestamp(MySqlDataReader reader, int index) => reader.IsDBNull(index)
+    private static DateTime? ReadTimestamp(DbDataReader reader, int index) => reader.IsDBNull(index)
         ? null : DateTime.SpecifyKind(reader.GetDateTime(index), DateTimeKind.Utc);
 
-    private async Task<MySqlConnection> Open()
+    private async Task<DbConnection> Open()
     {
-        var db = new MySqlConnection(connectionString);
-        try { await db.OpenAsync(); return db; }
+        DbConnection db = sqlite ? new Microsoft.Data.Sqlite.SqliteConnection(connectionString) : new MySqlConnection(connectionString);
+        try
+        {
+            await db.OpenAsync();
+            if (db is Microsoft.Data.Sqlite.SqliteConnection local) ConfigureSqlite(local);
+            return db;
+        }
         catch { await db.DisposeAsync(); throw; }
     }
 
-    private static MySqlCommand Command(MySqlConnection db, MySqlTransaction? tx, string sql, params (string Name, object? Value)[] args)
+    internal static DbCommand Command(DbConnection db, DbTransaction? tx, string sql, params (string Name, object? Value)[] args)
     {
-        var cmd = new MySqlCommand(sql, db, tx);
-        foreach (var (name, value) in args) cmd.Parameters.AddWithValue("@" + name, value ?? DBNull.Value);
+        var cmd = db.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = db is Microsoft.Data.Sqlite.SqliteConnection ? SqliteSql(sql) : sql;
+        foreach (var (name, value) in args)
+        {
+            var parameter = cmd.CreateParameter();
+            parameter.ParameterName = "@" + name;
+            parameter.Value = value ?? DBNull.Value;
+            cmd.Parameters.Add(parameter);
+        }
         return cmd;
     }
 }

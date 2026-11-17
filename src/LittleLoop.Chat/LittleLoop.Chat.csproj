@@ -8,6 +8,7 @@
     <PackageReference Include="Google.Apis.Auth" Version="1.78.0" />
     <PackageReference Include="Lib.Net.Http.WebPush" Version="3.3.1" />
     <ProjectReference Include="../LittleLoop.Tools/LittleLoop.Tools.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.15" />
     <PackageReference Include="MySqlConnector" Version="2.6.1" />
   </ItemGroup>
 </Project>

@@ -23,19 +23,27 @@ Check(conflict, "goal updates require current version");
 Check(GoalMessageRouter.Parse("你好", false).Action == "help" && GoalMessageRouter.Parse("帮我修复登录问题", false).Action == "create",
     "greeting is not a task; explicit natural-language request is");
 
-string connection = Environment.GetEnvironmentVariable("LITTLELOOP_CHAT_TEST_CONNECTION") ??
-    throw new InvalidOperationException("Set LITTLELOOP_CHAT_TEST_CONNECTION to an isolated test database (name must contain goal_test).");
-var settings = new MySqlConnectionStringBuilder(connection);
-if (!settings.Database.Contains("goal_test", StringComparison.Ordinal)) throw new InvalidOperationException("Use a dedicated goal_test database.");
-if (!System.Text.RegularExpressions.Regex.IsMatch(settings.Database, "^[a-zA-Z0-9_]+$")) throw new InvalidOperationException("Invalid fixture database name.");
-var adminSettings = new MySqlConnectionStringBuilder(connection) { Database = "" };
-await using (var admin = new MySqlConnection(adminSettings.ConnectionString))
+await SqliteChecks.Run();
+await CommitmentHostChecks.Run();
+
+using var fixture = new TemporaryChatDatabase();
+string? mysql = Environment.GetEnvironmentVariable("LITTLELOOP_CHAT_TEST_CONNECTION");
+string connection = fixture.Connection;
+if (!string.IsNullOrWhiteSpace(mysql))
 {
+    var settings = new MySqlConnectionStringBuilder(mysql);
+    if (!settings.Database.Contains("goal_test", StringComparison.Ordinal) ||
+        !System.Text.RegularExpressions.Regex.IsMatch(settings.Database, "^[a-zA-Z0-9_]+$"))
+        throw new InvalidOperationException("Use a dedicated goal_test database.");
+    var adminSettings = new MySqlConnectionStringBuilder(mysql) { Database = "" };
+    await using var admin = new MySqlConnection(adminSettings.ConnectionString);
     await admin.OpenAsync();
     await using var create = new MySqlCommand($"CREATE DATABASE IF NOT EXISTS `{settings.Database}` CHARACTER SET utf8mb4", admin);
     await create.ExecuteNonQueryAsync();
+    connection = mysql;
 }
-var store = new ChatStore(connection, false);
+string provider = string.IsNullOrWhiteSpace(mysql) ? "Sqlite" : "MySql";
+var store = new ChatStore(connection, false, provider);
 await store.Initialize(); await store.InitializeChannelAdministration(); await store.InitializeGroupModeration(); await store.InitializeChannelDiscussions();
 string tag = Guid.NewGuid().ToString("N")[..8];
 var owner = new Account(Guid.NewGuid().ToString(), "goal_" + tag, "!fixture");
@@ -85,7 +93,7 @@ Check(await store.ReadBotWork(id, stranger.Id) is null, "nonmember cannot read g
 
 // Simulate crash between message commit and inbox processing; recreate store and recover.
 var pending = await Send("任务：验证重启恢复");
-store = new ChatStore(connection, false); await store.RecoverContinuousGoals(); await Drain();
+store = new ChatStore(connection, false, provider); await store.RecoverContinuousGoals(); await Drain();
 Guid recoveryId = await GoalFor(pending);
 Check((await Read(recoveryId)).Status == "queued", "durable inbox survives store recreation before processing");
 var crash = await store.ClaimBotWork(lease); await store.RecoverContinuousGoals();
@@ -164,4 +172,11 @@ if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_EXECUTABLE") is { Lengt
 }
 await lease.DisposeAsync();
 await WorkerChecks.Run(store, owner, stranger, robot, room.Id, Check);
-Console.WriteLine($"All {checks} chat goal checks passed.");
+Console.WriteLine($"All {checks} chat goal checks passed on {provider}.");
+
+sealed class TemporaryChatDatabase : IDisposable
+{
+    private readonly string directory = Directory.CreateTempSubdirectory("littleloop-goals-").FullName;
+    public string Connection => new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "chat.db") }.ConnectionString;
+    public void Dispose() => Directory.Delete(directory, recursive: true);
+}

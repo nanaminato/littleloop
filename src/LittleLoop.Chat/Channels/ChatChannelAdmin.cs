@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.SignalR;
 using MySqlConnector;
@@ -43,7 +44,7 @@ sealed partial class ChatStore
         await command.ExecuteNonQueryAsync();
     }
 
-    private static async Task RecordChannelAction(MySqlConnection db, MySqlTransaction tx, string room,
+    private static async Task RecordChannelAction(DbConnection db, DbTransaction tx, string room,
         string actor, string action, string detail)
     {
         await using var entry = Command(db, tx, """
@@ -53,7 +54,7 @@ sealed partial class ChatStore
         await entry.ExecuteNonQueryAsync();
     }
 
-    private static async Task RecordChannelPostChange(MySqlConnection db, MySqlTransaction tx, string room,
+    private static async Task RecordChannelPostChange(DbConnection db, DbTransaction tx, string room,
         string actor, string action, long sequence)
     {
         await using var entry = Command(db, tx, """
@@ -174,7 +175,7 @@ sealed partial class ChatStore
         return (204, recipients);
     }
 
-    private static async Task<bool> HasChannelRight(MySqlConnection db, MySqlTransaction tx,
+    private static async Task<bool> HasChannelRight(DbConnection db, DbTransaction tx,
         string room, string user, ChannelRights right)
     {
         await using var command = Command(db, tx, """
@@ -199,7 +200,7 @@ sealed partial class ChatStore
         return admins.ToArray();
     }
 
-    private static async Task RemoveChannelSubscription(MySqlConnection db, MySqlTransaction tx, string room, string user)
+    private static async Task RemoveChannelSubscription(DbConnection db, DbTransaction tx, string room, string user)
     {
         await using var remove = Command(db, tx, """
             DELETE FROM chat_channel_admins WHERE room_id=@room AND user_id=@user;

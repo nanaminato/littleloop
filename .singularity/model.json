@@ -2657,6 +2657,70 @@
       "type": "test",
       "verification": "passed",
       "id": "TEST-COLLABORATION-REWORK-RECOVERY"
+    },
+    {
+      "id": "INTENT-CHAT-COMMITMENTS",
+      "type": "intent",
+      "title": "Advance bounded ordinary-turn work commitments and optional chat SQL adapter",
+      "body": "User explicitly said: 那你进行推进吧，不过你可能没有mysql数据库，或许你可以先添加一个另外sql数据库的适配层（用于chat），然后继续推进。 This authorizes implementation of the discussed bounded chat commitment stage and optional SQL adapter; not deployment, automatic learning or tool privilege expansion.",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "Preserve the previously confirmed intent and its explicit quoted basis from bfd154b when merging the branch, as requested by the user: 合并到主分支并处理错误，以及合并最新架构。",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {}
+    },
+    {
+      "id": "MOD-CHAT-COMMITMENTS",
+      "type": "module",
+      "title": "Bounded chat work commitment experiment and optional SQLite persistence",
+      "body": "Opt-in, bounded synthetic executor and separate commitment ledger, with a distinct robot identity from the real ChatBot. The optional SQLite provider shares the current goal inbox, scheduling, outbox and approval recovery logic with the default MySQL provider.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-CHAT-SQLITE",
+        "REF-CHAT-COMMITMENTS"
+      ],
+      "verification_basis": [
+        "EVIDENCE-CHAT-STORAGE-INTEGRATION"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-COMMITMENTS",
+      "type": "evidence",
+      "title": "Pre-merge synthetic commitment and SQLite verification",
+      "body": "Chat build passed with zero warnings/errors; 36 new Core commitment checks and existing 308 Core checks passed. Real HTTP SQLite test generated accounts/files and passed 77 response/assertion checks on one run (poll count varies): authenticated ordinary turns, duplicates, pause/resume, replace, stale reply and restart. Store/host checks cover concurrent sequences, immutable identity and capacity. No live MySQL, real provider interruption or browser/Android UI acceptance was run.",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "unverified",
+      "attributes": {
+        "observation": "Repeat using tests/LittleLoop.CommitmentChecks, tests/LittleLoop.ChatChecks, tests/ChatCommitmentHttp/check.py and tests/LittleLoop.Checks. Initial SDK environment required writable HOME and dotnet on PATH; existing checks were rerun after correcting environment."
+      },
+      "references": [
+        "REF-CHAT-SQLITE",
+        "REF-CHAT-COMMITMENTS"
+      ]
+    },
+    {
+      "title": "Merged SQLite and MySQL task storage verification",
+      "id": "EVIDENCE-CHAT-STORAGE-INTEGRATION",
+      "type": "evidence",
+      "body": "The current goal lifecycle and the separate synthetic Chat host were exercised after the feature branch merge.",
+      "attributes": {
+        "observation": "89 goal checks on each provider; SQLite old task schema upgrade preserves prior records; 36 commitment core checks, nine Chat host checks and SQLite HTTP passed. Real SQLite RelaxKonOS rework recovered at the pending second patch in data/continuous-http/2b5eef83/. No production migration."
+      },
+      "verification": "not_applicable",
+      "actor": "AI",
+      "delivery": "implemented",
+      "authorization": "not_applicable",
+      "references": [
+        "REF-CHAT-SQLITE",
+        "REF-CHAT-COMMITMENTS"
+      ]
     }
   ],
   "relations": [
@@ -3649,6 +3713,24 @@
       "target": "CAP-CHAT-CONTINUOUS-S1",
       "source": "TEST-COLLABORATION-REWORK-RECOVERY",
       "type": "verifies"
+    },
+    {
+      "id": "REL-CHAT-COMMITMENTS-INTENT",
+      "type": "implements",
+      "source": "MOD-CHAT-COMMITMENTS",
+      "target": "INTENT-CHAT-COMMITMENTS"
+    },
+    {
+      "id": "REL-CHAT-COMMITMENTS-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-COMMITMENTS",
+      "target": "MOD-CHAT-COMMITMENTS"
+    },
+    {
+      "type": "supports",
+      "id": "REL-CHAT-STORAGE-INTEGRATION-EVIDENCE",
+      "target": "MOD-CHAT-COMMITMENTS",
+      "source": "EVIDENCE-CHAT-STORAGE-INTEGRATION"
     }
   ],
   "references": [
@@ -4323,6 +4405,20 @@
       "purpose": "DeepSeek ACP 配置与真实 HTTP 验收",
       "kind": "project_file",
       "id": "REF-DEEPSEEK-ACP"
+    },
+    {
+      "id": "REF-CHAT-SQLITE",
+      "kind": "project_file",
+      "target": "docs/52-chat-sqlite.md",
+      "purpose": "Optional Chat SQLite adapter",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-COMMITMENTS",
+      "kind": "project_file",
+      "target": "docs/53-chat-commitments.md",
+      "purpose": "Ordinary-turn bounded synthetic commitment stage",
+      "tracking": "live"
     }
   ],
   "views": [

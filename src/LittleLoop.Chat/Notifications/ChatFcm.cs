@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -66,8 +67,8 @@ sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<Chat
                 }
                 log.LogWarning("FCM notice {NoticeId} returned HTTP {Status}.", id, (int)response.StatusCode);
             }
-            catch (MySqlException e) when (!token.IsCancellationRequested)
-            { log.LogWarning("FCM database temporarily unavailable, MySQL error {Error}.", e.Number); }
+            catch (DbException e) when (!token.IsCancellationRequested)
+            { log.LogWarning("FCM database temporarily unavailable, database error {Error}.", e.ErrorCode); }
             catch (Exception e) when (!token.IsCancellationRequested &&
                 e is HttpRequestException or OperationCanceledException or InvalidOperationException or IOException or TokenResponseException)
             { log.LogWarning("FCM notice {NoticeId} awaits credentials or transport.", id); }

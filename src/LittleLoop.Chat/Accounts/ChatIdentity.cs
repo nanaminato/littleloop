@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
@@ -10,7 +11,7 @@ sealed class DirectMessageBlockedException : Exception;
 
 sealed partial class ChatStore
 {
-    private static async Task UpgradeIdentity(MySqlConnection db)
+    private static async Task UpgradeIdentity(DbConnection db)
     {
         await using var cmd = Command(db, null, """
             CREATE TABLE IF NOT EXISTS chat_usernames (
@@ -67,7 +68,7 @@ sealed partial class ChatStore
             await tx.CommitAsync();
             return true;
         }
-        catch (MySqlException e) when (e.Number == 1062) { return false; }
+        catch (DbException e) when (ChatStore.IsDuplicate(e)) { return false; }
     }
 
     public async Task<BlockedAccount[]> Blocks(string user)
@@ -98,7 +99,7 @@ sealed partial class ChatStore
         return true;
     }
 
-    private static async Task<bool> Blocked(MySqlConnection db, MySqlTransaction? tx, string first, string second)
+    private static async Task<bool> Blocked(DbConnection db, DbTransaction? tx, string first, string second)
     {
         await using var cmd = Command(db, tx, """
             SELECT 1 FROM chat_blocks WHERE (blocker_id=@first AND target_id=@second)

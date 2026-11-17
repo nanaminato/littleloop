@@ -1,13 +1,15 @@
 using LittleLoop.Core;
-using MySqlConnector;
+using System.Data.Common;
 
 sealed record GoalNotice(string Id, string Room, long ReplyTo, string Text, Guid? TaskId);
 
 sealed partial class ChatStore
 {
-    private static async Task UpgradeGoals(MySqlConnection db)
+    private async Task UpgradeGoals(DbConnection db)
     {
-        await using var cmd = Command(db, null, """
+        string outboxId = sqlite ? "id CHAR(36) NOT NULL UNIQUE" : "id CHAR(36) PRIMARY KEY";
+        string outboxOrder = sqlite ? "created INTEGER PRIMARY KEY AUTOINCREMENT" : "created BIGINT AUTO_INCREMENT UNIQUE";
+        await using var cmd = Command(db, null, $"""
             CREATE TABLE IF NOT EXISTS chat_goal_inbox (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY, room_id CHAR(36) NOT NULL, seq BIGINT NOT NULL,
                 owner_id CHAR(36) NOT NULL, body TEXT NOT NULL, reply_to BIGINT NULL,
@@ -18,15 +20,15 @@ sealed partial class ChatStore
                 room_id CHAR(36) NOT NULL, seq BIGINT NOT NULL, action VARCHAR(24) NOT NULL, snapshot JSON NOT NULL
             );
             CREATE TABLE IF NOT EXISTS chat_goal_outbox (
-                id CHAR(36) PRIMARY KEY, room_id CHAR(36) NOT NULL, reply_to BIGINT NOT NULL,
+                {outboxId}, room_id CHAR(36) NOT NULL, reply_to BIGINT NOT NULL,
                 body TEXT NOT NULL, work_id CHAR(36) NULL, delivered BOOLEAN NOT NULL DEFAULT FALSE,
-                created BIGINT AUTO_INCREMENT UNIQUE, INDEX(delivered,created)
+                {outboxOrder}, INDEX(delivered,created)
             );
             """);
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private static async Task EnqueueGoalMessage(MySqlConnection db, MySqlTransaction tx, string room,
+    private static async Task EnqueueGoalMessage(DbConnection db, DbTransaction tx, string room,
         string type, string user, long seq, PostMessage input, string robot)
     {
         if (type is not ("direct" or "group" or "topic") || !await IsMember(db, tx, room, robot)) return;
@@ -126,13 +128,13 @@ sealed partial class ChatStore
         await tx.CommitAsync(); return true;
     }
 
-    private static async Task LockGoalRoom(MySqlConnection db, MySqlTransaction tx, string room)
+    private static async Task LockGoalRoom(DbConnection db, DbTransaction tx, string room)
     {
         await using var cmd = Command(db, tx, "SELECT id FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
         await cmd.ExecuteScalarAsync();
     }
 
-    private static async Task SaveGoal(MySqlConnection db, MySqlTransaction tx, BotWork work, ContinuousGoal goal, long seq, string action,
+    private static async Task SaveGoal(DbConnection db, DbTransaction tx, BotWork work, ContinuousGoal goal, long seq, string action,
         string? error = null, string? output = null)
     {
         await using var cmd = Command(db, tx, """
@@ -200,7 +202,7 @@ sealed partial class ChatStore
         }
     }
 
-    private static async Task AddGoalNotice(MySqlConnection db, MySqlTransaction tx, string room, long reply, string text, Guid? work)
+    private static async Task AddGoalNotice(DbConnection db, DbTransaction tx, string room, long reply, string text, Guid? work)
     {
         await using var cmd = Command(db, tx, "INSERT INTO chat_goal_outbox(id,room_id,reply_to,body,work_id) VALUES(@id,@room,@reply,@body,@work)",
             ("id", Guid.NewGuid().ToString()), ("room", room), ("reply", reply), ("body", text), ("work", work?.ToString()));

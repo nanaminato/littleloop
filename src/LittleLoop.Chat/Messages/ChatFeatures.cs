@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text.Json;
 using MySqlConnector;
@@ -10,10 +11,11 @@ sealed record StoredFile(string Name, string Mime, byte[] Content);
 
 sealed partial class ChatStore
 {
-    private static async Task Upgrade(MySqlConnection db)
+    private async Task Upgrade(DbConnection db)
     {
         // Serialize incomplete or concurrent upgrades. Each DDL step commits separately on MySQL.
-        await using var lease = Command(db, null, "SELECT GET_LOCK(SHA2(CONCAT('littleloop-chat-schema:',DATABASE()),256),30)");
+        using var sqliteLock = sqlite ? AcquireSqliteLock("schema") : null;
+        await using var lease = Command(db, null, sqlite ? "SELECT 1" : "SELECT GET_LOCK(SHA2(CONCAT('littleloop-chat-schema:',DATABASE()),256),30)");
         if (Convert.ToInt32(await lease.ExecuteScalarAsync()) != 1) throw new IOException("Could not acquire chat schema lock.");
         try
         {
@@ -42,6 +44,7 @@ sealed partial class ChatStore
             await AddColumn("chat_messages", "deleted", "BOOLEAN NOT NULL DEFAULT FALSE");
             await AddColumn("chat_messages", "forwarded_from", "VARCHAR(100) NULL");
             // Mirrored channel posts store a channel title, which may exceed a username's 32 characters.
+            if (!sqlite)
             await using (var length = Command(db, null, """
                 SELECT character_maximum_length FROM information_schema.columns
                 WHERE table_schema=DATABASE() AND table_name='chat_messages' AND column_name='forwarded_from'
@@ -70,19 +73,34 @@ sealed partial class ChatStore
         }
         finally
         {
-            await using var release = Command(db, null, "SELECT RELEASE_LOCK(SHA2(CONCAT('littleloop-chat-schema:',DATABASE()),256))");
+            await using var release = Command(db, null, sqlite ? "SELECT 1" : "SELECT RELEASE_LOCK(SHA2(CONCAT('littleloop-chat-schema:',DATABASE()),256))");
             await release.ExecuteScalarAsync();
         }
 
         async Task AddColumn(string table, string column, string definition)
         {
-            await using var check = Command(db, null, """
+            await using var check = Command(db, null, sqlite ? "SELECT COUNT(*) FROM pragma_table_info(@table) WHERE name=@column" : """
                 SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()
                     AND table_name=@table AND column_name=@column
                 """, ("table", table), ("column", column));
             if (Convert.ToInt32(await check.ExecuteScalarAsync()) != 0) return;
+            // SQLite cannot ADD a nonconstant timestamp default to a populated table.
+            // Backfill existing rows and supply the same insert-time default through a trigger.
+            if (sqlite && column == "last_activity") definition = "TEXT NULL";
             await using var alter = Command(db, null, $"ALTER TABLE {table} ADD COLUMN {column} {definition}");
             await alter.ExecuteNonQueryAsync();
+            if (sqlite && column == "last_activity")
+            {
+                await using var fill = Command(db, null, "UPDATE chat_rooms SET last_activity=UTC_TIMESTAMP(6) WHERE last_activity IS NULL");
+                await fill.ExecuteNonQueryAsync();
+                await using var trigger = Command(db, null, """
+                    CREATE TRIGGER IF NOT EXISTS chat_rooms_default_activity AFTER INSERT ON chat_rooms
+                    WHEN NEW.last_activity IS NULL BEGIN
+                        UPDATE chat_rooms SET last_activity=UTC_TIMESTAMP(6) WHERE id=NEW.id;
+                    END;
+                    """);
+                await trigger.ExecuteNonQueryAsync();
+            }
         }
     }
 
@@ -120,7 +138,7 @@ sealed partial class ChatStore
         return await reader.ReadAsync() ? new(reader.GetString(0), reader.GetString(1), reader.GetFieldValue<byte[]>(2)) : null;
     }
 
-    private static async Task<Attachment?> OwnedAttachment(MySqlConnection db, MySqlTransaction tx, string user, string id)
+    private static async Task<Attachment?> OwnedAttachment(DbConnection db, DbTransaction tx, string user, string id)
     {
         await using var cmd = Command(db, tx, "SELECT id,name,mime,size FROM chat_attachments WHERE id=@id AND owner_id=@user",
             ("id", id), ("user", user));
@@ -128,7 +146,7 @@ sealed partial class ChatStore
         return await reader.ReadAsync() ? new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3)) : null;
     }
 
-    private static async Task<ChatMessage?> ForwardSource(MySqlConnection db, MySqlTransaction tx, string user, ForwardMessage forward)
+    private static async Task<ChatMessage?> ForwardSource(DbConnection db, DbTransaction tx, string user, ForwardMessage forward)
     {
         string room = forward.RoomId.ToString();
         await using var cmd = Command(db, tx, MessageSelect + """
@@ -254,7 +272,7 @@ sealed partial class ChatStore
         return recipients;
     }
 
-    private static async Task<string[]> MessageRecipients(MySqlConnection db, MySqlTransaction tx, string room)
+    private static async Task<string[]> MessageRecipients(DbConnection db, DbTransaction tx, string room)
     {
         await using var members = Command(db, tx, "SELECT user_id FROM chat_members WHERE room_id=@room", ("room", room));
         await using var reader = await members.ExecuteReaderAsync();

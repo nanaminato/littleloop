@@ -50,7 +50,7 @@ builder.Services.AddSingleton<PasswordHasher<Account>>();
 var fcmProject = config["ChatFcm:ProjectId"]?.Trim();
 if (string.IsNullOrEmpty(fcmProject)) fcmProject = null;
 var store = new ChatStore(builder.Configuration.GetConnectionString("Chat") ?? throw new InvalidOperationException("Set ConnectionStrings__Chat"),
-    fcmProject is not null);
+    fcmProject is not null, config["ChatDatabase:Provider"] ?? "MySql");
 await store.Initialize();
 await store.InitializeChannelAdministration();
 await store.InitializeGroupModeration();
@@ -63,6 +63,11 @@ if (config["ChatBot:Policy"] is not null)
 {
     builder.Services.AddSingleton<ChatBot>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatBot>());
+}
+if (config.GetValue<bool>("ChatCommitments:Enabled"))
+{
+    builder.Services.AddSingleton<ChatCommitments>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatCommitments>());
 }
 if (fcmProject is not null)
     builder.Services.AddHostedService(sp => new ChatFcm(store, sp.GetService<ChatBot>(), fcmProject,
@@ -179,6 +184,8 @@ secured.MapPost("/rooms/{room:guid}/messages", async (Guid room, PostMessage req
             goalRobot: chatBot?.CanOperate(Id(user)) == true ? chatBot.Robot(null).Id : null);
         if (result is null) return Results.NotFound();
         if (result.IsNew) await Push(hub, result.Recipients, room.ToString());
+        if (app.Services.GetService<ChatCommitments>() is { } commitments)
+            await commitments.Handle(Id(user), result.Message);
         if (result.Discussion is { } discussion)
             await Push(hub, discussion.Recipients, discussion.Room);
         return Results.Ok(result.Message);
@@ -207,6 +214,7 @@ ChatPush.Map(secured, store, pushIdentity);
 ChatFcm.Map(secured, store, app.Services.GetService<ChatBot>(), fcmProject);
 ChatSocialEndpoints.Map(secured, store);
 ChatBotEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
+ChatCommitments.Map(secured, app.Services.GetService<ChatCommitments>());
 await app.RunAsync();
 
 static Task Push(IHubContext<ChatHub> hub, string[] users, string room) => hub.Clients.Users(users).SendAsync("roomChanged", room);
