@@ -2492,6 +2492,39 @@
       "attributes": {},
       "verification": "passed",
       "actor": "AI"
+    },
+    {
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "authorization": "not_applicable",
+      "attributes": {
+        "observation": "data/continuous-http/9427859b/relaxkonos-result.json：Codex 和真实 dsh 各用两次独立审批执行一处注释修改和 appid-tests，均退出 0、19 项通过。源项目哈希未变，未授权项目拒绝，默认 DeepSeek 只读。"
+      },
+      "title": "RelaxKonOS 共享项目双执行器隔离验收",
+      "id": "EVIDENCE-DEEPSEEK-RELAXKONOS",
+      "actor": "AI",
+      "verification": "not_applicable",
+      "body": "沿用现有 Codex 文件白名单和固定测试，仅重定位隔离根目录。",
+      "delivery": "implemented",
+      "type": "evidence"
+    },
+    {
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "verification_basis": [
+        "EVIDENCE-DEEPSEEK-RELAXKONOS"
+      ],
+      "authorization": "not_applicable",
+      "attributes": {},
+      "title": "RelaxKonOS 复用 Codex 授权的 DeepSeek 验收",
+      "id": "TEST-DEEPSEEK-RELAXKONOS",
+      "actor": "AI",
+      "verification": "passed",
+      "body": "用户要求先在隔离副本验证两执行器、分开审批和其他项目只读。",
+      "delivery": "implemented",
+      "type": "test"
     }
   ],
   "relations": [
@@ -3454,6 +3487,12 @@
       "id": "REL-DEEPSEEK-NAMED-PROJECTS-VERIFIES",
       "type": "verifies",
       "source": "TEST-DEEPSEEK-NAMED-PROJECTS"
+    },
+    {
+      "type": "verifies",
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "source": "TEST-DEEPSEEK-RELAXKONOS",
+      "id": "REL-DEEPSEEK-RELAXKONOS-VERIFIES"
     }
   ],
   "references": [

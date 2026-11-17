@@ -34,6 +34,8 @@ DeepSeek Harness 提供[官方 ACP 接口](https://github.com/deepseek-ai/deepse
 
 真实 dsh 复验 `data/continuous-http/9523f268/` 通过。`alpha` 和 `beta` 分别在审批后修改自己的文件并运行固定测试，执行 `beta` 时 `alpha` 的文件和测试标记均未变化。未配置的项目执行器被拒绝，普通 DeepSeek 成功执行只读搜索。暂停 `beta` 后收紧写入策略并重启，旧审批失效，恢复请求进入待核对，文件未改动。现有服务未加载具名项目配置。
 
+RelaxKonOS 的共享项目验收 `data/continuous-http/9427859b/` 通过。复制现有 Codex 项目后，仅重定位策略根目录，在同一隔离副本分别派给 Codex 和 `deepseek_project_relaxkonos`。每个执行器获批后仅在 `ApplicationDescriptor.cs` 写入一处验收注释，`appid-tests` 单独获批后才运行，均退出 0 并报告 19 项通过。现有策略说明文字写的是 20 项，验收以实际测试程序输出为准。源项目哈希未变，未配置项目被拒绝，普通 DeepSeek 仍可只读搜索。现有服务未启用 RelaxKonOS 的 DeepSeek 写入。
+
 真实 dsh 隔离验收 `data/continuous-http/86f90de2/` 通过。拒绝补丁时原文件保持 `broken`，拒绝测试时没有执行标记或命令回执。另一任务在补丁审批前保持原文件，批准后变为 `fixed`。暂停待批测试后，旧审批返回 HTTP 409，测试标记仍不存在。恢复后收到新审批，批准后测试产生标记和退出码 0 回执。
 
 预检发现，原共享宿主把用户主动暂停计入委派失败，可能阻止同一目标恢复。修复后这种中断不进入执行成败学习，已执行工具的回执仍独立保存。DeepSeek 恢复时会收到明确提示，说明上次未获回执的请求已失效。真实 Codex HTTP 回归 `data/continuous-http/82ee3c02/` 通过。
