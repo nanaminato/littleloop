@@ -42,8 +42,9 @@ public interface IActionExecutor
 /// <summary>Local single-writer store. Every transition atomically replaces the state file.</summary>
 public sealed partial class LearningSession(string path)
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, object> LocalGates =
+    private static readonly Dictionary<string, LocalGate> LocalGates =
         new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private sealed class LocalGate { public int Users; }
     private readonly string path = Path.GetFullPath(path);
     public string StatePath => path;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
@@ -276,17 +277,42 @@ public sealed partial class LearningSession(string path)
     private IDisposable Lock()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var gate = LocalGates.GetOrAdd(path, _ => new object());
-        Monitor.Enter(gate);
-        try { return new StateLease(new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None), gate); }
-        catch { Monitor.Exit(gate); throw; }
+        LocalGate gate;
+        lock (LocalGates)
+        {
+            if (!LocalGates.TryGetValue(path, out gate!)) LocalGates.Add(path, gate = new());
+            // Count waiters before entering the per-path monitor so a gate cannot
+            // be removed while another caller is about to use it.
+            gate.Users++;
+        }
+        bool entered = false;
+        try
+        {
+            Monitor.Enter(gate, ref entered);
+            return new StateLease(new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None), path, gate);
+        }
+        catch
+        {
+            if (entered) Monitor.Exit(gate);
+            ReleaseGate(path, gate);
+            throw;
+        }
     }
-    private sealed class StateLease(FileStream stream, object gate) : IDisposable
+    private static void ReleaseGate(string path, LocalGate gate)
+    {
+        lock (LocalGates)
+            if (--gate.Users == 0) LocalGates.Remove(path);
+    }
+    private sealed class StateLease(FileStream stream, string path, LocalGate gate) : IDisposable
     {
         public void Dispose()
         {
             try { stream.Dispose(); }
-            finally { Monitor.Exit(gate); }
+            finally
+            {
+                Monitor.Exit(gate);
+                ReleaseGate(path, gate);
+            }
         }
     }
     private void Save(LearningState state)

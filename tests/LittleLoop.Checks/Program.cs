@@ -43,6 +43,7 @@ foreach (var path in Directory.GetFiles("examples/phase1", "*.json"))
 }
 RoleChecks.Run();
 LearningChecks.Run();
+await LearningLockChecks.Run();
 await SchedulingChecks.Run();
 await RealToolChecks.Run();
 await GoalChecks.Run();

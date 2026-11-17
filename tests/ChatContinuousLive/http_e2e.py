@@ -54,6 +54,8 @@ service_dll = os.environ.get('LITTLELOOP_CHAT_DLL', str(repo / 'src/LittleLoop.C
 atomic_json(root / 'run.json', dict(startedAt=time.strftime('%Y-%m-%dT%H:%M:%S%z'), durationSeconds=duration,
     roundLimit=rounds, restartEvery=restart_every, intervalSeconds=interval,
     binary=service_dll, sha256=hashlib.sha256(Path(service_dll).read_bytes()).hexdigest(),
+    assemblyHashes={name: hashlib.sha256(Path(service_dll).with_name(name).read_bytes()).hexdigest()
+        for name in ('LittleLoop.Chat.dll', 'LittleLoop.Core.dll', 'LittleLoop.Tools.dll')},
     driverSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     metricsSha256=hashlib.sha256(Path(__file__).with_name('soak_metrics.py').read_bytes()).hexdigest()))
 print('Evidence: ' + str(root), flush=True)

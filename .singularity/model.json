@@ -2318,7 +2318,7 @@
       "id": "TEST-CHAT-CONTINUOUS-24H",
       "type": "test",
       "title": "24 小时持续任务及资源稳定性验证",
-      "body": "用户明确要求完整 24 小时并在发现问题后修复重验。2026-11-16 21:07:46 +08:00 已启动隔离真实 Codex 运行，目标为 86400 秒，约每 5 分钟任务、每 72 轮重启，采样服务/子进程内存句柄和日志增长。短时预检通过，完整 24 小时仍在运行，不能标记通过。",
+      "body": "用户明确要求完整 24 小时，发现问题修复重验。首轮 33 轮约 9746 秒后因确认 LearningSession 静态路径锁缓存无界保留而停止；已修复并通过 316 项核心、92 项集成及真实 HTTP 复验。修复版 2026-11-16 23:56:32 +08:00 在 data/continuous-http/48dd82dd 重新启动完整 86400 秒，尚未完成，verification 保持 unverified。",
       "actor": "AI",
       "authorization": "not_applicable",
       "delivery": "implemented",
@@ -2327,6 +2327,41 @@
       "references": [
         "REF-CONTINUOUS-24H",
         "REF-CONTINUOUS-HTTP-SOAK"
+      ]
+    },
+    {
+      "id": "EVIDENCE-LEARNING-LOCK-RETENTION",
+      "type": "evidence",
+      "title": "静态路径锁引用保留已复现并修复",
+      "body": "128 个已完成会话新增 128 个永久缓存项的回归先失败；按持有者与等待者计数释放后通过。并发 96 次更新与文件锁失败恢复检查通过；316 核心、92 集成与修复版 HTTP 复验通过。未证明该缓存是首轮句柄小幅变化的唯一或直接原因。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "data/learning-lock-before.log、data/learning-lock-after.log、data/continuous-live-checks.log、data/continuous-http/37119336/。修复版 Core SHA-256 80bc8856fa76674a63028545467c7a44893efc2bd076e5ca6ab3050e10786d01；完整 24h 重验仍未完成。"
+      },
+      "references": [
+        "REF-CONTINUOUS-24H",
+        "REF-LEARNING-LOCK-CHECKS"
+      ]
+    },
+    {
+      "id": "TEST-LEARNING-LOCK-LIFETIME",
+      "type": "test",
+      "title": "学习状态路径锁生命周期回归",
+      "body": "验证完成会话不留下按历史路径累积的同步条目，8 并发调用者 96 次更新无丢失，文件租约失败后条目释放且可重新读取。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-LEARNING-LOCK-RETENTION"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-LEARNING-LOCK-CHECKS",
+        "REF-CONTINUOUS-24H"
       ]
     }
   ],
@@ -3260,6 +3295,12 @@
       "type": "verifies",
       "source": "TEST-CHAT-CONTINUOUS-24H",
       "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "id": "REL-LEARNING-LOCK-VERIFIES",
+      "type": "verifies",
+      "source": "TEST-LEARNING-LOCK-LIFETIME",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
     }
   ],
   "references": [
@@ -3919,6 +3960,13 @@
       "kind": "project_file",
       "target": "docs/51-continuous-24h.md",
       "purpose": "24 小时运行协议、资源监测和未完成验收状态",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-LEARNING-LOCK-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/LearningLockChecks.cs",
+      "purpose": "路径锁生命周期、并发与失败释放回归",
       "tracking": "live"
     }
   ],
