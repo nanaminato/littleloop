@@ -2591,6 +2591,39 @@
       "type": "test",
       "verification": "passed",
       "id": "TEST-COLLABORATION-REVIEW-RECOVERY"
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "body": "真实 Codex 和 DeepSeek 在 RelaxKonOS 隔离副本完成首轮修改、审阅、修正、重测及复审。",
+      "attributes": {
+        "observation": "data/continuous-http/462da246/relaxkonos-collab-revision-result.json：同一任务与原 Codex 会话，补丁和测试各独立批准两次，测试各通过 19 项，DeepSeek 两次只读审阅，最终汇总与项目隔离已验证。"
+      },
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "delivery": "implemented",
+      "title": "协作任务审阅触发修正的隔离实跑",
+      "type": "evidence",
+      "verification": "not_applicable",
+      "id": "EVIDENCE-COLLABORATION-REWORK"
+    },
+    {
+      "verification_basis": [
+        "EVIDENCE-COLLABORATION-REWORK"
+      ],
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "body": "用户明确要求在隔离副本验证审阅发现问题后交回 Codex 修正，补丁和测试各自审批，DeepSeek 只读。",
+      "attributes": {},
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "delivery": "implemented",
+      "title": "同一任务内的审阅、受控修正与复审",
+      "type": "test",
+      "verification": "passed",
+      "id": "TEST-COLLABORATION-REWORK"
     }
   ],
   "relations": [
@@ -3570,6 +3603,12 @@
       "id": "REL-COLLABORATION-REVIEW-RECOVERY-VERIFIES",
       "target": "CAP-CHAT-CONTINUOUS-S1",
       "source": "TEST-COLLABORATION-REVIEW-RECOVERY",
+      "type": "verifies"
+    },
+    {
+      "id": "REL-COLLABORATION-REWORK-VERIFIES",
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "source": "TEST-COLLABORATION-REWORK",
       "type": "verifies"
     }
   ],

@@ -54,6 +54,14 @@ RelaxKonOS 隔离验收 `data/continuous-http/6dfcbc9e/` 通过。同一任务�
 
 修复版隔离复验 `data/continuous-http/a3a15112/relaxkonos-collaboration-recovery-result.json` 覆盖审阅中暂停后重启和审阅中直接强制重启。两次都续接原 DeepSeek 会话，各自保留一条补丁回执和一条成功测试回执，工具日志哈希在恢复前后相同。任务完成后再次重启，最终汇总不变，聊天各有一条完成通知。现有服务未部署本修复。
 
+### 审阅发现问题后的修正
+
+DeepSeek 给出明确可修正的问题时，LittleLoop 在同一任务中把意见交回原 Codex 会话。Codex 按原项目策略分别申请修正补丁和固定测试的审批。宿主核对新增补丁，以及与修正后源码快照一致的成功测试回执，再启动 DeepSeek 只读复审。最终结果记录首轮测试、首轮审阅意见、修正后的测试及复审结论。
+
+每个任务自动修正一轮。复审仍有问题时，任务转为等待补充要求，并保留两个阶段的结果。修正阶段沿用 Codex 的审批恢复规则。只读审阅和复审分别保存会话记录。
+
+RelaxKonOS 隔离实跑记录 `data/continuous-http/462da246/relaxkonos-collab-revision-result.json`。DeepSeek 在首轮通过测试后发现一条错误注释，原 Codex 会话修正后重新运行 `appid-tests`。两次补丁和两次测试分别审批，两次测试均退出码 0、19 项通过。DeepSeek 两次只读审阅均保留独立会话，复审通过，结果汇总到原聊天任务。隔离副本只有获批注释发生变化，原项目未修改。本次未部署。
+
 ## 调用方式
 
 策略文件示例（路径替换成本机实际值）：
