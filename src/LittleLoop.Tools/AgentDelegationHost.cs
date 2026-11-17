@@ -15,6 +15,24 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
     private string StateFile => Path.Combine(root, "agent.json");
     private string ApprovalFile => Path.Combine(root, "approval.json");
     public AgentHostState Read() => JsonSerializer.Deserialize<AgentHostState>(AtomicSnapshot.ReadText(StateFile), Json) ?? throw new InvalidDataException("Missing agent state.");
+
+    // Only a still-unanswered approval proves that its tool could not have started.
+    // The service calls this after acquiring its exclusive worker lease on restart.
+    public bool? RecoverApprovalBoundary()
+    {
+        if (!File.Exists(StateFile)) return null;
+        using var lease = Lease();
+        var state = Read();
+        if (state.Status == "suspended") return true;
+        if (state.Status != "awaiting-approval" || !File.Exists(ApprovalFile)) return null;
+        var approval = JsonSerializer.Deserialize<AgentApprovalRequest>(AtomicSnapshot.ReadText(ApprovalFile), Json);
+        if (approval?.Status != "pending" || File.Exists(Path.Combine(root, "answer-" + approval.Nonce + ".json")) ||
+            state.Turns.Length == 0 || !Guid.TryParseExact(approval.Nonce, "N", out _)) return false;
+        state.Turns[^1] = state.Turns[^1] with { Status = "suspended", Issues = ["Service restarted before the pending approval was answered."] };
+        Save(state with { Status = "suspended" });
+        Write(ApprovalFile, approval with { Status = "expired" });
+        return true;
+    }
     public void Create(AgentHostPolicy policy)
     {
         policy = policy with { Project = Path.TrimEndingDirectorySeparator(Path.GetFullPath(policy.Project)) };

@@ -2429,6 +2429,36 @@
         "EVIDENCE-DEEPSEEK-CONTROLLED"
       ],
       "authorization": "not_applicable"
+    },
+    {
+      "type": "evidence",
+      "actor": "AI",
+      "references": [
+        "REF-CONTINUOUS-STABILITY"
+      ],
+      "verification": "not_applicable",
+      "body": "同一隔离服务交替运行两个提供方，检查未答复审批、已暂停及批准结果未知三类恢复。",
+      "id": "EVIDENCE-CHAT-ALTERNATING-RESTART",
+      "attributes": {
+        "observation": "data/continuous-http/1f3cd426/alternating-result.json：六个场景通过。原会话恢复、旧审批返回 409、四个完成任务各一次补丁和测试，两个已批准未知任务停在待核对。"
+      },
+      "delivery": "implemented",
+      "authorization": "not_applicable",
+      "title": "真实 DeepSeek 和 Codex 交替重启验收"
+    },
+    {
+      "type": "test",
+      "actor": "AI",
+      "verification": "passed",
+      "body": "用户要求不扩大授权范围，验证待审批、暂停、失效审批及工具副作用。",
+      "id": "TEST-CHAT-ALTERNATING-RESTART",
+      "attributes": {},
+      "delivery": "implemented",
+      "authorization": "not_applicable",
+      "title": "两个执行器交替接单与重启状态恢复",
+      "verification_basis": [
+        "EVIDENCE-CHAT-ALTERNATING-RESTART"
+      ]
     }
   ],
   "relations": [
@@ -3378,6 +3408,12 @@
       "source": "TEST-DEEPSEEK-CONTROLLED",
       "type": "verifies",
       "id": "REL-DEEPSEEK-CONTROLLED-VERIFIES",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "type": "verifies",
+      "id": "REL-CHAT-ALTERNATING-RESTART-VERIFIES",
+      "source": "TEST-CHAT-ALTERNATING-RESTART",
       "target": "CAP-CHAT-CONTINUOUS-S1"
     }
   ],

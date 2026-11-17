@@ -170,13 +170,20 @@ sealed partial class ChatStore
         await tx.CommitAsync();
     }
 
-    public async Task RecoverContinuousGoals()
+    public async Task RecoverContinuousGoals(Func<BotWork, bool?>? recoverApprovalBoundary = null)
     {
         await using var db = await Open(); var works = new List<BotWork>();
-        await using (var cmd = Command(db, null, "SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work WHERE goal IS NOT NULL AND status='running'"))
+        await using (var cmd = Command(db, null, "SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work WHERE goal IS NOT NULL AND status IN ('running','paused')"))
         await using (var r = await cmd.ExecuteReaderAsync())
             while (await r.ReadAsync()) works.Add(ReadWork(r));
-        foreach (var work in works) await FinishGoal(work, "needs-reconciliation", "服务中断，执行结果需要核对；不会自动重跑未知操作。");
+        foreach (var work in works)
+        {
+            var recovered = recoverApprovalBoundary?.Invoke(work);
+            if (recovered == true && work.Status == "running")
+                await FinishGoal(work, "paused", "服务重启，原审批已失效。恢复任务后将重新申请审批。");
+            else if (recovered != true && (work.Status == "running" || recovered == false))
+                await FinishGoal(work, "needs-reconciliation", "服务中断，执行结果需要核对；不会自动重跑未知操作。");
+        }
     }
 
     private static async Task AddGoalNotice(MySqlConnection db, MySqlTransaction tx, string room, long reply, string text, Guid? work)

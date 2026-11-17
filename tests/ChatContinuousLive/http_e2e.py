@@ -62,6 +62,7 @@ print('Evidence: ' + str(root), flush=True)
 results = []
 deepseek = os.environ.get('LITTLELOOP_TEST_DEEPSEEK') == '1'
 controlled = deepseek and os.environ.get('LITTLELOOP_TEST_DEEPSEEK_WRITE') == '1'
+alternating = controlled and os.environ.get('LITTLELOOP_TEST_ALTERNATING') == '1'
 if controlled:
     (root / 'deepseek-readonly').mkdir()
     codex_project = root / 'codex-project'
@@ -72,6 +73,9 @@ if controlled:
         development=dict(policy['development'], root=str(codex_project)))), encoding='utf-8')
     (project / 'verify.py').write_text("from pathlib import Path\nassert Path('code.txt').read_text() == 'fixed'\nPath('.littleloop-temp/test-ran').write_text('verified')\nprint('DEEPSEEK-VERIFY-PASS')\n", encoding='utf-8')
     atomic_json(root / 'deepseek-grant.json', policy['development'])
+    if alternating:
+        for fixture in (project, codex_project):
+            (fixture / 'verify.py').write_text("from pathlib import Path\nassert Path('code.txt').read_text() == 'fixed'\nwith Path('.littleloop-temp/test-ran').open('a') as f: f.write('verified\\n')\nprint('ALTERNATING-VERIFY-PASS')\n", encoding='utf-8')
 password = secrets.token_hex(20)
 def client():
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -156,7 +160,12 @@ try:
     request(owner, f'/bot/rooms/{room}/install', dict(enabled=True), 204)
     def send(text, reply=None, identifier=None):
         return request(owner, f'/rooms/{room}/messages', dict(clientId=identifier or str(uuid.uuid4()), text=text, replyTo=reply))
-    if controlled:
+    if alternating:
+        from alternating_restarts import verify_alternating
+        results.extend(verify_alternating(project, codex_project, root, room, owner, approver, request, send,
+                                          start, stop, wait, log))
+        atomic_json(root / 'alternating-result.json', results)
+    if controlled and not alternating:
         assert not duration and os.environ.get('LITTLELOOP_SOAK_FAULTS') != '1'
         anchor = send('DeepSeek controlled tools fixture')
         marker = project / '.littleloop-temp' / 'test-ran'
@@ -355,6 +364,9 @@ try:
         killed = subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], capture_output=True)
         assert killed.returncode == 0, 'Could not terminate fixture process tree'
         process.wait(timeout=15)
+        # Model the crash window after an answer was persisted and before its effects are known.
+        atomic_json(root / 'bot' / task.replace('-', '') / ('answer-' + pending['nonce'] + '.json'),
+                    dict(nonce=pending['nonce'], decision='accept'))
         start('crash-recovery', True)
         wait(lambda: state()['status'] == 'needs-reconciliation', 20)
         before = state()

@@ -115,7 +115,16 @@ sealed class ChatBot : BackgroundService
         await using var lease = await store.AcquireBotLease();
         await using var workspace = new FileStream(Path.Combine(directory, "chat-worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         await store.RecoverBotWork(lease);
-        await store.RecoverContinuousGoals();
+        await store.RecoverContinuousGoals(work =>
+        {
+            if (!SupportsApproval(work.Input.Provider)) return null;
+            try { return new AgentDelegationHost(Folder(work)).RecoverApprovalBoundary(); }
+            catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+            {
+                log.LogWarning(error, "Could not verify approval boundary for task {Task}", work.Id);
+                return false;
+            }
+        });
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(600));
         Task? active = null;
         try
