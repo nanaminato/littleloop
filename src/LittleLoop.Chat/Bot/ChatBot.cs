@@ -54,17 +54,34 @@ sealed class ChatBot : BackgroundService
             bool electron = options.GetValue<bool>("ElectronRunAsNode");
             var timeout = TimeSpan.FromSeconds(policy.TimeoutSeconds);
             configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron, project, timeout)];
+            var roots = new List<string>();
             if (options["TestDevelopmentPolicy"] is { Length: > 0 } grantPath)
+                AddProject(ChatStore.DeepSeekTestBotName, grantPath, legacy: true);
+            foreach (var entry in options.GetSection("DevelopmentProjects").GetChildren())
             {
+                if (entry.Key.Length is < 1 or > 15 || entry.Key.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '_')) ||
+                    entry["Policy"] is not { Length: > 0 } path)
+                    throw new InvalidOperationException("DeepSeek project IDs require 1–15 lowercase letters, digits or underscores and a policy path.");
+                AddProject(ChatStore.DeepSeekProjectPrefix + entry.Key, path, legacy: false);
+            }
+
+            void AddProject(string provider, string grantPath, bool legacy)
+            {
+                if (!Path.IsPathFullyQualified(grantPath)) throw new InvalidOperationException("DeepSeek policy path must be absolute.");
                 var grant = ChatStore.FromJson<DevelopmentPolicy>(File.ReadAllText(grantPath));
+                var scoped = new ProjectFiles(grant);
                 if (!Path.IsPathFullyQualified(grant.Root) ||
-                    Overlaps(grant.Root, project) || Overlaps(grant.Root, files.Root) || Overlaps(grant.Root, directory) ||
-                    grant.Commands.Any(command => !command.IsTest || command.ProtectedFiles.Length == 0))
-                    throw new InvalidOperationException("DeepSeek test grant requires a separate project and protected, fixed tests.");
-                _ = new ProjectFiles(grant);
-                var development = policy with { Project = grant.Root, Development = grant };
+                    Overlaps(scoped.Root, directory) || Overlaps(scoped.Root, project) ||
+                    harnessHome is not null && Overlaps(scoped.Root, harnessHome) ||
+                    legacyDirectory is not null && Overlaps(scoped.Root, legacyDirectory) ||
+                    roots.Any(root => Overlaps(root, scoped.Root)) ||
+                    Overlaps(scoped.Root, files.Root) && (legacy || !ProjectFiles.Same(scoped.Root, files.Root)) ||
+                    scoped.Policy.Commands.Any(command => !command.IsTest))
+                    throw new InvalidOperationException("DeepSeek grant requires a distinct, bounded project and fixed tests; host state must stay outside it.");
+                roots.Add(scoped.Root);
+                var development = policy with { Project = scoped.Root, Development = scoped.Policy };
                 configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron,
-                    grant.Root, timeout, development, ChatStore.DeepSeekTestBotName)];
+                    scoped.Root, timeout, development, provider)];
             }
         }
         adapters = configured.ToDictionary(adapter => adapter.Name, StringComparer.Ordinal);
@@ -206,7 +223,8 @@ sealed class ChatBot : BackgroundService
 
     public async Task<ChatMessage?> Queue(string room, string user, string name, Guid id, long? anchor, string kind, BotInput input)
     {
-        var goal = kind == "task" && (input.Provider is null or ChatStore.BotName or ChatStore.DeepSeekBotName or ChatStore.DeepSeekTestBotName)
+        var goal = kind == "task" && ((input.Provider is null or ChatStore.BotName or ChatStore.DeepSeekBotName or ChatStore.DeepSeekTestBotName) ||
+            ChatStore.IsDeepSeekProject(input.Provider))
             ? LittleLoop.Core.ContinuousGoal.Create(input.Text) : null;
         var work = new BotWork(id, room, user, 0, kind, goal?.Status ?? "queued", input, Goal: goal);
         var result = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),

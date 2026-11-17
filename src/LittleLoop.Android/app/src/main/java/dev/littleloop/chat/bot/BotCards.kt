@@ -153,7 +153,8 @@ internal fun BotRequestDialog(bot: BotChat, room: String, providers: List<String
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val asking = anchor == null
-    val preferred = if ("littleloop" in providers) "littleloop" else providers.firstOrNull().orEmpty()
+    val choices = if (asking) providers.filterNot { it.startsWith("deepseek_project_") } else providers
+    val preferred = if ("littleloop" in choices) "littleloop" else choices.firstOrNull().orEmpty()
     var provider by rememberSaveable { mutableStateOf(preferred) }
     var paths by remember { mutableStateOf<List<String>?>(null) }
     var path by rememberSaveable { mutableStateOf("") }
@@ -200,8 +201,11 @@ internal fun BotRequestDialog(bot: BotChat, room: String, providers: List<String
                 Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (providers.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (name in providers) {
+                if (choices.size > 1) Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (name in choices) {
                         FilterChip(name == provider, { provider = name }, { Text(providerName(name)) }, enabled = !busy)
                     }
                 }
@@ -298,7 +302,7 @@ private fun providerName(name: String) = when (name) {
     "deepseek" -> "DeepSeek"
     "deepseek_test" -> "DeepSeek (Test)"
     "source_review" -> stringResource(R.string.bot_provider_review)
-    else -> "LittleLoop"
+    else -> if (name.startsWith("deepseek_project_")) "DeepSeek · ${name.removePrefix("deepseek_project_")}" else "LittleLoop"
 }
 
 @Composable

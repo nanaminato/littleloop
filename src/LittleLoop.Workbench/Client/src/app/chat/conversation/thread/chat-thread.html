@@ -63,7 +63,7 @@
         <div class="form-head"><strong>{{ store.t('源码提问') }}</strong><button type="button" class="quiet" (click)="store.sources.set(null)">{{ store.t('关闭源码提问') }}</button></div>
         <label for="question-provider">{{ store.t('问答机器人') }}</label>
         <select id="question-provider" name="provider" [(ngModel)]="store.provider" required>
-          @for (name of store.roomProviders(); track name) { <option [value]="name">{{ store.botName(name) }}</option> }
+          @for (name of store.questionProviders(); track name) { <option [value]="name">{{ store.botName(name) }}</option> }
         </select>
         <label for="bot-source">{{ store.t('源码文件') }}</label>
         <select id="bot-source" name="sourcePath" [(ngModel)]="store.sourcePath" required>

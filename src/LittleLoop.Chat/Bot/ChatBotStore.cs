@@ -20,7 +20,9 @@ sealed partial class ChatStore
     public const string ReviewBotName = "source_review";
     public const string DeepSeekBotName = "deepseek";
     public const string DeepSeekTestBotName = "deepseek_test";
-    public static bool IsRobot(string name) => name is BotName or ReviewBotName or DeepSeekBotName or DeepSeekTestBotName;
+    public const string DeepSeekProjectPrefix = "deepseek_project_";
+    public static bool IsDeepSeekProject(string? name) => name?.StartsWith(DeepSeekProjectPrefix, StringComparison.Ordinal) == true;
+    public static bool IsRobot(string name) => name is BotName or ReviewBotName or DeepSeekBotName or DeepSeekTestBotName || IsDeepSeekProject(name);
     private const string RobotCredential = "!robot:v1";
     private static readonly JsonSerializerOptions BotJson = new(JsonSerializerDefaults.Web);
     internal static string ToJson<T>(T item) => JsonSerializer.Serialize(item, BotJson);

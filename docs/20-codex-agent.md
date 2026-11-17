@@ -22,6 +22,18 @@ DeepSeek Harness 提供[官方 ACP 接口](https://github.com/deepseek-ai/deepse
 
 受控开发配置必须使用独立项目，并明确列出可写文件、受保护的测试文件和固定测试命令。测试项目不得与 Codex 项目、普通 DeepSeek 项目或任务状态目录重叠。复验在 `LITTLELOOP_TEST_DEEPSEEK=1` 基础上设置 `LITTLELOOP_TEST_DEEPSEEK_WRITE=1`。
 
+### 按项目选择受控执行器
+
+服务管理员可通过 `ChatBot__DeepSeek__DevelopmentProjects__<项目ID>__Policy` 添加用户指定的项目，值为 `DevelopmentPolicy` JSON 的绝对路径。项目 ID 使用 1–15 位小写字母、数字或下划线，例如 `alpha`。在包含审批人的群聊里安装机器人后，「安排任务」会列出「DeepSeek · alpha」。策略定义绝对根目录、可写文件列表、只读扩展名、带受保护输入的固定测试和工具预算。聊天里输入的路径和要求无法注册项目或增加授权。
+
+各 DeepSeek 写入授权的根目录彼此独立，且不得覆盖 Harness 数据、普通只读工作区或服务任务状态。具名项目可以与 Codex 的完整项目根相同，但 DeepSeek 的授权要单独配置。现有 `deepseek_test` 配置继续可用。暂停任务恢复时会重新核对当前项目授权，发现授权变化则进入待核对，旧任务不会继续按原授权执行。
+
+模型工具申请格式有误时，宿主最多要求修正两次，未通过校验的回复不会发起审批或执行。修正仍受该轮的总步数和超时限制。
+
+复验设置 `LITTLELOOP_TEST_DEEPSEEK=1`、`LITTLELOOP_TEST_DEEPSEEK_WRITE=1` 和 `LITTLELOOP_TEST_DEEPSEEK_PROJECTS=1`，使用独立数据库运行 `http_e2e.py`。
+
+真实 dsh 复验 `data/continuous-http/9523f268/` 通过。`alpha` 和 `beta` 分别在审批后修改自己的文件并运行固定测试，执行 `beta` 时 `alpha` 的文件和测试标记均未变化。未配置的项目执行器被拒绝，普通 DeepSeek 成功执行只读搜索。暂停 `beta` 后收紧写入策略并重启，旧审批失效，恢复请求进入待核对，文件未改动。现有服务未加载具名项目配置。
+
 真实 dsh 隔离验收 `data/continuous-http/86f90de2/` 通过。拒绝补丁时原文件保持 `broken`，拒绝测试时没有执行标记或命令回执。另一任务在补丁审批前保持原文件，批准后变为 `fixed`。暂停待批测试后，旧审批返回 HTTP 409，测试标记仍不存在。恢复后收到新审批，批准后测试产生标记和退出码 0 回执。
 
 预检发现，原共享宿主把用户主动暂停计入委派失败，可能阻止同一目标恢复。修复后这种中断不进入执行成败学习，已执行工具的回执仍独立保存。DeepSeek 恢复时会收到明确提示，说明上次未获回执的请求已失效。真实 Codex HTTP 回归 `data/continuous-http/82ee3c02/` 通过。

@@ -17,6 +17,7 @@ static class ChatBotEndpoints
         api.MapPost("/direct", async (ClaimsPrincipal user, string? provider) =>
         {
             if (!bot.CanOperate(Id(user))) return Results.StatusCode(403);
+            if (ChatStore.IsDeepSeekProject(provider)) return Results.BadRequest("请在包含审批人的群聊中安排项目任务。");
             if (!bot.CanUse(provider)) return Results.BadRequest("未知机器人。");
             var robot = bot.Robot(provider);
             var room = await store.CreateRoom(new(Id(user), user.Identity!.Name!, ""), new("direct", "", [robot.Name]));
@@ -55,6 +56,7 @@ static class ChatBotEndpoints
         api.MapPost("/rooms/{room:guid}/ask", async (Guid room, BotAsk ask, ClaimsPrincipal user) =>
         {
             if (!bot.CanOperate(Id(user))) return Results.StatusCode(403);
+            if (ChatStore.IsDeepSeekProject(ask.Provider)) return Results.BadRequest("请使用项目执行器的安排任务入口。");
             if (ask.ClientId == Guid.Empty || string.IsNullOrWhiteSpace(ask.Text) || ask.Text.Length > 4000 || string.IsNullOrWhiteSpace(ask.Path))
                 return Results.BadRequest("请输入问题和引用。");
             var current = await store.BotRoom(room.ToString(), Id(user));
@@ -79,7 +81,8 @@ static class ChatBotEndpoints
             var source = await store.FindMessage(room.ToString(), input.Sequence, Id(user));
             if (source is null) return Results.NotFound();
             return await Queue(room, user, input.ClientId, input.Sequence, "task",
-                new(input.Goal, source.Text[..Math.Min(source.Text.Length, 12000)], source.Card?.Source, input.Provider));
+                new(input.Goal, source.Text[..Math.Min(source.Text.Length, 12000)],
+                    ChatStore.IsDeepSeekProject(input.Provider) ? null : source.Card?.Source, input.Provider));
         });
 
         api.MapGet("/work/{id:guid}", async (Guid id, ClaimsPrincipal user) =>

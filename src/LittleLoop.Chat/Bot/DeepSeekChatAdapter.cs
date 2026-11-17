@@ -23,7 +23,11 @@ sealed class DeepSeekChatAdapter(string launcher, string[] arguments, string? ha
         if (development is null) return await Execute(work.Input, folder, shouldYield, token);
         var host = new AgentDelegationHost(folder, onApproval, shouldYield, transport: "deepseek-acp");
         if (!File.Exists(Path.Combine(folder, "agent.json"))) host.Create(development);
-        bool resuming = host.Read().Status == "suspended";
+        var previous = host.Read();
+        if (previous.Policy.Development is not { } stored || development.Development is not { } current ||
+            new ProjectFiles(stored).PolicyHash != new ProjectFiles(current).PolicyHash)
+            return new("needs-reconciliation", "项目授权已变化，请核对旧任务后按当前授权新建任务。");
+        bool resuming = previous.Status == "suspended";
         var state = await host.RunAsync(work.Input.Text, token, new DeepSeekDevelopmentSession(
             Path.Combine(folder, "acp"), (prompt, ct) => Execute(new(prompt), Path.Combine(folder, "acp"), shouldYield, ct), shouldYield, resuming));
         var report = state.Turns.LastOrDefault()?.Report;

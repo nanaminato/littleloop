@@ -10,6 +10,7 @@ sealed class DeepSeekDevelopmentSession(string directory,
     private readonly Queue<JsonElement> events = new();
     private string thread = "", turn = "", nextPrompt = "";
     private int step;
+    private int formatRepairs;
     private int? pending;
     private bool interrupted;
 
@@ -28,10 +29,11 @@ sealed class DeepSeekDevelopmentSession(string directory,
             case "turn/start":
                 turn = Guid.NewGuid().ToString("N");
                 step = 0;
+                formatRepairs = 0;
                 interrupted = false;
                 nextPrompt = args.GetProperty("input")[0].GetProperty("text").GetString()! + """
 
-                    通过 LittleLoop 申请工具。每次只输出一个 JSON 对象，不要 Markdown。
+                    LittleLoop 会读取你的回复文本，并执行其中格式正确的工具申请。project_* 不会出现在 Harness 的原生工具列表中，这是正常的。不要调用原生工具或等待添加工具。要申请宿主工具，请把完整 JSON 作为你的最终回复文本发出，每次只输出一个 JSON 对象，不要 Markdown。
                     工具请求格式 {"tool":"project_read","arguments":{"path":"code.txt"}}。
                     写入使用 project_patch，参数 path、sha256、oldText、newText。SHA-256 必须来自本会话发出的 project_read 回执的 toolReceipt.artifacts。
                     测试使用 project_command，唯一参数 command 是宿主预设的测试 ID。写入和测试各自需要批准。
@@ -75,7 +77,9 @@ sealed class DeepSeekDevelopmentSession(string directory,
             Report(outcome.Report ?? "DeepSeek 未返回完整结果。", ["请补充要求后再继续。"]);
             return events.Dequeue();
         }
-        var raw = outcome.Report!;
+        var raw = outcome.Report!.Trim();
+        if (raw.StartsWith("```json\n", StringComparison.Ordinal) && raw.EndsWith("\n```", StringComparison.Ordinal))
+            raw = raw[8..^4];
         try
         {
             using var parsed = JsonDocument.Parse(raw);
@@ -89,6 +93,7 @@ sealed class DeepSeekDevelopmentSession(string directory,
                 if (tool is not null && args.EnumerateObject().Count() == tool.Parameters.Length &&
                     tool.Parameters.All(key => args.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String))
                 {
+                    formatRepairs = 0;
                     pending = step;
                     return JsonSerializer.SerializeToElement(new { id = step, method = "item/tool/call",
                         @params = new { threadId = thread, turnId = turn, callId = turn + "-" + step,
@@ -104,6 +109,13 @@ sealed class DeepSeekDevelopmentSession(string directory,
             }
         }
         catch (JsonException) { }
+        if (++formatRepairs <= 2)
+        {
+            nextPrompt = "宿主未接受上一条回复，未执行任何工具。请只在回复正文输出一个 JSON 对象。" +
+                "例如 {\"tool\":\"project_read\",\"arguments\":{\"path\":\"code.txt\"}}。" +
+                "按当前任务选择实际的工具和参数，不要输出解释、原生工具调用或多个请求。";
+            return await NextAsync(token);
+        }
         Report("DeepSeek 未返回有效的工具请求或报告。", ["请核对任务要求或重试。"]);
         return events.Dequeue();
     }

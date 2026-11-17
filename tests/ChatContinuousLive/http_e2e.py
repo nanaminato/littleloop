@@ -63,6 +63,8 @@ results = []
 deepseek = os.environ.get('LITTLELOOP_TEST_DEEPSEEK') == '1'
 controlled = deepseek and os.environ.get('LITTLELOOP_TEST_DEEPSEEK_WRITE') == '1'
 alternating = controlled and os.environ.get('LITTLELOOP_TEST_ALTERNATING') == '1'
+named_projects = controlled and os.environ.get('LITTLELOOP_TEST_DEEPSEEK_PROJECTS') == '1'
+project_provider = 'deepseek_project_alpha' if named_projects else 'deepseek_test'
 if controlled:
     (root / 'deepseek-readonly').mkdir()
     codex_project = root / 'codex-project'
@@ -73,6 +75,13 @@ if controlled:
         development=dict(policy['development'], root=str(codex_project)))), encoding='utf-8')
     (project / 'verify.py').write_text("from pathlib import Path\nassert Path('code.txt').read_text() == 'fixed'\nPath('.littleloop-temp/test-ran').write_text('verified')\nprint('DEEPSEEK-VERIFY-PASS')\n", encoding='utf-8')
     atomic_json(root / 'deepseek-grant.json', policy['development'])
+    if named_projects:
+        secondary = root / 'deepseek-beta'
+        secondary.mkdir()
+        for name in ('code.txt', 'notes.txt', 'verify.py'):
+            (secondary / name).write_bytes((project / name).read_bytes())
+        (root / 'deepseek-readonly' / 'marker.txt').write_text('readonly-' + uuid.uuid4().hex, encoding='utf-8')
+        atomic_json(root / 'deepseek-beta-grant.json', dict(policy['development'], root=str(secondary), writableFiles=['code.txt']))
     if alternating:
         for fixture in (project, codex_project):
             (fixture / 'verify.py').write_text("from pathlib import Path\nassert Path('code.txt').read_text() == 'fixed'\nwith Path('.littleloop-temp/test-ran').open('a') as f: f.write('verified\\n')\nprint('ALTERNATING-VERIFY-PASS')\n", encoding='utf-8')
@@ -107,7 +116,11 @@ def start(label, bot=False):
             child_env['ChatBot__DeepSeek__Project'] = str(project)
             if controlled:
                 child_env['ChatBot__DeepSeek__Project'] = str(root / 'deepseek-readonly')
-                child_env['ChatBot__DeepSeek__TestDevelopmentPolicy'] = str(root / 'deepseek-grant.json')
+                if named_projects:
+                    child_env['ChatBot__DeepSeek__DevelopmentProjects__alpha__Policy'] = str(root / 'deepseek-grant.json')
+                    child_env['ChatBot__DeepSeek__DevelopmentProjects__beta__Policy'] = str(root / 'deepseek-beta-grant.json')
+                else:
+                    child_env['ChatBot__DeepSeek__TestDevelopmentPolicy'] = str(root / 'deepseek-grant.json')
     stdout = open(root / (label + '.out'), 'wb'); stderr = open(root / (label + '.err'), 'wb')
     streams.extend([stdout, stderr])
     process = subprocess.Popen(['dotnet', service_dll],
@@ -170,12 +183,12 @@ try:
         anchor = send('DeepSeek controlled tools fixture')
         marker = project / '.littleloop-temp' / 'test-ran'
         code = project / 'code.txt'
-        def schedule():
+        def schedule(provider=project_provider, expected=202):
             return request(owner, f'/bot/rooms/{room}/schedule', dict(clientId=str(uuid.uuid4()),
-                sequence=anchor['sequence'], provider='deepseek_test', goal='先用 project_read 读取 code.txt，若为 broken 则用 project_patch 精确改为 fixed。文件正确后申请 project_command 运行 verify。仅使用宿主工具。'), 202)
+                sequence=anchor['sequence'], provider=provider, goal='先用 project_read 读取 code.txt，若为 broken 则用 project_patch 精确改为 fixed。文件正确后申请 project_command 运行 verify。仅使用宿主工具。'), expected)
         def state():
             value = request(approver, f'/bot/work/{task}')
-            assert value['provider'] == 'deepseek_test' and value['status'] not in ('failed', 'needs-reconciliation', 'disabled', 'refused'), value
+            assert value['provider'] == project_provider and value['status'] not in ('failed', 'needs-reconciliation', 'disabled', 'refused'), value
             return value
         def approval(tool):
             def pending():
@@ -230,6 +243,48 @@ try:
         results.append(dict(task=task, rejectedPatchTask=declined, rejectedTestTask=declined_test, result=result))
         atomic_json(root / 'deepseek-write-result.json', results[0])
         log('PASS DeepSeek executes only approved patch and fixed test, with actual receipts')
+        if named_projects:
+            assert (secondary / 'code.txt').read_text() == 'broken'
+            schedule('deepseek_project_ungranted', 400)
+            marker_path = root / 'deepseek-readonly' / 'marker.txt'
+            readonly = request(owner, f'/bot/rooms/{room}/schedule', dict(clientId=str(uuid.uuid4()),
+                sequence=anchor['sequence'], provider='deepseek', goal='只读搜索 marker.txt 中以 readonly- 开头的完整标记并原样返回。'), 202)['card']['taskId']
+            def read_only_done():
+                value = request(approver, f'/bot/work/{readonly}')
+                assert not value['canApprove'] and value['status'] not in ('needs-reconciliation','failed'), value
+                return value if value['status'] == 'completed' else None
+            assert marker_path.read_text() in wait(read_only_done)['output']
+            project_provider = 'deepseek_project_beta'
+            message = schedule(project_provider)
+            task = message['card']['taskId']
+            alpha_stamp = (code.stat().st_mtime_ns, marker.stat().st_mtime_ns)
+            decide(approval('project_patch'), 'accept')
+            test = approval('project_command')
+            assert test['parameters']['arguments'] == {'command': 'verify'}
+            decide(test, 'accept')
+            beta = wait(lambda: (value if (value := state())['status'] == 'completed' else None))
+            beta_marker = secondary / '.littleloop-temp/test-ran'
+            assert (secondary / 'code.txt').read_text() == 'fixed' and beta_marker.read_text() == 'verified'
+            assert (code.stat().st_mtime_ns, marker.stat().st_mtime_ns) == alpha_stamp
+            (secondary / 'code.txt').write_text('broken', encoding='utf-8')
+            beta_marker.unlink()
+            message = schedule(project_provider)
+            task = message['card']['taskId']
+            a = approval('project_patch')
+            send('暂停', message['sequence'])
+            wait(lambda: state()['status'] == 'paused' and state()['execution']['status'] == 'suspended')
+            # Tighten the policy while the task is parked. A resumed task must not reuse the broader stored grant.
+            stop()
+            atomic_json(root / 'deepseek-beta-grant.json', dict(policy['development'], root=str(secondary), writableFiles=[]))
+            start('named-project-narrowed', True)
+            decide(a, 'accept', 409)
+            send('恢复', message['sequence'])
+            wait(lambda: request(approver, f'/bot/work/{task}')['status'] == 'needs-reconciliation')
+            assert (secondary / 'code.txt').read_text() == 'broken' and not (secondary / '.littleloop-temp/test-ran').exists()
+            assert code.read_text() == 'fixed' and marker.read_text() == 'verified'
+            results.append(dict(readOnlyTask=readonly, betaResult=beta, narrowedGrantTask=task))
+            atomic_json(root / 'deepseek-projects-result.json', results)
+            log('PASS named projects stay isolated; ungranted provider rejected, default read-only, narrowed grant cannot resume')
     if deepseek and not controlled:
         assert not duration and os.environ.get('LITTLELOOP_SOAK_FAULTS') != '1'
         assert 'deepseek' in request(owner, '/bot/capabilities')['providers']

@@ -394,6 +394,7 @@ export class ChatStore {
 
   botName(name: string) {
     if (name === 'deepseek_test') return 'DeepSeek · ' + this.t('测试项目');
+    if (name.startsWith('deepseek_project_')) return 'DeepSeek · ' + name.slice('deepseek_project_'.length);
     return name === 'deepseek' ? 'DeepSeek' : name === 'source_review' ? this.t('源码审阅') : 'LittleLoop';
   }
 
@@ -485,9 +486,14 @@ export class ChatStore {
     const room = this.selected();
     await this.action(async () => {
       const paths = await this.api<string[]>('/bot/rooms/' + room + '/sources');
-      if (this.selected() === room) this.sources.set(paths);
+      if (this.selected() === room) {
+        if (!this.questionProviders().includes(this.provider)) this.provider = this.questionProviders()[0] ?? '';
+        this.sources.set(paths);
+      }
     });
   }
+
+  questionProviders() { return this.roomProviders().filter(name => !name.startsWith('deepseek_project_')); }
 
   async askBot() {
     const room = this.selected();

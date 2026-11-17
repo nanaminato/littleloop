@@ -2459,6 +2459,39 @@
       "verification_basis": [
         "EVIDENCE-CHAT-ALTERNATING-RESTART"
       ]
+    },
+    {
+      "id": "EVIDENCE-DEEPSEEK-NAMED-PROJECTS",
+      "body": "两个具名项目真实 ACP 审批执行及范围隔离，普通只读、未知项目拒绝及收紧授权后待核对。",
+      "delivery": "implemented",
+      "type": "evidence",
+      "title": "DeepSeek 多项目隔离验收",
+      "authorization": "not_applicable",
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "attributes": {
+        "observation": "data/continuous-http/9523f268/deepseek-projects-result.json 与 status.json；alpha、beta 分别获批写入和测试，互不影响，授权收紧后旧任务未执行。"
+      },
+      "verification": "not_applicable",
+      "actor": "AI"
+    },
+    {
+      "id": "TEST-DEEPSEEK-NAMED-PROJECTS",
+      "body": "用户要求先在隔离环境按项目验证独立文件及测试授权，保留既有审批和只读入口。",
+      "delivery": "implemented",
+      "type": "test",
+      "title": "用户指定项目的 DeepSeek 受控开发",
+      "verification_basis": [
+        "EVIDENCE-DEEPSEEK-NAMED-PROJECTS"
+      ],
+      "authorization": "not_applicable",
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "attributes": {},
+      "verification": "passed",
+      "actor": "AI"
     }
   ],
   "relations": [
@@ -3415,6 +3448,12 @@
       "id": "REL-CHAT-ALTERNATING-RESTART-VERIFIES",
       "source": "TEST-CHAT-ALTERNATING-RESTART",
       "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "id": "REL-DEEPSEEK-NAMED-PROJECTS-VERIFIES",
+      "type": "verifies",
+      "source": "TEST-DEEPSEEK-NAMED-PROJECTS"
     }
   ],
   "references": [
