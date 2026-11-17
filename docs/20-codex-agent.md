@@ -4,6 +4,18 @@ LittleLoop 通过独立 `codex app-server --stdio` 进程进行 JSON-RPC 握手�
 
 默认任务宿主验证**只读验收矩阵**。配置 `development` 后使用[受限开发工具桥接](21-codex-development.md)，可实际修改授权源码、运行固定测试，并验证最终快照；不支持任意命令或部署。
 
+## DeepSeek Harness ACP 原型
+
+DeepSeek Harness 提供[官方 ACP 接口](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md)，可用 `dsh --profile acp` 通过标准输入输出启动。该接口支持创建和恢复持久会话、提交提示、取消当前提示、接收事件及响应一次性权限请求。
+
+聊天服务通过现有的执行器接口选择 `deepseek`，Codex 仍使用原来的传输。通过群聊的机器人任务表单或 `schedule` API 选择 DeepSeek，随后回复任务卡片补充、暂停或恢复。任务目录中的 `deepseek-session.json` 保存原会话 ID。已暂停的任务可在服务重启后恢复，执行中断且未确认结果的任务沿用待核对状态。
+
+原型默认关闭。设置 `ChatBot__DeepSeek__Project`、`ChatBot__DeepSeek__ReadOnlyLauncher` 和 `ChatBot__DeepSeek__Home`，分别指向隔离项目、ACP 启动程序和独立 Harness 数据目录。使用 `ChatBot__DeepSeek__Arguments__0` 等配置启动参数。桌面版可通过自带 `dsh.cmd` 所使用的 Electron 入口启动，按脚本传递 `--expose-internals`、入口路径、`--profile acp` 和 `--patch`。此方式还需设置 `ChatBot__DeepSeek__ElectronRunAsNode=true`。
+
+测试采用[只读配置覆盖](../tests/ChatContinuousLive/deepseek-readonly.yml)，保留文件搜索工具，禁用文件修改、终端、联网工具和委派入口。宿主设置 `DSH_PERMISSION_MODE=read-only`，不挂载 MCP 工具并拒绝权限请求。更换 Harness 版本时应核对实际加载的工具清单。密钥由独立 Harness 配置的 Models 页面保存。若本地网络需要企业信任根，可通过 `NODE_EXTRA_CA_CERTS` 提供已有 CA 文件。
+
+2026-11-17 使用桌面版 0.2.2-rc.3 自带的真实 `dsh` 完成一轮隔离 HTTP 验收。任务通过聊天调度接收，在执行中取消当前提示并确认暂停，暂停期间补充要求，随后重启聊天服务并续接同一个 ACP 会话。最终报告准确引用了只读文件中的随机标记和补充要求，标记文件内容保持一致。证据位于 `data/continuous-http/01b8fcbe/`。复验使用 `tests/ChatContinuousLive/http_e2e.py` 的 `LITTLELOOP_TEST_DEEPSEEK=1` 模式和独立 `goal_test` 数据库。
+
 ## 调用方式
 
 策略文件示例（路径替换成本机实际值）：

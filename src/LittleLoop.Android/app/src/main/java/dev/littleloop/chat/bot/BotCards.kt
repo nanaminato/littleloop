@@ -294,7 +294,11 @@ internal fun cardTitle(kind: String) = when (kind) {
 }
 
 @Composable
-private fun providerName(name: String) = if (name == "source_review") stringResource(R.string.bot_provider_review) else "LittleLoop"
+private fun providerName(name: String) = when (name) {
+    "deepseek" -> "DeepSeek"
+    "source_review" -> stringResource(R.string.bot_provider_review)
+    else -> "LittleLoop"
+}
 
 @Composable
 private fun workLabel(status: String) = when (status) {

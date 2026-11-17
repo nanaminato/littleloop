@@ -2363,6 +2363,39 @@
         "REF-LEARNING-LOCK-CHECKS",
         "REF-CONTINUOUS-24H"
       ]
+    },
+    {
+      "verification": "not_applicable",
+      "type": "evidence",
+      "body": "桌面自带 dsh 0.2.2-rc.3 使用独立模型认证和只读配置，完成接单、取消当前执行、暂停补充、重启后续接原会话。",
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "title": "真实 DeepSeek ACP 隔离聊天验收",
+      "id": "EVIDENCE-DEEPSEEK-ACP",
+      "attributes": {
+        "observation": "data/continuous-http/01b8fcbe/deepseek-result.json 和 status.json：一轮通过，目标版本 4，原 ACP 会话保留，结果包含文件随机标记和补充要求，文件未修改。"
+      }
+    },
+    {
+      "verification": "passed",
+      "type": "test",
+      "body": "用户明确要求在隔离项目以真实 dsh 验证只读任务、补充、暂停和服务重启后续接原会话。",
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "title": "DeepSeek ACP 持久聊天目标验收",
+      "verification_basis": [
+        "EVIDENCE-DEEPSEEK-ACP"
+      ],
+      "id": "TEST-DEEPSEEK-ACP",
+      "attributes": {}
     }
   ],
   "relations": [
@@ -3301,6 +3334,12 @@
       "type": "verifies",
       "source": "TEST-LEARNING-LOCK-LIFETIME",
       "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "source": "TEST-DEEPSEEK-ACP",
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "type": "verifies",
+      "id": "REL-DEEPSEEK-ACP-VERIFIES"
     }
   ],
   "references": [
@@ -3968,6 +4007,13 @@
       "target": "tests/LittleLoop.Checks/LearningLockChecks.cs",
       "purpose": "路径锁生命周期、并发与失败释放回归",
       "tracking": "live"
+    },
+    {
+      "tracking": "live",
+      "target": "docs/20-codex-agent.md",
+      "purpose": "DeepSeek ACP 配置与真实 HTTP 验收",
+      "kind": "project_file",
+      "id": "REF-DEEPSEEK-ACP"
     }
   ],
   "views": [

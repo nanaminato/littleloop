@@ -60,6 +60,7 @@ atomic_json(root / 'run.json', dict(startedAt=time.strftime('%Y-%m-%dT%H:%M:%S%z
     metricsSha256=hashlib.sha256(Path(__file__).with_name('soak_metrics.py').read_bytes()).hexdigest()))
 print('Evidence: ' + str(root), flush=True)
 results = []
+deepseek = os.environ.get('LITTLELOOP_TEST_DEEPSEEK') == '1'
 password = secrets.token_hex(20)
 def client():
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -84,6 +85,11 @@ def start(label, bot=False):
     if bot:
         child_env.update(ChatBot__Policy=str(root / 'policy.json'), ChatBot__Data=str(root / 'bot'),
                          ChatBot__Operators='s1_owner', ChatBot__Approvers='s1_approver')
+        if deepseek:
+            harness = json.loads(Path(os.environ['LITTLELOOP_TEST_DEEPSEEK_CONFIG']).read_text(encoding='utf-8-sig'))
+            for key, value in harness.items():
+                child_env['ChatBot__DeepSeek__' + key] = value
+            child_env['ChatBot__DeepSeek__Project'] = str(project)
     stdout = open(root / (label + '.out'), 'wb'); stderr = open(root / (label + '.err'), 'wb')
     streams.extend([stdout, stderr])
     process = subprocess.Popen(['dotnet', service_dll],
@@ -136,7 +142,42 @@ try:
     request(owner, f'/bot/rooms/{room}/install', dict(enabled=True), 204)
     def send(text, reply=None, identifier=None):
         return request(owner, f'/rooms/{room}/messages', dict(clientId=identifier or str(uuid.uuid4()), text=text, replyTo=reply))
-    for iteration in range(1, rounds + 1):
+    if deepseek:
+        assert not duration and os.environ.get('LITTLELOOP_SOAK_FAULTS') != '1'
+        assert 'deepseek' in request(owner, '/bot/capabilities')['providers']
+        marker = 'fixture-' + uuid.uuid4().hex
+        (project / 'code.txt').write_text(marker, encoding='utf-8')
+        anchor = send('ACP read-only fixture')
+        message = request(owner, f'/bot/rooms/{room}/schedule', dict(clientId=str(uuid.uuid4()),
+            sequence=anchor['sequence'], provider='deepseek',
+            goal='请用只读搜索查找 code.txt 中以 fixture- 开头的完整标记，并在输出中原样引用该标记。'), 202)
+        task = message['card']['taskId']
+        folder = root / 'bot' / task.replace('-', '')
+        receipt_path = folder / 'deepseek-execution.json'
+        def receipt():
+            return json.loads(receipt_path.read_text(encoding='utf-8')) if receipt_path.exists() else {}
+        def state():
+            value = request(owner, f'/bot/work/{task}')
+            assert value['provider'] == 'deepseek' and value['goal']['status'] == value['status']
+            assert value['status'] not in ('failed', 'needs-reconciliation', 'disabled'), value
+            return value
+        wait(lambda: receipt().get('stage') == 'prompting', 30)
+        send('暂停', message['sequence'])
+        wait(lambda: state()['status'] == 'paused' and receipt().get('stage') == 'suspended', 40)
+        session = receipt()['sessionId']
+        send('补充：请在结果中另附 ACP-SUPPLEMENT-OK。', message['sequence'])
+        wait(lambda: state()['goal']['version'] == 3 and state()['status'] == 'paused', 15)
+        stop(); start('deepseek-paused-restart', True)
+        assert state()['status'] == 'paused' and receipt()['sessionId'] == session
+        send('恢复', message['sequence'])
+        result = wait(lambda: (value if (value := state())['status'] == 'completed' else None))
+        assert result['goal']['version'] == 4 and receipt() == dict(sessionId=session, stage='settled')
+        assert marker in result['output'] and 'ACP-SUPPLEMENT-OK' in result['output'], result
+        assert (project / 'code.txt').read_text(encoding='utf-8') == marker
+        results.append(dict(task=task, sessionId=session, result=result))
+        atomic_json(root / 'deepseek-result.json', results[0])
+        log('PASS DeepSeek intake, cancellation, supplement and same-session resume after service restart')
+    for iteration in range(1, 1 if deepseek else rounds + 1):
         round_started = time.monotonic()
         restart_round = iteration % restart_every == 0 or (duration and time.monotonic()-started >= duration)
         (project / 'code.txt').write_text('broken', encoding='utf-8')

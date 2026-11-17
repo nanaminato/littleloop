@@ -392,7 +392,7 @@ export class ChatStore {
     this.taskId = undefined;
   }
 
-  botName(name: string) { return name === 'source_review' ? this.t('源码审阅') : 'LittleLoop'; }
+  botName(name: string) { return name === 'deepseek' ? 'DeepSeek' : name === 'source_review' ? this.t('源码审阅') : 'LittleLoop'; }
 
   roomType(room: Room) {
     return this.t({ direct: '私聊', group: '群聊', saved: '收藏', legacy: '历史', topic: '话题', channel: '频道' }[room.type]);

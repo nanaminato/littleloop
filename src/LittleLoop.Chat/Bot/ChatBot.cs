@@ -40,6 +40,20 @@ sealed class ChatBot : BackgroundService
             throw new InvalidOperationException("Keep agent state outside project.");
         Directory.CreateDirectory(directory);
         IChatRobotAdapter[] configured = configuredAdapters ?? [new LittleLoopChatAdapter(policy, directory), new SourceReviewChatAdapter()];
+        if (configuredAdapters is null && config["ChatBot:DeepSeek:ReadOnlyLauncher"] is { Length: > 0 } launcher)
+        {
+            var project = config["ChatBot:DeepSeek:Project"];
+            if (!Path.IsPathFullyQualified(launcher) || !File.Exists(launcher) || project is null ||
+                !Path.IsPathFullyQualified(project) || !Directory.Exists(project))
+                throw new InvalidOperationException("DeepSeek requires an absolute read-only ACP launcher and isolated project directory.");
+            var options = config.GetSection("ChatBot:DeepSeek");
+            var arguments = options.GetSection("Arguments").Get<string[]>() ?? [];
+            string? harnessHome = options["Home"];
+            if (harnessHome is not null && !Path.IsPathFullyQualified(harnessHome))
+                throw new InvalidOperationException("DeepSeek home must be absolute.");
+            configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome,
+                options.GetValue<bool>("ElectronRunAsNode"), project, TimeSpan.FromSeconds(policy.TimeoutSeconds))];
+        }
         adapters = configured.ToDictionary(adapter => adapter.Name, StringComparer.Ordinal);
         operators = Names(config["ChatBot:Operators"]);
         approvers = Names(config["ChatBot:Approvers"]);
@@ -161,7 +175,7 @@ sealed class ChatBot : BackgroundService
 
     public async Task<ChatMessage?> Queue(string room, string user, string name, Guid id, long? anchor, string kind, BotInput input)
     {
-        var goal = kind == "task" && (input.Provider is null or ChatStore.BotName)
+        var goal = kind == "task" && (input.Provider is null or ChatStore.BotName or ChatStore.DeepSeekBotName)
             ? LittleLoop.Core.ContinuousGoal.Create(input.Text) : null;
         var work = new BotWork(id, room, user, 0, kind, goal?.Status ?? "queued", input, Goal: goal);
         var result = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),
