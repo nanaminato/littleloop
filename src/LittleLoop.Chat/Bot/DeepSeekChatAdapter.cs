@@ -10,6 +10,12 @@ sealed class DeepSeekChatAdapter(string launcher, string[] arguments, string? ha
     public string Name => provider;
     public bool SupportsApproval => development is not null;
 
+    public Task<RobotOutcome> Review(string prompt, string folder, Func<CancellationToken, Task<bool>>? shouldYield, CancellationToken token)
+    {
+        if (SupportsApproval) throw new InvalidOperationException("The reviewer must have no development grant.");
+        return Execute(new(prompt), folder, shouldYield, token);
+    }
+
     public async Task<string> Answer(BotInput input, CancellationToken token)
     {
         var result = await Execute(input, null, null, token);

@@ -53,7 +53,10 @@ sealed class ChatBot : BackgroundService
                 throw new InvalidOperationException("DeepSeek home must be absolute.");
             bool electron = options.GetValue<bool>("ElectronRunAsNode");
             var timeout = TimeSpan.FromSeconds(policy.TimeoutSeconds);
-            configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron, project, timeout)];
+            var readOnly = new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron, project, timeout);
+            configured = [.. configured, readOnly];
+            if (options.GetValue<bool>("ReviewCodexChanges"))
+                configured = [.. configured, new CollaborationChatAdapter(policy, new LittleLoopChatAdapter(policy, directory), readOnly)];
             var roots = new List<string>();
             if (options["TestDevelopmentPolicy"] is { Length: > 0 } grantPath)
                 AddProject(ChatStore.DeepSeekTestBotName, grantPath, legacy: true);
@@ -224,7 +227,7 @@ sealed class ChatBot : BackgroundService
     public async Task<ChatMessage?> Queue(string room, string user, string name, Guid id, long? anchor, string kind, BotInput input)
     {
         var goal = kind == "task" && ((input.Provider is null or ChatStore.BotName or ChatStore.DeepSeekBotName or ChatStore.DeepSeekTestBotName) ||
-            ChatStore.IsDeepSeekProject(input.Provider))
+            ChatStore.IsProjectTaskOnly(input.Provider))
             ? LittleLoop.Core.ContinuousGoal.Create(input.Text) : null;
         var work = new BotWork(id, room, user, 0, kind, goal?.Status ?? "queued", input, Goal: goal);
         var result = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),

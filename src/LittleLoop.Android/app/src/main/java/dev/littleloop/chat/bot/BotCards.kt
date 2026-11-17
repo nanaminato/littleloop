@@ -153,7 +153,7 @@ internal fun BotRequestDialog(bot: BotChat, room: String, providers: List<String
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val asking = anchor == null
-    val choices = if (asking) providers.filterNot { it.startsWith("deepseek_project_") } else providers
+    val choices = if (asking) providers.filterNot { it == "littleloop_collab" || it.startsWith("deepseek_project_") } else providers
     val preferred = if ("littleloop" in choices) "littleloop" else choices.firstOrNull().orEmpty()
     var provider by rememberSaveable { mutableStateOf(preferred) }
     var paths by remember { mutableStateOf<List<String>?>(null) }
@@ -299,6 +299,7 @@ internal fun cardTitle(kind: String) = when (kind) {
 
 @Composable
 private fun providerName(name: String) = when (name) {
+    "littleloop_collab" -> "Codex + DeepSeek"
     "deepseek" -> "DeepSeek"
     "deepseek_test" -> "DeepSeek (Test)"
     "source_review" -> stringResource(R.string.bot_provider_review)

@@ -2525,6 +2525,39 @@
       "body": "用户要求先在隔离副本验证两执行器、分开审批和其他项目只读。",
       "delivery": "implemented",
       "type": "test"
+    },
+    {
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "data/continuous-http/6dfcbc9e/relaxkonos-collaboration-result.json：同一任务中实际 19 项测试通过，Codex 和 DeepSeek 会话证据齐备，只写入批准的验收注释，原项目未变。"
+      },
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "body": "真实 Codex 按两次独立审批修改和测试，真实 dsh 依据补丁和实际测试回执进行只读审阅，LittleLoop 持久汇总。",
+      "title": "RelaxKonOS 单任务双执行器协作验收",
+      "actor": "AI",
+      "type": "evidence",
+      "id": "EVIDENCE-RELAXKONOS-COLLABORATION"
+    },
+    {
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-RELAXKONOS-COLLABORATION"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "body": "用户要求隔离验证，两种副作用分别审批，线上服务保持不变。",
+      "title": "RelaxKonOS 同一任务的 Codex 修改与 DeepSeek 只读审阅",
+      "actor": "AI",
+      "type": "test",
+      "id": "TEST-RELAXKONOS-COLLABORATION"
     }
   ],
   "relations": [
@@ -3493,6 +3526,12 @@
       "target": "CAP-CHAT-CONTINUOUS-S1",
       "source": "TEST-DEEPSEEK-RELAXKONOS",
       "id": "REL-DEEPSEEK-RELAXKONOS-VERIFIES"
+    },
+    {
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "type": "verifies",
+      "id": "REL-RELAXKONOS-COLLABORATION-VERIFIES",
+      "source": "TEST-RELAXKONOS-COLLABORATION"
     }
   ],
   "references": [

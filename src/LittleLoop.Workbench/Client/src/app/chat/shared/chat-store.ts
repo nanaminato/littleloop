@@ -393,6 +393,7 @@ export class ChatStore {
   }
 
   botName(name: string) {
+    if (name === 'littleloop_collab') return 'Codex + DeepSeek';
     if (name === 'deepseek_test') return 'DeepSeek · ' + this.t('测试项目');
     if (name.startsWith('deepseek_project_')) return 'DeepSeek · ' + name.slice('deepseek_project_'.length);
     return name === 'deepseek' ? 'DeepSeek' : name === 'source_review' ? this.t('源码审阅') : 'LittleLoop';
@@ -493,7 +494,8 @@ export class ChatStore {
     });
   }
 
-  questionProviders() { return this.roomProviders().filter(name => !name.startsWith('deepseek_project_')); }
+  projectTaskOnly(name: string) { return name === 'littleloop_collab' || name.startsWith('deepseek_project_'); }
+  questionProviders() { return this.roomProviders().filter(name => !this.projectTaskOnly(name)); }
 
   async askBot() {
     const room = this.selected();
