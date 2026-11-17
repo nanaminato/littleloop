@@ -62,6 +62,21 @@ DeepSeek 给出明确可修正的问题时，LittleLoop 在同一任务中把意
 
 RelaxKonOS 隔离实跑记录 `data/continuous-http/462da246/relaxkonos-collab-revision-result.json`。DeepSeek 在首轮通过测试后发现一条错误注释，原 Codex 会话修正后重新运行 `appid-tests`。两次补丁和两次测试分别审批，两次测试均退出码 0、19 项通过。DeepSeek 两次只读审阅均保留独立会话，复审通过，结果汇总到原聊天任务。隔离副本只有获批注释发生变化，原项目未修改。本次未部署。
 
+### 返工与复审的暂停和重启验收
+
+预跑中，DeepSeek 曾把任务目标里描述的后续修正当成已执行补丁，导致首轮误判通过。`data/continuous-http/5cd0d669/review-evidence-mismatch.json` 记录了意见与实际补丁的差异。修正版明确标记首轮或复审，区分期望修正与宿主记录的实际补丁，并说明替换后的内容以回执为准。
+
+使用真实 Codex 和 DeepSeek 在 RelaxKonOS 隔离副本复验修正版。各目录下的 `relaxkonos-collab-rework-recovery-result.json` 保存执行结果。
+
+| 中断点 | 结果 | 验收目录 |
+| --- | --- | --- |
+| 第二轮补丁待审批时强制重启 | 任务暂停，旧审批被拒绝，恢复后原 Codex 会话发出新审批，首轮补丁及测试保留 | `data/continuous-http/70e11d28/` |
+| 第二轮测试待审批时暂停再重启 | 保留暂停和已执行的修正补丁，旧测试审批被拒绝，恢复后重新申请测试 | `data/continuous-http/2d33d281/` |
+| DeepSeek 复审中强制重启 | 自动续接原复审会话，工具日志哈希不变 | `data/continuous-http/592b324f/` |
+| DeepSeek 复审中暂停再重启 | 保留暂停，用户恢复后续接原复审会话，工具日志哈希不变 | `data/continuous-http/efdd9165/` |
+
+四个任务各留下两次成功补丁和两次成功测试，四次独立批准。每轮 `appid-tests` 通过 19 项。各任务完成后再次重启，汇总未变化且只发送过一条完成通知。本轮只在隔离环境复验，未部署。
+
 ## 调用方式
 
 策略文件示例（路径替换成本机实际值）：

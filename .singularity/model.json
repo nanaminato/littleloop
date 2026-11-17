@@ -2624,6 +2624,39 @@
       "type": "test",
       "verification": "passed",
       "id": "TEST-COLLABORATION-REWORK"
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "body": "使用真实 Codex 和 DeepSeek 在 RelaxKonOS 隔离副本复验第二轮补丁和测试审批、复审恢复与汇总去重。",
+      "attributes": {
+        "observation": "data/relaxkonos-collab-rework-recovery-summary.json 汇总修正版四个通过场景：70e11d28、2d33d281、592b324f、efdd9165。旧审批被拒绝，补丁和测试未重跑，复审续接原会话，完成后重启仍只有一条完成通知。未部署。"
+      },
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "delivery": "implemented",
+      "title": "返工审批和复审的暂停与重启实跑",
+      "type": "evidence",
+      "verification": "not_applicable",
+      "id": "EVIDENCE-COLLABORATION-REWORK-RECOVERY"
+    },
+    {
+      "verification_basis": [
+        "EVIDENCE-COLLABORATION-REWORK-RECOVERY"
+      ],
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "body": "验证隔离环境中第二轮补丁或测试待审批重启、复审直接重启和暂停后重启。",
+      "attributes": {},
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "delivery": "implemented",
+      "title": "返工审批与只读复审的恢复",
+      "type": "test",
+      "verification": "passed",
+      "id": "TEST-COLLABORATION-REWORK-RECOVERY"
     }
   ],
   "relations": [
@@ -3609,6 +3642,12 @@
       "id": "REL-COLLABORATION-REWORK-VERIFIES",
       "target": "CAP-CHAT-CONTINUOUS-S1",
       "source": "TEST-COLLABORATION-REWORK",
+      "type": "verifies"
+    },
+    {
+      "id": "REL-COLLABORATION-REWORK-RECOVERY-VERIFIES",
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "source": "TEST-COLLABORATION-REWORK-RECOVERY",
       "type": "verifies"
     }
   ],

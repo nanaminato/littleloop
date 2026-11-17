@@ -103,8 +103,11 @@ sealed class CollaborationChatAdapter(AgentHostPolicy policy, LittleLoopChatAdap
                 "不要调用工具、修改项目或发起测试。仅输出一个 JSON 对象，不要 Markdown：" +
                 "{\"decision\":\"pass\",\"summary\":\"简洁中文审阅意见\",\"issues\":[]}。" +
                 "只有发现可具体修正的问题时用 decision=revise，issues 是问题描述字符串的数组。" +
-                "补丁按执行顺序排列，以最终效果为准。复审时检查先前问题是否已解决。\n" +
-                JsonSerializer.Serialize(new { goal = checkpoint.Prompt, priorFeedback = checkpoint.Feedback, patches, tests = tests.Select(t => new
+                "actualPatches 是实际执行过的补丁，按执行顺序排列，After 才是替换后的文本。" +
+                "goal 中可以描述未来步骤和期望的修复，它们只用于判断验收要求。" +
+                "当 reviewStage 是 initial 时，按当前实际变更判断是否需修正；当它是 follow-up 时，检查先前问题是否已解决。\n" +
+                JsonSerializer.Serialize(new { reviewStage = checkpoint.Feedback is null ? "initial" : "follow-up",
+                    goal = checkpoint.Prompt, priorFeedback = checkpoint.Feedback, actualPatches = patches, tests = tests.Select(t => new
                     { t.Id, t.ExitCode, Output = Limit(t.StandardOutput, 4000) }) });
             if (prompt.Length > 30000) return new("waiting-input", "审阅证据超过本轮上限，请拆分任务后重试。");
             var review = await reviewer.Review(prompt, Path.Combine(folder, checkpoint.Feedback is null ? "review" : "re-review"), shouldYield, token);
