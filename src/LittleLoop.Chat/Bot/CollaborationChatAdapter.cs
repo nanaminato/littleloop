@@ -15,6 +15,7 @@ sealed class CollaborationChatAdapter(AgentHostPolicy policy, LittleLoopChatAdap
         bool IssuesRemain = false);
 
     private sealed record ReviewVerdict(string Decision, string Summary, string[] Issues);
+    private sealed record ReviewEnvelope(string Decision, string Summary, JsonElement[] Issues);
 
     public bool? CanRecoverReview(BotWork work, string folder)
     {
@@ -101,7 +102,8 @@ sealed class CollaborationChatAdapter(AgentHostPolicy policy, LittleLoopChatAdap
                 "列出的补丁均由宿主验证过唯一匹配并已写入和读回。回执未列出测试命令内部步骤，不要推断是否编译或断言未完成构建。" +
                 "不要调用工具、修改项目或发起测试。仅输出一个 JSON 对象，不要 Markdown：" +
                 "{\"decision\":\"pass\",\"summary\":\"简洁中文审阅意见\",\"issues\":[]}。" +
-                "只有发现可具体修正的问题时用 decision=revise，并在 issues 中列出问题。复审时检查先前问题是否已解决。\n" +
+                "只有发现可具体修正的问题时用 decision=revise，issues 是问题描述字符串的数组。" +
+                "补丁按执行顺序排列，以最终效果为准。复审时检查先前问题是否已解决。\n" +
                 JsonSerializer.Serialize(new { goal = checkpoint.Prompt, priorFeedback = checkpoint.Feedback, patches, tests = tests.Select(t => new
                     { t.Id, t.ExitCode, Output = Limit(t.StandardOutput, 4000) }) });
             if (prompt.Length > 30000) return new("waiting-input", "审阅证据超过本轮上限，请拆分任务后重试。");
@@ -137,17 +139,30 @@ sealed class CollaborationChatAdapter(AgentHostPolicy policy, LittleLoopChatAdap
     private static ReviewVerdict? ParseReview(string? report)
     {
         if (string.IsNullOrWhiteSpace(report)) return null;
-        string json = report.Trim();
+        string json = report.Trim().Replace("\r\n", "\n");
         if (json.StartsWith("```json\n", StringComparison.Ordinal) && json.EndsWith("\n```", StringComparison.Ordinal))
             json = json[8..^4];
         try
         {
-            var result = JsonSerializer.Deserialize<ReviewVerdict>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            return result is { Decision: "pass" or "revise", Summary.Length: > 0 and <= 2000, Issues.Length: <= 6 } &&
-                result.Issues.All(issue => !string.IsNullOrWhiteSpace(issue) && issue.Length <= 500) &&
-                (result.Decision == "revise" ? result.Issues.Length > 0 : result.Issues.Length == 0) ? result : null;
+            var result = JsonSerializer.Deserialize<ReviewEnvelope>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (result is not { Decision: "pass" or "revise", Summary.Length: > 0 and <= 2000, Issues.Length: <= 6 } ||
+                string.IsNullOrWhiteSpace(result.Summary) || (result.Decision == "revise") != (result.Issues.Length > 0)) return null;
+            var issues = new List<string>();
+            foreach (var item in result.Issues)
+            {
+                var description = item.ValueKind == JsonValueKind.String ? item.GetString() : Field(item, "description");
+                if (string.IsNullOrWhiteSpace(description)) return null;
+                string issue = string.Join(" · ", new[] { Field(item, "file"), description, Field(item, "fix") }
+                    .Where(value => !string.IsNullOrWhiteSpace(value)));
+                if (issue.Length > 600) return null;
+                issues.Add(issue);
+            }
+            return new(result.Decision, result.Summary, issues.ToArray());
         }
         catch (JsonException) { return null; }
+
+        static string? Field(JsonElement item, string key) => item.ValueKind == JsonValueKind.Object &&
+            item.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     }
 
     private (Patch[] Patches, CommandObservation[] Tests, string Snapshot)? ReadEvidence(string folder, string snapshot)
