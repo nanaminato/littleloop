@@ -5,10 +5,10 @@ using LittleLoop.Core;
 using LittleLoop.Tools;
 
 sealed class DeepSeekChatAdapter(string launcher, string[] arguments, string? harnessHome, bool electron,
-    string project, TimeSpan timeout) : IChatRobotAdapter
+    string project, TimeSpan timeout, AgentHostPolicy? development = null, string provider = ChatStore.DeepSeekBotName) : IChatRobotAdapter
 {
-    public string Name => ChatStore.DeepSeekBotName;
-    public bool SupportsApproval => false;
+    public string Name => provider;
+    public bool SupportsApproval => development is not null;
 
     public async Task<string> Answer(BotInput input, CancellationToken token)
     {
@@ -16,9 +16,19 @@ sealed class DeepSeekChatAdapter(string launcher, string[] arguments, string? ha
         return result.Status == "completed" ? result.Report! : throw new IOException("DeepSeek did not complete the answer.");
     }
 
-    public Task<RobotOutcome> Run(BotWork work, string folder,
+    public async Task<RobotOutcome> Run(BotWork work, string folder,
         Func<AgentApprovalRequest, CancellationToken, Task> onApproval, CancellationToken token,
-        Func<CancellationToken, Task<bool>>? shouldYield = null) => Execute(work.Input, folder, shouldYield, token);
+        Func<CancellationToken, Task<bool>>? shouldYield = null)
+    {
+        if (development is null) return await Execute(work.Input, folder, shouldYield, token);
+        var host = new AgentDelegationHost(folder, onApproval, shouldYield, transport: "deepseek-acp");
+        if (!File.Exists(Path.Combine(folder, "agent.json"))) host.Create(development);
+        bool resuming = host.Read().Status == "suspended";
+        var state = await host.RunAsync(work.Input.Text, token, new DeepSeekDevelopmentSession(
+            Path.Combine(folder, "acp"), (prompt, ct) => Execute(new(prompt), Path.Combine(folder, "acp"), shouldYield, ct), shouldYield, resuming));
+        var report = state.Turns.LastOrDefault()?.Report;
+        return new(state.Status == "needs-revision" ? "waiting-input" : state.Status, report);
+    }
 
     private async Task<RobotOutcome> Execute(BotInput input, string? folder,
         Func<CancellationToken, Task<bool>>? shouldYield, CancellationToken shutdown)

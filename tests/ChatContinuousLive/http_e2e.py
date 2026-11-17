@@ -61,6 +61,17 @@ atomic_json(root / 'run.json', dict(startedAt=time.strftime('%Y-%m-%dT%H:%M:%S%z
 print('Evidence: ' + str(root), flush=True)
 results = []
 deepseek = os.environ.get('LITTLELOOP_TEST_DEEPSEEK') == '1'
+controlled = deepseek and os.environ.get('LITTLELOOP_TEST_DEEPSEEK_WRITE') == '1'
+if controlled:
+    (root / 'deepseek-readonly').mkdir()
+    codex_project = root / 'codex-project'
+    codex_project.mkdir()
+    for name in ('code.txt', 'notes.txt', 'verify.py'):
+        (codex_project / name).write_bytes((project / name).read_bytes())
+    (root / 'policy.json').write_text(json.dumps(dict(policy, project=str(codex_project),
+        development=dict(policy['development'], root=str(codex_project)))), encoding='utf-8')
+    (project / 'verify.py').write_text("from pathlib import Path\nassert Path('code.txt').read_text() == 'fixed'\nPath('.littleloop-temp/test-ran').write_text('verified')\nprint('DEEPSEEK-VERIFY-PASS')\n", encoding='utf-8')
+    atomic_json(root / 'deepseek-grant.json', policy['development'])
 password = secrets.token_hex(20)
 def client():
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -90,6 +101,9 @@ def start(label, bot=False):
             for key, value in harness.items():
                 child_env['ChatBot__DeepSeek__' + key] = value
             child_env['ChatBot__DeepSeek__Project'] = str(project)
+            if controlled:
+                child_env['ChatBot__DeepSeek__Project'] = str(root / 'deepseek-readonly')
+                child_env['ChatBot__DeepSeek__TestDevelopmentPolicy'] = str(root / 'deepseek-grant.json')
     stdout = open(root / (label + '.out'), 'wb'); stderr = open(root / (label + '.err'), 'wb')
     streams.extend([stdout, stderr])
     process = subprocess.Popen(['dotnet', service_dll],
@@ -142,7 +156,72 @@ try:
     request(owner, f'/bot/rooms/{room}/install', dict(enabled=True), 204)
     def send(text, reply=None, identifier=None):
         return request(owner, f'/rooms/{room}/messages', dict(clientId=identifier or str(uuid.uuid4()), text=text, replyTo=reply))
-    if deepseek:
+    if controlled:
+        assert not duration and os.environ.get('LITTLELOOP_SOAK_FAULTS') != '1'
+        anchor = send('DeepSeek controlled tools fixture')
+        marker = project / '.littleloop-temp' / 'test-ran'
+        code = project / 'code.txt'
+        def schedule():
+            return request(owner, f'/bot/rooms/{room}/schedule', dict(clientId=str(uuid.uuid4()),
+                sequence=anchor['sequence'], provider='deepseek_test', goal='先用 project_read 读取 code.txt，若为 broken 则用 project_patch 精确改为 fixed。文件正确后申请 project_command 运行 verify。仅使用宿主工具。'), 202)
+        def state():
+            value = request(approver, f'/bot/work/{task}')
+            assert value['provider'] == 'deepseek_test' and value['status'] not in ('failed', 'needs-reconciliation', 'disabled', 'refused'), value
+            return value
+        def approval(tool):
+            def pending():
+                current = state()
+                assert current['status'] not in ('completed','waiting-input'), current
+                a = (current.get('execution') or {}).get('approval')
+                if a:
+                    assert a['parameters']['tool'] == tool, a
+                    return a
+            return wait(pending)
+        def decide(a, value, expected=204):
+            request(approver, f'/bot/work/{task}/decision', dict(nonce=a['nonce'], value=value), expected)
+        message = schedule()
+        task = message['card']['taskId']
+        a = approval('project_patch')
+        assert code.read_text() == 'broken' and not marker.exists()
+        decide(a, 'decline')
+        wait(lambda: state()['status'] == 'waiting-input')
+        assert code.read_text() == 'broken' and not marker.exists()
+        declined = task
+        log('PASS DeepSeek patch rejection has no effects')
+        code.write_text('fixed', encoding='utf-8')
+        message = schedule()
+        task = message['card']['taskId']
+        a = approval('project_command')
+        assert a['parameters']['arguments'] == {'command': 'verify'} and not marker.exists()
+        decide(a, 'decline')
+        wait(lambda: state()['status'] == 'waiting-input')
+        assert not marker.exists() and not state()['execution']['receipts']
+        declined_test = task
+        log('PASS DeepSeek test rejection does not start the test')
+        code.write_text('broken', encoding='utf-8')
+        message = schedule()
+        task = message['card']['taskId']
+        a = approval('project_patch')
+        assert a['parameters']['arguments']['path'] == 'code.txt' and code.read_text() == 'broken' and not marker.exists()
+        decide(a, 'accept')
+        a = approval('project_command')
+        assert a['parameters']['arguments'] == {'command': 'verify'} and code.read_text() == 'fixed' and not marker.exists()
+        send('暂停', message['sequence'])
+        wait(lambda: state()['status'] == 'paused' and state()['execution']['status'] == 'suspended')
+        decide(a, 'accept', 409)
+        assert not marker.exists()
+        log('PASS DeepSeek pause invalidates pending test approval without running the test')
+        send('恢复', message['sequence'])
+        a = approval('project_command')
+        assert a['parameters']['arguments'] == {'command': 'verify'} and not marker.exists()
+        decide(a, 'accept')
+        result = wait(lambda: (value if (value := state())['status'] == 'completed' else None))
+        assert marker.read_text() == 'verified' and code.read_text() == 'fixed'
+        assert any(r['id'] == 'verify' and r['exitCode'] == 0 and 'DEEPSEEK-VERIFY-PASS' in r['standardOutput'] for r in result['execution']['receipts'])
+        results.append(dict(task=task, rejectedPatchTask=declined, rejectedTestTask=declined_test, result=result))
+        atomic_json(root / 'deepseek-write-result.json', results[0])
+        log('PASS DeepSeek executes only approved patch and fixed test, with actual receipts')
+    if deepseek and not controlled:
         assert not duration and os.environ.get('LITTLELOOP_SOAK_FAULTS') != '1'
         assert 'deepseek' in request(owner, '/bot/capabilities')['providers']
         marker = 'fixture-' + uuid.uuid4().hex

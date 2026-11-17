@@ -51,13 +51,35 @@ sealed class ChatBot : BackgroundService
             string? harnessHome = options["Home"];
             if (harnessHome is not null && !Path.IsPathFullyQualified(harnessHome))
                 throw new InvalidOperationException("DeepSeek home must be absolute.");
-            configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome,
-                options.GetValue<bool>("ElectronRunAsNode"), project, TimeSpan.FromSeconds(policy.TimeoutSeconds))];
+            bool electron = options.GetValue<bool>("ElectronRunAsNode");
+            var timeout = TimeSpan.FromSeconds(policy.TimeoutSeconds);
+            configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron, project, timeout)];
+            if (options["TestDevelopmentPolicy"] is { Length: > 0 } grantPath)
+            {
+                var grant = ChatStore.FromJson<DevelopmentPolicy>(File.ReadAllText(grantPath));
+                if (!Path.IsPathFullyQualified(grant.Root) ||
+                    Overlaps(grant.Root, project) || Overlaps(grant.Root, files.Root) || Overlaps(grant.Root, directory) ||
+                    grant.Commands.Any(command => !command.IsTest || command.ProtectedFiles.Length == 0))
+                    throw new InvalidOperationException("DeepSeek test grant requires a separate project and protected, fixed tests.");
+                _ = new ProjectFiles(grant);
+                var development = policy with { Project = grant.Root, Development = grant };
+                configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron,
+                    grant.Root, timeout, development, ChatStore.DeepSeekTestBotName)];
+            }
         }
         adapters = configured.ToDictionary(adapter => adapter.Name, StringComparer.Ordinal);
         operators = Names(config["ChatBot:Operators"]);
         approvers = Names(config["ChatBot:Approvers"]);
         if (operators.Count == 0 || approvers.Count == 0) throw new InvalidOperationException("Configure bot operators and approvers.");
+    }
+
+    private static bool Overlaps(string first, string second) => Contains(first, second) || Contains(second, first);
+
+    private static bool Contains(string root, string path)
+    {
+        string relative = Path.GetRelativePath(root, path);
+        return !Path.IsPathFullyQualified(relative) && relative != ".." &&
+            !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     private static HashSet<string> Names(string? names) => (names ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
@@ -175,7 +197,7 @@ sealed class ChatBot : BackgroundService
 
     public async Task<ChatMessage?> Queue(string room, string user, string name, Guid id, long? anchor, string kind, BotInput input)
     {
-        var goal = kind == "task" && (input.Provider is null or ChatStore.BotName or ChatStore.DeepSeekBotName)
+        var goal = kind == "task" && (input.Provider is null or ChatStore.BotName or ChatStore.DeepSeekBotName or ChatStore.DeepSeekTestBotName)
             ? LittleLoop.Core.ContinuousGoal.Create(input.Text) : null;
         var work = new BotWork(id, room, user, 0, kind, goal?.Status ?? "queued", input, Goal: goal);
         var result = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),

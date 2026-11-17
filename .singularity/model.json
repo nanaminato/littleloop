@@ -2396,6 +2396,39 @@
       ],
       "id": "TEST-DEEPSEEK-ACP",
       "attributes": {}
+    },
+    {
+      "verification": "not_applicable",
+      "type": "evidence",
+      "body": "隔离 HTTP 验收确认补丁、固定测试、拒绝及暂停恢复均由共享宿主控制。",
+      "id": "EVIDENCE-DEEPSEEK-CONTROLLED",
+      "attributes": {
+        "observation": "data/continuous-http/86f90de2/deepseek-write-result.json：拒绝补丁不改文件，拒绝测试不启动，暂停使旧审批返回 409，恢复后新批准的 verify 测试退出 0。data/continuous-http/82ee3c02/status.json：共享暂停修复的真实 Codex 回归通过。"
+      },
+      "delivery": "implemented",
+      "title": "真实 DeepSeek 受控开发审批验收",
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "actor": "AI",
+      "authorization": "not_applicable"
+    },
+    {
+      "verification": "passed",
+      "type": "test",
+      "body": "用户确认仅在隔离项目验证批准、拒绝和暂停，现有服务保持只读。",
+      "id": "TEST-DEEPSEEK-CONTROLLED",
+      "attributes": {},
+      "delivery": "implemented",
+      "title": "DeepSeek 受控写入和固定测试验收",
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "actor": "AI",
+      "verification_basis": [
+        "EVIDENCE-DEEPSEEK-CONTROLLED"
+      ],
+      "authorization": "not_applicable"
     }
   ],
   "relations": [
@@ -3340,6 +3373,12 @@
       "target": "CAP-CHAT-CONTINUOUS-S1",
       "type": "verifies",
       "id": "REL-DEEPSEEK-ACP-VERIFIES"
+    },
+    {
+      "source": "TEST-DEEPSEEK-CONTROLLED",
+      "type": "verifies",
+      "id": "REL-DEEPSEEK-CONTROLLED-VERIFIES",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
     }
   ],
   "references": [

@@ -8,7 +8,7 @@ public sealed record AgentTurnRecord(string DecisionId, string? TurnId, string P
 public sealed record AgentHostState(AgentHostPolicy Policy, string? ThreadId, string Status, AgentTurnRecord[] Turns);
 
 public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequest, CancellationToken, Task>? onApproval = null,
-    Func<CancellationToken, Task<bool>>? shouldYield = null)
+    Func<CancellationToken, Task<bool>>? shouldYield = null, string transport = "codex-app-server")
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private readonly string root = Path.GetFullPath(directory);
@@ -71,7 +71,7 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
                 { state = state with { Status = "suspended" }; Save(state); return state; }
                 if (state.Turns.Length >= state.Policy.MaxTurns) { state = state with { Status = "needs-revision" }; Save(state); return state; }
                 string id = "agent-turn-" + (state.Turns.Length + 1);
-                var option = new Proposal("codex.delegate", ChoiceKind.Act, "Delegate bounded project task", 0, .15m, "Collect agent report under configured host policy.", "agent.delegate", 1)
+                var option = new Proposal(transport == "codex-app-server" ? "codex.delegate" : "deepseek.delegate", ChoiceKind.Act, "Delegate bounded project task", 0, .15m, "Collect agent report under configured host policy.", "agent.delegate", 1)
                 { Meaning = new("agent/matrix/1", ["agent.report.received"], ["delegation"], []) };
                 var episode = learning.Begin(new(id, task, new() { ["workflow"] = development is null ? "agent-matrix" : "agent-development", ["project"] = state.Policy.Project,
                     ["requestHash"] = ProjectFiles.Hash(Encoding.UTF8.GetBytes(prompt)) }, [new("report", "agent.report.received", 1, true)], [option], [], [], 1, ["agent.delegate"]));
@@ -155,9 +155,14 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
                 if (context is not null)
                     issues = [.. issues, .. context.Sources.Where(s => !SourceUnchanged(context.Root, s)).Select(s => "Source changed after snapshot: " + s.Path)];
                 record = record with { Status = status, Report = report, Issues = issues }; Replace(record);
-                learning.Complete(new("result:" + id, id, "codex.delegate", episode.Trace.Decision.Selected.Source,
+                if (shouldYield is not null && await shouldYield(token))
+                {
+                    SaveSuspension();
+                    return state;
+                }
+                learning.Complete(new("result:" + id, id, option.Id, episode.Trace.Decision.Selected.Source,
                     status == "completed" ? ExecutionStatus.Completed : ExecutionStatus.Failed,
-                    status == "completed" ? ["agent.report.received"] : [], "codex-app-server", $"Thread {threadId}; turn {turnId}; {status}. Report is not device-test proof.\n" + report[..Math.Min(12000, report.Length)], true));
+                    status == "completed" ? ["agent.report.received"] : [], transport, $"Thread {threadId}; turn {turnId}; {status}. Report is not device-test proof.\n" + report[..Math.Min(12000, report.Length)], true));
                 learning.Feedback(new("review:" + id, id, null, issues.Length == 0, issues.Length == 0 ? ["agent.report.received"] : [],
                     "host.result.validation", issues.Length == 0 ? development is null ? "Required matrix structure and evidence paths verified; device execution remains unverified." : "Host patch and all required tests verified on final snapshot." : string.Join("; ", issues)));
                 if (shouldYield is not null && await shouldYield(token))
@@ -191,16 +196,24 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
                             stopped.GetProperty("params").GetProperty("threadId").GetString() == threadId &&
                             stopped.GetProperty("params").GetProperty("turn").GetProperty("id").GetString() == turnId) break;
                     }
+                    SaveSuspension();
+                    return true;
+                }
+
+                void SaveSuspension()
+                {
                     record = record with { Status = "suspended", Issues = ["User goal changed or paused at a tool boundary."] };
                     Replace(record);
-                    learning.Complete(new("result:" + id, id, "codex.delegate", episode.Trace.Decision.Selected.Source,
-                        ExecutionStatus.Failed, [], "chat-goal-control", "Turn interrupted at a tool boundary; previous tool receipts remain authoritative.", true));
+                    // A user-requested interruption is not evidence about the success of delegation.
+                    // Any prior tool effects remain in the separate tool receipts.
+                    learning.Complete(new("result:" + id, id, option.Id, episode.Trace.Decision.Selected.Source,
+                        ExecutionStatus.NotExecuted, [], "chat-goal-control", "Delegation result was not evaluated because the user suspended the turn.", false));
                     if (File.Exists(ApprovalFile))
                     {
                         var pending = JsonSerializer.Deserialize<AgentApprovalRequest>(File.ReadAllText(ApprovalFile), Json)!;
                         if (pending.Status == "pending") Write(ApprovalFile, pending with { Status = "expired" });
                     }
-                    state = state with { Status = "suspended" }; Save(state); return true;
+                    state = state with { Status = "suspended" }; Save(state);
                 }
             }
             state = state with { Status = "needs-revision" }; Save(state); return state;

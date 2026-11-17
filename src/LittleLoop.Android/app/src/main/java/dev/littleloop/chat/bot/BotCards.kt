@@ -296,6 +296,7 @@ internal fun cardTitle(kind: String) = when (kind) {
 @Composable
 private fun providerName(name: String) = when (name) {
     "deepseek" -> "DeepSeek"
+    "deepseek_test" -> "DeepSeek (Test)"
     "source_review" -> stringResource(R.string.bot_provider_review)
     else -> "LittleLoop"
 }

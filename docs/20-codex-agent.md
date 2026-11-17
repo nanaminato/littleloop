@@ -16,6 +16,16 @@ DeepSeek Harness 提供[官方 ACP 接口](https://github.com/deepseek-ai/deepse
 
 2026-11-17 使用桌面版 0.2.2-rc.3 自带的真实 `dsh` 完成一轮隔离 HTTP 验收。任务通过聊天调度接收，在执行中取消当前提示并确认暂停，暂停期间补充要求，随后重启聊天服务并续接同一个 ACP 会话。最终报告准确引用了只读文件中的随机标记和补充要求，标记文件内容保持一致。证据位于 `data/continuous-http/01b8fcbe/`。复验使用 `tests/ChatContinuousLive/http_e2e.py` 的 `LITTLELOOP_TEST_DEEPSEEK=1` 模式和独立 `goal_test` 数据库。
 
+### 隔离环境的受控开发
+
+配置 `ChatBot__DeepSeek__TestDevelopmentPolicy` 后，聊天中会出现独立的 `deepseek_test` 执行器，只能操作该策略指定的测试项目。普通 `deepseek` 执行器继续只读。受控执行器在原 ACP 会话里用结构化回复提出工具请求，Harness 本身仍使用只读配置。LittleLoop 将请求交给 Codex 同样的宿主审批和开发执行器。补丁需使用宿主读取回执中的文件哈希，测试只能按明确配置的 ID 启动。每次补丁和测试各有一个审批请求。点击拒绝或在待批期间暂停会使该请求失效。已完成的操作保留真实回执，暂停不回滚此前已批准并执行的操作。
+
+受控开发配置必须使用独立项目，并明确列出可写文件、受保护的测试文件和固定测试命令。测试项目不得与 Codex 项目、普通 DeepSeek 项目或任务状态目录重叠。复验在 `LITTLELOOP_TEST_DEEPSEEK=1` 基础上设置 `LITTLELOOP_TEST_DEEPSEEK_WRITE=1`。
+
+真实 dsh 隔离验收 `data/continuous-http/86f90de2/` 通过。拒绝补丁时原文件保持 `broken`，拒绝测试时没有执行标记或命令回执。另一任务在补丁审批前保持原文件，批准后变为 `fixed`。暂停待批测试后，旧审批返回 HTTP 409，测试标记仍不存在。恢复后收到新审批，批准后测试产生标记和退出码 0 回执。
+
+预检发现，原共享宿主把用户主动暂停计入委派失败，可能阻止同一目标恢复。修复后这种中断不进入执行成败学习，已执行工具的回执仍独立保存。DeepSeek 恢复时会收到明确提示，说明上次未获回执的请求已失效。真实 Codex HTTP 回归 `data/continuous-http/82ee3c02/` 通过。
+
 ## 调用方式
 
 策略文件示例（路径替换成本机实际值）：
