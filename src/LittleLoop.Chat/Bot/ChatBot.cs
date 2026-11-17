@@ -144,6 +144,17 @@ sealed class ChatBot : BackgroundService
                 log.LogWarning(error, "Could not verify approval boundary for task {Task}", work.Id);
                 return false;
             }
+        }, work =>
+        {
+            if (work.Input.Provider != ChatStore.CollaborationBotName ||
+                !adapters.TryGetValue(ChatStore.CollaborationBotName, out var adapter) || adapter is not CollaborationChatAdapter collaboration)
+                return null;
+            try { return collaboration.CanRecoverReview(work, Folder(work)); }
+            catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException or ArgumentException)
+            {
+                log.LogWarning(error, "Could not verify collaboration review checkpoint for task {Task}", work.Id);
+                return false;
+            }
         });
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(600));
         Task? active = null;

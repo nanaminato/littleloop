@@ -12,17 +12,32 @@ sealed class CollaborationChatAdapter(AgentHostPolicy policy, LittleLoopChatAdap
 
     private sealed record Checkpoint(string Prompt, string PolicyHash, string Snapshot, string? Review = null);
 
+    public bool? CanRecoverReview(BotWork work, string folder)
+    {
+        var checkpoint = ReadCheckpoint(folder);
+        if (checkpoint is null) return null;
+        var files = new ProjectFiles(policy.Development!);
+        return new AgentDelegationHost(folder).Read().Status == "completed" && checkpoint.Prompt == work.Input.Text &&
+            checkpoint.PolicyHash == files.PolicyHash && checkpoint.Snapshot == files.Snapshot() &&
+            ReadEvidence(folder, checkpoint.Snapshot) is not null;
+    }
+
+    private static Checkpoint? ReadCheckpoint(string folder)
+    {
+        var path = Path.Combine(folder, "collaboration.json");
+        return File.Exists(path) ? JsonSerializer.Deserialize<Checkpoint>(AtomicSnapshot.ReadText(path))
+            ?? throw new InvalidDataException("Missing collaboration checkpoint.") : null;
+    }
+
     public async Task<RobotOutcome> Run(BotWork work, string folder,
         Func<AgentApprovalRequest, CancellationToken, Task> onApproval, CancellationToken token,
         Func<CancellationToken, Task<bool>>? shouldYield = null)
     {
         var files = new ProjectFiles(policy.Development!);
         string path = Path.Combine(folder, "collaboration.json");
-        Checkpoint checkpoint;
-        if (File.Exists(path))
+        var checkpoint = ReadCheckpoint(folder);
+        if (checkpoint is not null)
         {
-            checkpoint = JsonSerializer.Deserialize<Checkpoint>(AtomicSnapshot.ReadText(path))
-                ?? throw new InvalidDataException("Missing collaboration checkpoint.");
             if (checkpoint.PolicyHash != files.PolicyHash || checkpoint.Snapshot != files.Snapshot())
                 return new("needs-reconciliation", "项目授权或已验证的源码快照变化，请核对原任务。");
             if (checkpoint.Prompt != work.Input.Text)

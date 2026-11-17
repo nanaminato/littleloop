@@ -170,7 +170,8 @@ sealed partial class ChatStore
         await tx.CommitAsync();
     }
 
-    public async Task RecoverContinuousGoals(Func<BotWork, bool?>? recoverApprovalBoundary = null)
+    public async Task RecoverContinuousGoals(Func<BotWork, bool?>? recoverApprovalBoundary = null,
+        Func<BotWork, bool?>? recoverReview = null)
     {
         await using var db = await Open(); var works = new List<BotWork>();
         await using (var cmd = Command(db, null, "SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work WHERE goal IS NOT NULL AND status IN ('running','paused')"))
@@ -178,6 +179,19 @@ sealed partial class ChatStore
             while (await r.ReadAsync()) works.Add(ReadWork(r));
         foreach (var work in works)
         {
+            var review = recoverReview?.Invoke(work);
+            if (review == true)
+            {
+                // No editing or testing is allowed after this checkpoint. Preserve user pauses.
+                if (work.Status == "running")
+                    await FinishGoal(work, "queued", "服务已重启，将从只读审阅继续。已完成的补丁和测试不会重跑。");
+                continue;
+            }
+            if (review == false)
+            {
+                await FinishGoal(work, "needs-reconciliation", "审阅记录与任务或源码不一致，请核对原测试回执。");
+                continue;
+            }
             var recovered = recoverApprovalBoundary?.Invoke(work);
             if (recovered == true && work.Status == "running")
                 await FinishGoal(work, "paused", "服务重启，原审批已失效。恢复任务后将重新申请审批。");

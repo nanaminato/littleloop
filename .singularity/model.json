@@ -2558,6 +2558,39 @@
       "actor": "AI",
       "type": "test",
       "id": "TEST-RELAXKONOS-COLLABORATION"
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "body": "修复后在 RelaxKonOS 隔离副本分别验证用户暂停和强制重启。",
+      "attributes": {
+        "observation": "data/continuous-http/e178b966/failure.json 复现原版待核对；data/continuous-http/a3a15112/relaxkonos-collaboration-recovery-result.json 两个修复场景通过，原审阅会话、工具日志哈希、最终汇总和单条完成通知均符合预期。"
+      },
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "delivery": "implemented",
+      "title": "协作任务审阅阶段的暂停与重启实跑",
+      "type": "evidence",
+      "verification": "not_applicable",
+      "id": "EVIDENCE-COLLABORATION-REVIEW-RECOVERY"
+    },
+    {
+      "verification_basis": [
+        "EVIDENCE-COLLABORATION-REVIEW-RECOVERY"
+      ],
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "body": "用户要求隔离验证审阅阶段暂停与重启，不重跑已批准操作，不重复发布完成结果。",
+      "attributes": {},
+      "references": [
+        "REF-DEEPSEEK-ACP"
+      ],
+      "delivery": "implemented",
+      "title": "审阅阶段安全续接与结果去重",
+      "type": "test",
+      "verification": "passed",
+      "id": "TEST-COLLABORATION-REVIEW-RECOVERY"
     }
   ],
   "relations": [
@@ -3532,6 +3565,12 @@
       "type": "verifies",
       "id": "REL-RELAXKONOS-COLLABORATION-VERIFIES",
       "source": "TEST-RELAXKONOS-COLLABORATION"
+    },
+    {
+      "id": "REL-COLLABORATION-REVIEW-RECOVERY-VERIFIES",
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "source": "TEST-COLLABORATION-REVIEW-RECOVERY",
+      "type": "verifies"
     }
   ],
   "references": [
