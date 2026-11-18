@@ -24,6 +24,13 @@ sealed partial class ChatStore
                 body TEXT NOT NULL, work_id CHAR(36) NULL, delivered BOOLEAN NOT NULL DEFAULT FALSE,
                 {outboxOrder}, INDEX(delivered,created)
             );
+            CREATE TABLE IF NOT EXISTS chat_goal_preferences (
+                room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL,
+                include_objective BOOLEAN NOT NULL, source_seq BIGINT NOT NULL,
+                PRIMARY KEY(room_id,owner_id),
+                FOREIGN KEY(room_id) REFERENCES chat_rooms(id),
+                FOREIGN KEY(owner_id) REFERENCES chat_accounts(id)
+            );
             """);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -62,13 +69,20 @@ sealed partial class ChatStore
             text = r.GetString(4); replyTo = r.IsDBNull(5) ? null : r.GetInt64(5);
         }
         await using var tx = await db.BeginTransactionAsync();
-        await LockGoalRoom(db, tx, room);
+        var roomType = await LockGoalRoom(db, tx, room);
         await using var done = Command(db, tx, "UPDATE chat_goal_inbox SET processed=TRUE WHERE id=@id AND NOT processed", ("id", inbox));
         if (await done.ExecuteNonQueryAsync() != 1) return true;
         await using var installed = Command(db, tx, "SELECT enabled FROM chat_bot_rooms WHERE room_id=@room FOR SHARE", ("room", room));
         if (!canOperate(user) || !await IsMember(db, tx, room, user) || !await IsMember(db, tx, room, robot) ||
             await installed.ExecuteScalarAsync() is not { } enabled || !Convert.ToBoolean(enabled))
         { await tx.CommitAsync(); return true; }
+
+        if (await HandleGoalMemory(db, tx, room, roomType, user, seq, text) is { } memoryReply)
+        {
+            await AddGoalNotice(db, tx, room, seq, memoryReply, null);
+            await tx.CommitAsync();
+            return true;
+        }
 
         Guid? target = null;
         if (replyTo is { } reply)
@@ -156,10 +170,10 @@ sealed partial class ChatStore
         await tx.CommitAsync(); return true;
     }
 
-    private static async Task LockGoalRoom(DbConnection db, DbTransaction tx, string room)
+    private static async Task<string?> LockGoalRoom(DbConnection db, DbTransaction tx, string room)
     {
-        await using var cmd = Command(db, tx, "SELECT id FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
-        await cmd.ExecuteScalarAsync();
+        await using var cmd = Command(db, tx, "SELECT type FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
+        return await cmd.ExecuteScalarAsync() as string;
     }
 
     private static async Task SaveGoal(DbConnection db, DbTransaction tx, BotWork work, ContinuousGoal goal, long seq, string action,
@@ -184,7 +198,7 @@ sealed partial class ChatStore
     public async Task FinishGoal(BotWork executed, string status, string? error = null, string? output = null)
     {
         await using var db = await Open(); await using var tx = await db.BeginTransactionAsync();
-        await LockGoalRoom(db, tx, executed.Room);
+        var roomType = await LockGoalRoom(db, tx, executed.Room);
         ContinuousGoal goal;
         await using (var cmd = Command(db, tx, "SELECT goal FROM chat_bot_work WHERE id=@id FOR UPDATE", ("id", executed.Id.ToString())))
             goal = FromJson<ContinuousGoal>((string)(await cmd.ExecuteScalarAsync())!);
@@ -193,9 +207,12 @@ sealed partial class ChatStore
         if (next != goal)
         {
             await SaveGoal(db, tx, executed with { Input = executed.Input with { Text = next.Prompt } }, next, executed.Sequence, "result", error, output);
+            bool includeObjective = next.Status == "completed" && roomType == "direct" &&
+                await ReadGoalPreference(db, tx, executed.Room, executed.Owner) is true;
             await AddGoalNotice(db, tx, executed.Room, executed.Sequence,
                 $"任务 v{next.Version}：{GoalStatusText(next.Status)}" + (error is null ? "" : "\n" + error) +
-                (next.Status == "waiting-input" && output is not null ? "\n" + output[..Math.Min(output.Length, 3000)] : ""), executed.Id);
+                (next.Status == "waiting-input" && output is not null ? "\n" + output[..Math.Min(output.Length, 3000)] : "") +
+                (includeObjective ? "\n任务目标：" + GoalMemoryExcerpt(next.Objective) : ""), executed.Id);
         }
         await tx.CommitAsync();
     }

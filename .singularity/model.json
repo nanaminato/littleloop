@@ -2806,6 +2806,41 @@
       },
       "delivery": "implemented",
       "id": "EVIDENCE-CHAT-MULTITASK-SQLITE"
+    },
+    {
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY",
+        "REF-CHAT-GOAL-MEMORY"
+      ],
+      "id": "CAP-CHAT-PRIVATE-MEMORY",
+      "title": "私聊完成通知偏好与已验收任务回顾",
+      "verification_basis": [
+        "EVIDENCE-CHAT-PRIVATE-MEMORY-SQLITE"
+      ],
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "attributes": {},
+      "verification": "passed",
+      "delivery": "implemented",
+      "body": "以私聊和账号隔离用户明确设置的偏好，结果事务仅在完成通知中采纳。已完成且源消息可见的任务可回顾。经验提炼与留出任务收益属于 S3 后续设计。",
+      "type": "capability"
+    },
+    {
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY",
+        "REF-CONTINUOUS-GOAL-CHECKS"
+      ],
+      "id": "EVIDENCE-CHAT-PRIVATE-MEMORY-SQLITE",
+      "title": "SQLite 私聊记忆隔离和纠正回归",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "attributes": {
+        "observation": "本地运行输出为 data/s3-chat-checks-final.log。验证使用测试回执；不支持真实任务成功率或成本的收益结论。"
+      },
+      "verification": "not_applicable",
+      "delivery": "implemented",
+      "body": "本地对照默认与已记忆偏好的完成通知。测试还覆盖重新打开同一数据库、重复消息、更正、忘记和跨账号及群聊隔离。",
+      "type": "evidence"
     }
   ],
   "relations": [
@@ -3846,6 +3881,18 @@
       "type": "depends_on",
       "id": "REL-CHAT-MULTITASK-USES-S1",
       "source": "CAP-CHAT-MULTITASK-DISPATCH"
+    },
+    {
+      "id": "REL-CHAT-PRIVATE-MEMORY-GOAL",
+      "source": "CAP-CHAT-PRIVATE-MEMORY",
+      "type": "derived_from",
+      "target": "GOAL-CONTINUOUS-COLLABORATOR"
+    },
+    {
+      "id": "REL-CHAT-PRIVATE-MEMORY-USES-S1",
+      "source": "CAP-CHAT-PRIVATE-MEMORY",
+      "type": "depends_on",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
     }
   ],
   "references": [
@@ -4562,6 +4609,20 @@
       "tracking": "live",
       "id": "REF-CHAT-MULTITASK-WORKER",
       "purpose": "聊天 worker 并发任务、工作区互斥与问答槽位"
+    },
+    {
+      "id": "REF-CHAT-LONG-TERM-MEMORY",
+      "kind": "project_file",
+      "tracking": "live",
+      "purpose": "S3 私聊记忆首版设计、命令与验收边界",
+      "target": "docs/56-chat-long-term-memory.md"
+    },
+    {
+      "id": "REF-CHAT-GOAL-MEMORY",
+      "kind": "project_file",
+      "tracking": "live",
+      "purpose": "私聊目标偏好与完成经历读取实现",
+      "target": "src/LittleLoop.Chat/Bot/ChatGoalMemory.cs"
     }
   ],
   "views": [

@@ -134,6 +134,41 @@ Check((await Read(groupId)).Status == "queued", "another authorized group operat
 await Send("取消", addressed.Message.Sequence, to: group.Id); await Drain();
 Check((await Read(groupId)).Status == "cancelled", "explicit group reply cancels own goal");
 
+async Task<Guid> CompleteMemoryFixture(string objective, string? targetRoom = null, Account? actor = null)
+{
+    string command = (targetRoom == group.Id ? "@littleloop " : "") + "任务：" + objective;
+    var sent = await Send(command, to: targetRoom, sender: actor);
+    await Drain();
+    var task = await store.ClaimBotWork(lease) ?? throw new Exception("Missing memory fixture task");
+    Check(task.Room == (targetRoom ?? room.Id) && task.Goal?.Objective == objective, "memory leaves the task objective intact");
+    await store.FinishGoal(task, "completed", output: "Verified fixture receipt");
+    return task.Id;
+}
+
+var savedPreference = await Send("记住偏好：完成通知含目标"); await Drain();
+var duplicatedPreference = await Send("记住偏好：完成通知含目标", client: savedPreference.Message.ClientId); await Drain();
+Check(!duplicatedPreference.IsNew && (await store.FindMessage(room.Id, savedPreference.Message.Sequence, owner.Id))?.Card is null,
+    "explicit preference write is idempotent and creates no task");
+store = new ChatStore(connection, false, provider);
+var rememberedQuery = await Send("查看偏好"); await Drain();
+var detailedGoal = await CompleteMemoryFixture("私聊记忆目标");
+
+var otherPrivate = await store.CreateRoom(stranger, new("direct", "", [robot.Name]));
+await store.InstallRobot(otherPrivate.Id, stranger.Id, [robot.Id], true);
+var isolatedQuery = await Send("查看偏好", to: otherPrivate.Id, sender: stranger); await Drain();
+var isolatedRecall = await Send("回顾经验", to: otherPrivate.Id, sender: stranger); await Drain();
+var groupMemory = await Send("@littleloop 忘记偏好", to: group.Id); await Drain();
+var afterGroupQuery = await Send("查看偏好"); await Drain();
+var otherGoal = await CompleteMemoryFixture("另一个用户的目标", otherPrivate.Id, stranger);
+var sharedGoal = await CompleteMemoryFixture("群聊已完成的目标", group.Id);
+var recalled = await Send("回顾经验"); await Drain();
+
+await Send("记住偏好：完成通知简洁"); await Drain();
+var correctedGoal = await CompleteMemoryFixture("更正后的目标");
+await Send("忘记偏好"); await Drain();
+var forgottenQuery = await Send("查看偏好"); await Drain();
+var forgottenGoal = await CompleteMemoryFixture("忘记后的目标");
+
 var empty = await Send("任务"); await Drain(); Guid emptyId = await GoalFor(empty);
 Check((await Read(emptyId)).Status == "waiting-input", "empty objective asks for clarification without execution");
 await Send("暂停", empty.Message.Sequence); await Drain(); await Send("恢复", empty.Message.Sequence); await Drain();
@@ -142,8 +177,10 @@ await Send("补充：修复空输入并通过测试", empty.Message.Sequence); a
 Check((await Read(emptyId)).Status == "queued", "answer fills missing objective");
 
 int notices = 0;
+var deliveredNotices = new List<GoalNotice>();
 while (await store.NextGoalNotice() is { } notice)
 {
+    deliveredNotices.Add(notice);
     var message = new PostMessage(notice.Id, notice.Text, notice.ReplyTo);
     var card = notice.TaskId is null ? null : new MessageCard("task", TaskId: notice.TaskId);
     var sent = await store.Send(robot.Id, robot.Name, notice.Room, message, card: card);
@@ -152,6 +189,20 @@ while (await store.NextGoalNotice() is { } notice)
     await store.CompleteGoalNotice(notice.Id); notices++;
 }
 Check(notices > 10, "durable progress and control responses delivered");
+string ReplyFor(SendResult sent) => deliveredNotices.Single(n => n.Room == sent.Message.RoomId && n.ReplyTo == sent.Message.Sequence).Text;
+string CompletionFor(Guid task) => deliveredNotices.Single(n => n.TaskId == task && n.Text.StartsWith("任务 v")).Text;
+Check(ReplyFor(rememberedQuery).Contains("当前偏好：完成通知含目标") && CompletionFor(detailedGoal).Contains("任务目标：私聊记忆目标"),
+    "saved preference survives reopening the store and changes later completion notices");
+Check(!CompletionFor(correctedGoal).Contains("任务目标：") && !CompletionFor(forgottenGoal).Contains("任务目标：") &&
+    ReplyFor(forgottenQuery).Contains("尚未保存偏好"), "correction and forgetting restore concise completion");
+Check(ReplyFor(isolatedQuery).Contains("尚未保存偏好") && ReplyFor(isolatedRecall).Contains("暂无") &&
+    !CompletionFor(otherGoal).Contains("任务目标：") && !CompletionFor(sharedGoal).Contains("任务目标：") &&
+    ReplyFor(groupMemory).Contains("仅在 LittleLoop 私聊") &&
+    ReplyFor(afterGroupQuery).Contains("当前偏好：完成通知含目标"),
+    "preferences and experience remain isolated across users and room types");
+Check(ReplyFor(recalled).Contains("私聊记忆目标") && !ReplyFor(recalled).Contains("另一个用户的目标") &&
+    !ReplyFor(recalled).Contains("群聊已完成的目标") &&
+    !ReplyFor(recalled).Contains("验证重启恢复"), "recall only lists completed goals in the current private room");
 await Send("取消", empty.Message.Sequence); await Drain();
 if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_EXECUTABLE") is { Length: > 0 } executable)
 {
