@@ -21,7 +21,11 @@ internal static class WorkerChecks
             ["ChatBot:Operators"] = owner.Name, ["ChatBot:Approvers"] = approver.Name
         }).Build();
         var executor = new ControlledAdapter();
-        ChatBot Create() => new(store, new QuietHub(), config, NullLogger<ChatBot>.Instance, [executor]);
+        var independent = new ControlledAdapter(ChatStore.DeepSeekTestBotName, Path.Combine(root, "independent"));
+        var independentRobot = await store.GetRobot(independent.Name);
+        var otherRoom = await store.CreateRoom(owner, new("direct", "", [independentRobot.Name]));
+        await store.InstallRobot(otherRoom.Id, owner.Id, [independentRobot.Id], true);
+        ChatBot Create() => new(store, new QuietHub(), config, NullLogger<ChatBot>.Instance, [executor, independent]);
         async Task<SendResult> Send(string text, long? reply = null) =>
             await store.Send(owner.Id, owner.Name, room, new(Guid.NewGuid().ToString(), text, reply), goalRobot: robot.Id)
                 ?? throw new Exception("Worker fixture message not sent");
@@ -36,12 +40,42 @@ internal static class WorkerChecks
             var message = await Send("任务：验证持续调度");
             var first = await executor.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
             check(first.Goal is { Version: 1, Status: "running" }, "background worker consumes ordinary chat message without manual queue action");
+
+            Guid sameProjectId = Guid.NewGuid();
+            var sameProject = await worker.Queue(room, owner.Id, owner.Name, sameProjectId, null, "task", new("Same workspace"));
+            Guid independentId = Guid.NewGuid();
+            await worker.Queue(otherRoom.Id, owner.Id, owner.Name, independentId, null, "task",
+                new("Independent workspace", Provider: independent.Name));
+            var parallel = await independent.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
+            check(parallel.Id == independentId && (await store.ReadBotWork(first.Id, owner.Id))?.Status == "running" &&
+                (await store.ReadBotWork(sameProjectId, owner.Id))?.Status == "queued",
+                "occupied workspace blocks its own queue but allows a later independent goal to run");
+            Guid questionId = Guid.NewGuid();
+            await worker.Queue(room, owner.Id, owner.Name, questionId, null, "question",
+                new("Question during execution", Source: worker.Cite("code.txt", 1, 1)));
+            await Wait(questionId, "completed");
+            check((await store.ReadBotWork(independentId, owner.Id))?.Status == "running",
+                "source question finishes while all development slots are occupied");
+            await Send("进度");
+            using (var overviewLimit = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                while (!(await store.History(owner.Id, room, null, null))!.Any(m =>
+                    m.Sender == robot.Name && m.Text.Contains("当前有 2 项未结束任务") &&
+                    m.Text.Contains("Same workspace") && m.Text.Contains("验证持续调度")))
+                    await Task.Delay(50, overviewLimit.Token);
+            check(true, "plain progress lists the user's in-room goals while execution continues");
+            independent.Release.TrySetResult();
+            await Wait(independentId, "completed");
+            await Send("取消", sameProject!.Sequence);
+            await Wait(sameProjectId, "cancelled");
+
             await Send("暂停", message.Message.Sequence); await Wait(first.Id, "paused");
             await executor.Yielded.Task.WaitAsync(TimeSpan.FromSeconds(15));
             await worker.StopAsync(CancellationToken.None); worker.Dispose();
             worker = Create(); await worker.StartAsync(CancellationToken.None);
             await Task.Delay(900);
             check(executor.Calls == 1 && (await store.ReadBotWork(first.Id, owner.Id))!.Status == "paused", "paused goal survives worker restart without automatic execution");
+            check(independent.Calls == 1 && (await store.ReadBotWork(independentId, owner.Id))?.Status == "completed",
+                "restart preserves independent goal completion without a second dispatch");
             await Send("补充：保留已有数据", message.Message.Sequence);
             await Send("恢复", message.Message.Sequence);
             var resumed = await executor.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
@@ -93,9 +127,10 @@ internal static class WorkerChecks
         finally { await worker.StopAsync(CancellationToken.None); worker.Dispose(); }
     }
 
-    private sealed class ControlledAdapter : IChatRobotAdapter
+    private sealed class ControlledAdapter(string name = ChatStore.BotName, string? projectRoot = null) : IChatRobotAdapter
     {
-        public string Name => ChatStore.BotName;
+        public string Name => name;
+        public string? ProjectRoot => projectRoot;
         public bool SupportsApproval => false;
         public Channel<BotWork> Started { get; } = Channel.CreateUnbounded<BotWork>();
         public TaskCompletionSource Yielded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -17,6 +17,8 @@ sealed class ChatBot : BackgroundService
     private readonly string? legacyDirectory;
     private readonly Dictionary<string, IChatRobotAdapter> adapters;
     private readonly Dictionary<string, Account> robots = new(StringComparer.Ordinal);
+    private readonly int maxConcurrentTasks;
+    private readonly int maxConcurrentQuestions;
     public string[] Providers => adapters.Keys.ToArray();
     public Account Robot(string? provider) => robots[provider ?? ChatStore.BotName];
     public bool CanUse(string? provider) => adapters.ContainsKey(provider ?? ChatStore.BotName);
@@ -29,6 +31,8 @@ sealed class ChatBot : BackgroundService
         this.hub = hub;
         this.log = log;
         this.config = config;
+        maxConcurrentTasks = ReadConcurrency(config, "MaxConcurrentTasks", 2);
+        maxConcurrentQuestions = ReadConcurrency(config, "MaxConcurrentQuestions", 1);
         var original = ChatStore.FromJson<AgentHostPolicy>(File.ReadAllText(config["ChatBot:Policy"]!));
         policy = original with { ApprovalMode = "user", OutsideRule = "decline", Commands = [], AttachDocumentation = false, HostToolsOnly = true };
         files = new ProjectFiles(policy.Development ?? throw new InvalidOperationException("Bot requires a bounded development policy."));
@@ -95,6 +99,13 @@ sealed class ChatBot : BackgroundService
 
     private static bool Overlaps(string first, string second) => Contains(first, second) || Contains(second, first);
 
+    private static int ReadConcurrency(IConfiguration config, string key, int fallback)
+    {
+        int value = config.GetValue("ChatBot:" + key, fallback);
+        if (value is < 1 or > 16) throw new InvalidOperationException($"ChatBot:{key} must be between 1 and 16.");
+        return value;
+    }
+
     private static bool Contains(string root, string path)
     {
         string relative = Path.GetRelativePath(root, path);
@@ -157,7 +168,7 @@ sealed class ChatBot : BackgroundService
             }
         });
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(600));
-        Task? active = null;
+        var active = new List<(BotWork Work, string? Root, Task Execution)>();
         try
         {
             while (await timer.WaitForNextTickAsync(token))
@@ -176,13 +187,37 @@ sealed class ChatBot : BackgroundService
                     { log.LogInformation("Goal notice {Notice} suppressed by conversation permissions.", notice.Id); }
                     await store.CompleteGoalNotice(notice.Id);
                 }
-                if (active is { IsCompleted: false }) continue;
-                if (active is not null) await active;
-                var next = await store.ClaimBotWork(lease);
-                active = next is null ? null : ExecuteWork(next);
+                foreach (var finished in active.Where(item => item.Execution.IsCompleted).ToArray())
+                {
+                    await finished.Execution;
+                    active.Remove(finished);
+                }
+
+                while (!token.IsCancellationRequested)
+                {
+                    int questions = active.Count(item => item.Work.Kind == "question");
+                    bool canAsk = questions < maxConcurrentQuestions;
+                    bool canRun = active.Count - questions < maxConcurrentTasks;
+                    if (!canAsk && !canRun) break;
+                    var next = await store.ClaimBotWork(lease, candidate =>
+                    {
+                        if (candidate.Kind == "question" ? !canAsk : !canRun) return false;
+                        string? root = Workspace(candidate);
+                        return root is null || !active.Any(item => item.Root is { } occupied && Overlaps(root, occupied));
+                    });
+                    if (next is null) break;
+                    active.Add((next, Workspace(next), ExecuteWork(next)));
+                }
             }
         }
-        finally { if (active is not null) await active; }
+        finally { await Task.WhenAll(active.Select(item => item.Execution)); }
+
+        string? Workspace(BotWork work)
+        {
+            var adapter = adapters.GetValueOrDefault(work.Input.Provider ?? ChatStore.BotName);
+            // The default question path uses a frozen citation; ACP answers have a working directory.
+            return adapter?.ProjectRoot ?? (work.Kind == "question" ? null : files.Root);
+        }
 
         async Task ExecuteWork(BotWork work)
         {
@@ -193,7 +228,7 @@ sealed class ChatBot : BackgroundService
                 var adapter = adapters[provider];
                 if (!(await store.BotRoom(work.Room, work.Owner)).Installed || !await store.RobotIsMember(work.Room, robot.Id))
                 {
-                    await store.SetBotStatus(lease, work, "disabled");
+                    await store.SetBotStatus(work, "disabled");
                     return;
                 }
                 if (work.Kind == "question")
@@ -205,14 +240,14 @@ sealed class ChatBot : BackgroundService
                         card: new("citation", source));
                     if (result is null) throw new InvalidOperationException("Robot reply was not stored.");
                     await Notify(result.Recipients, work.Room);
-                    await store.SetBotStatus(lease, work, "completed");
+                    await store.SetBotStatus(work, "completed");
                     return;
                 }
 
                 if (work.Input.Source is { } cited && !File.Exists(Path.Combine(Folder(work), "agent.json")) &&
                     Cite(cited.Path, cited.Start, cited.End).Sha256 != cited.Sha256)
                 {
-                    await store.SetBotStatus(lease, work, "stale-source", "文件已变化，请重新引用后安排任务。");
+                    await store.SetBotStatus(work, "stale-source", "文件已变化，请重新引用后安排任务。");
                     return;
                 }
                 var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
@@ -220,17 +255,17 @@ sealed class ChatBot : BackgroundService
                     try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }
                     catch (System.Data.Common.DbException e) { log.LogWarning(e, "Could not queue approval notification."); }
                 }, token, work.Goal is null ? null : _ => store.GoalShouldYield(work));
-                await store.SetBotStatus(lease, work, outcome.Status == "suspended" ? "disabled" : outcome.Status, output: outcome.Report);
+                await store.SetBotStatus(work, outcome.Status == "suspended" ? "disabled" : outcome.Status, output: outcome.Report);
             }
             catch (Exception e) when (!token.IsCancellationRequested)
             {
                 log.LogError(e, "Chat bot work {Id} interrupted", work.Id);
                 if (work.Kind == "question")
                 {
-                    await store.SetBotStatus(lease, work, "failed", "源码问答未完成。");
+                    await store.SetBotStatus(work, "failed", "源码问答未完成。");
                     return;
                 }
-                await store.SetBotStatus(lease, work, "needs-reconciliation", "任务已停止，请核对执行记录。");
+                await store.SetBotStatus(work, "needs-reconciliation", "任务已停止，请核对执行记录。");
             }
         }
     }

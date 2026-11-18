@@ -24,6 +24,7 @@
 - [S1 真实 Codex 验收与部署](docs/49-codex-runtime-deployment.md) — 独立 SQLite/临时目录、真实 HTTP 闭环和现有服务部署记录
 - [S1 持续任务稳定性验证](docs/50-continuous-stability.md) — 多轮真实执行、积压调度、通知去重和故障恢复
 - [S1 24 小时长稳验证](docs/51-continuous-24h.md) — 持续负载、进程资源、日志增长及实际运行状态
+- [S2 聊天多任务协作](docs/55-chat-multitask.md) — 独立工作区并发、同工作区互斥、问答与任务进度
 
 - [初版架构与阶段路线](docs/06-design-baseline.md) — 当前设计基线与第一阶段验收
 

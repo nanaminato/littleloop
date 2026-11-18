@@ -115,6 +115,18 @@ sealed partial class ChatStore
                 await SaveGoal(db, tx, work, goal, seq, "create");
                 response = goal.Status == "waiting-input" ? "请补充具体要完成什么，以及如何判断完成。" : "已接收任务，将在现有权限和预算内持续推进。";
             }
+            else if (intent.Action == "status" && candidates.Count > 1)
+            {
+                var overview = candidates.Take(8).Select(item =>
+                {
+                    string objective = item.Goal!.Objective;
+                    string summary = objective.Length == 0 ? "等待补充目标" :
+                        objective.Length > 96 ? objective[..96] + "…" : objective;
+                    return $"任务消息 #{item.Sequence} · {GoalStatusText(item.Status)} · {summary}";
+                });
+                response = $"当前有 {candidates.Count} 项未结束任务。回复对应任务卡可查看或操作单项。\n" +
+                    string.Join("\n", overview);
+            }
             else if (work is null) response = candidates.Count > 1
                 ? "你有多个进行中的任务，请回复要操作的任务卡。" : "未找到你在此会话中可操作的目标。请回复自己的任务卡，或发送“任务：具体目标”。";
             else

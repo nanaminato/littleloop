@@ -2756,6 +2756,56 @@
         "REF-PRIVATE-DEVELOPMENT-WORK",
         "REF-PRIVATE-DEVELOPMENT-HTTP"
       ]
+    },
+    {
+      "references": [
+        "REF-CONTINUOUS-AGENT-GOALS"
+      ],
+      "authorization_basis": "2026-11-18 用户明确要求：“验收不着急，开始S2的设计与实现，设计完直接实现，”",
+      "id": "INTENT-CHAT-MULTITASK-S2",
+      "title": "开始 S2 聊天多任务协作",
+      "body": "先设计并直接实现 S2 多任务协作，正式验收可延后。具体并发策略、优先级和依赖规则由工程设计逐步展开。",
+      "authorization": "confirmed",
+      "actor": "Human",
+      "verification": "unverified",
+      "delivery": "planned",
+      "attributes": {},
+      "type": "intent"
+    },
+    {
+      "title": "聊天工作区并发与多任务进度",
+      "body": "同一聊天 worker 串行派发，每个工作区独占，独立工作区可并发，源码问答有独立槽位；聊天进度可汇总发起人的目标。优先级、依赖与共享角色状态为后续增量。",
+      "verification_basis": [
+        "EVIDENCE-CHAT-MULTITASK-SQLITE"
+      ],
+      "actor": "AI",
+      "verification": "passed",
+      "references": [
+        "REF-CHAT-MULTITASK-S2",
+        "REF-CHAT-MULTITASK-WORKER"
+      ],
+      "type": "capability",
+      "authorization": "not_applicable",
+      "attributes": {},
+      "delivery": "implemented",
+      "id": "CAP-CHAT-MULTITASK-DISPATCH"
+    },
+    {
+      "title": "S2 首版 SQLite 聊天调度回归",
+      "body": "本地受控执行器验证聊天调度、交互与重启。正式真实代理并发、MySQL 与长稳实测仍待进行。",
+      "actor": "AI",
+      "verification": "not_applicable",
+      "references": [
+        "REF-CHAT-MULTITASK-S2",
+        "REF-CONTINUOUS-WORKER-CHECKS"
+      ],
+      "type": "evidence",
+      "authorization": "not_applicable",
+      "attributes": {
+        "observation": "SQLite 聊天目标检查 112 项通过，本地输出 data/s2-chat-checks.log。两个工作区并发、同工作区排队、并行源码问答、多目标进度及重启状态检查通过。"
+      },
+      "delivery": "implemented",
+      "id": "EVIDENCE-CHAT-MULTITASK-SQLITE"
     }
   ],
   "relations": [
@@ -3778,6 +3828,24 @@
       "type": "supports",
       "source": "EVIDENCE-PRIVATE-DEVELOPMENT-HTTP",
       "target": "TEST-PRIVATE-DEVELOPMENT-HTTP"
+    },
+    {
+      "source": "GOAL-CONTINUOUS-COLLABORATOR",
+      "target": "INTENT-CHAT-MULTITASK-S2",
+      "id": "REL-CONTINUOUS-COLLABORATOR-S2",
+      "type": "decomposes"
+    },
+    {
+      "target": "INTENT-CHAT-MULTITASK-S2",
+      "type": "derived_from",
+      "id": "REL-CHAT-MULTITASK-DISPATCH-S2",
+      "source": "CAP-CHAT-MULTITASK-DISPATCH"
+    },
+    {
+      "target": "CAP-CHAT-CONTINUOUS-S1",
+      "type": "depends_on",
+      "id": "REL-CHAT-MULTITASK-USES-S1",
+      "source": "CAP-CHAT-MULTITASK-DISPATCH"
     }
   ],
   "references": [
@@ -4480,6 +4548,20 @@
       "target": "tests/ChatContinuousLive/direct_http_e2e.py",
       "purpose": "Isolated SQLite and real Codex private-message acceptance driver",
       "tracking": "live"
+    },
+    {
+      "target": "docs/55-chat-multitask.md",
+      "kind": "project_file",
+      "tracking": "live",
+      "id": "REF-CHAT-MULTITASK-S2",
+      "purpose": "S2 调度设计、配置和验证边界"
+    },
+    {
+      "target": "src/LittleLoop.Chat/Bot/ChatBot.cs",
+      "kind": "project_file",
+      "tracking": "live",
+      "id": "REF-CHAT-MULTITASK-WORKER",
+      "purpose": "聊天 worker 并发任务、工作区互斥与问答槽位"
     }
   ],
   "views": [

@@ -173,16 +173,23 @@ sealed partial class ChatStore
         await cmd.ExecuteNonQueryAsync();
     }
 
-    public async Task<BotWork?> ClaimBotWork(DbConnection lease)
+    public async Task<BotWork?> ClaimBotWork(DbConnection lease, Func<BotWork, bool>? canDispatch = null)
     {
-        BotWork? work;
+        BotWork? work = null;
+        string limit = canDispatch is null ? " LIMIT 1" : "";
         await using (var select = Command(lease, null, """
             SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal
-            FROM chat_bot_work WHERE status='queued' ORDER BY created,id LIMIT 1
-            """))
+            FROM chat_bot_work WHERE status='queued' ORDER BY created,id
+            """ + limit))
         {
             await using var reader = await select.ExecuteReaderAsync();
-            work = await reader.ReadAsync() ? ReadWork(reader) : null;
+            while (await reader.ReadAsync())
+            {
+                var candidate = ReadWork(reader);
+                if (canDispatch is not null && !canDispatch(candidate)) continue;
+                work = candidate;
+                break;
+            }
         }
         if (work is null) return null;
         var goal = work.Goal is null ? null : work.Goal with { Status = "running" };
@@ -192,10 +199,11 @@ sealed partial class ChatStore
         return await update.ExecuteNonQueryAsync() == 1 ? work with { Status = "running", Goal = goal } : null;
     }
 
-    public async Task SetBotStatus(DbConnection lease, BotWork work, string state, string? error = null, string? output = null)
+    public async Task SetBotStatus(BotWork work, string state, string? error = null, string? output = null)
     {
         if (work.Goal is not null) { await FinishGoal(work, state, error, output); return; }
-        await using var cmd = Command(lease, null, "UPDATE chat_bot_work SET status=@status,error=@error,output=@output WHERE id=@id AND status='running'",
+        await using var db = await Open();
+        await using var cmd = Command(db, null, "UPDATE chat_bot_work SET status=@status,error=@error,output=@output WHERE id=@id AND status='running'",
             ("status", state), ("error", error), ("output", output), ("id", work.Id.ToString()));
         await cmd.ExecuteNonQueryAsync();
     }

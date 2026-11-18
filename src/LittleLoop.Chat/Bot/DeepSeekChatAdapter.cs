@@ -9,6 +9,7 @@ sealed class DeepSeekChatAdapter(string launcher, string[] arguments, string? ha
 {
     public string Name => provider;
     public bool SupportsApproval => development is not null;
+    public string ProjectRoot => project;
 
     public Task<RobotOutcome> Review(string prompt, string folder, Func<CancellationToken, Task<bool>>? shouldYield, CancellationToken token)
     {

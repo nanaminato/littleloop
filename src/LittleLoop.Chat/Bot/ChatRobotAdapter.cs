@@ -5,6 +5,7 @@ interface IChatRobotAdapter
 {
     string Name { get; }
     bool SupportsApproval { get; }
+    string? ProjectRoot => null;
     Task<string> Answer(BotInput input, CancellationToken token);
     Task<RobotOutcome> Run(BotWork work, string folder, Func<AgentApprovalRequest, CancellationToken, Task> onApproval, CancellationToken token,
         Func<CancellationToken, Task<bool>>? shouldYield = null);
