@@ -31,6 +31,16 @@ sealed partial class ChatStore
                 FOREIGN KEY(room_id) REFERENCES chat_rooms(id),
                 FOREIGN KEY(owner_id) REFERENCES chat_accounts(id)
             );
+            CREATE TABLE IF NOT EXISTS chat_goal_experience_settings (
+                room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL,
+                PRIMARY KEY(room_id,owner_id)
+            );
+            CREATE TABLE IF NOT EXISTS chat_goal_experiences (
+                work_id CHAR(36) PRIMARY KEY, room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL,
+                source_version INT NOT NULL, grant_hash CHAR(64) NOT NULL, goal_hash CHAR(64) NOT NULL, paths JSON NOT NULL,
+                INDEX(room_id,owner_id,grant_hash,goal_hash),
+                FOREIGN KEY(work_id) REFERENCES chat_bot_work(id)
+            );
             """);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -77,7 +87,7 @@ sealed partial class ChatStore
             await installed.ExecuteScalarAsync() is not { } enabled || !Convert.ToBoolean(enabled))
         { await tx.CommitAsync(); return true; }
 
-        if (await HandleGoalMemory(db, tx, room, roomType, user, seq, text) is { } memoryReply)
+        if (await HandleGoalMemory(db, tx, room, roomType, user, seq, replyTo, text) is { } memoryReply)
         {
             await AddGoalNotice(db, tx, room, seq, memoryReply, null);
             await tx.CommitAsync();
@@ -195,7 +205,8 @@ sealed partial class ChatStore
         return latest?.Goal is not { } goal || goal.Version != work.Goal!.Version || goal.Status != "running" || !room.Installed;
     }
 
-    public async Task FinishGoal(BotWork executed, string status, string? error = null, string? output = null)
+    public async Task FinishGoal(BotWork executed, string status, string? error = null, string? output = null,
+        VerifiedGoalExperience? experience = null)
     {
         await using var db = await Open(); await using var tx = await db.BeginTransactionAsync();
         var roomType = await LockGoalRoom(db, tx, executed.Room);
@@ -207,6 +218,8 @@ sealed partial class ChatStore
         if (next != goal)
         {
             await SaveGoal(db, tx, executed with { Input = executed.Input with { Text = next.Prompt } }, next, executed.Sequence, "result", error, output);
+            if (next.Status == "completed" && roomType == "direct" && experience is not null && SupportsGoalExperience(executed))
+                await SaveGoalExperience(db, tx, executed, experience);
             bool includeObjective = next.Status == "completed" && roomType == "direct" &&
                 await ReadGoalPreference(db, tx, executed.Room, executed.Owner) is true;
             await AddGoalNotice(db, tx, executed.Room, executed.Sequence,

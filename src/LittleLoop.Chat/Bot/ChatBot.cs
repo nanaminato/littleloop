@@ -250,12 +250,33 @@ sealed class ChatBot : BackgroundService
                     await store.SetBotStatus(work, "stale-source", "文件已变化，请重新引用后安排任务。");
                     return;
                 }
+                bool learns = adapter is LittleLoopChatAdapter && CanOperate(work.Owner) && ChatStore.SupportsGoalExperience(work);
+                if (learns && !File.Exists(Path.Combine(Folder(work), "agent.json")))
+                    work = work with { ExperienceHint = await store.ReadGoalExperience(work, files.PolicyHash) };
                 var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
                 {
                     try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }
                     catch (System.Data.Common.DbException e) { log.LogWarning(e, "Could not queue approval notification."); }
                 }, token, work.Goal is null ? null : _ => store.GoalShouldYield(work));
-                await store.SetBotStatus(work, outcome.Status == "suspended" ? "disabled" : outcome.Status, output: outcome.Report);
+                VerifiedGoalExperience? experience = null;
+                if (learns && outcome.Status == "completed")
+                {
+                    try
+                    {
+                        var verifiedPolicy = new AgentDelegationHost(Folder(work)).Read().Policy.Development;
+                        if (verifiedPolicy is not null)
+                        {
+                            var receipts = new LittleLoop.Core.LearningSession(Path.Combine(Folder(work), "tools-learning.json")).Read().Episodes;
+                            experience = VerifiedGoalExperience.FromReceipts(new ProjectFiles(verifiedPolicy), receipts);
+                        }
+                    }
+                    catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException or ArgumentException)
+                    {
+                        log.LogWarning(error, "Could not derive experience for completed task {Task}", work.Id);
+                    }
+                }
+                await store.SetBotStatus(work, outcome.Status == "suspended" ? "disabled" : outcome.Status,
+                    output: outcome.Report, experience: experience);
             }
             catch (Exception e) when (!token.IsCancellationRequested)
             {

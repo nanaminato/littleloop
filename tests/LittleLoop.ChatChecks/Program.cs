@@ -204,6 +204,73 @@ Check(ReplyFor(recalled).Contains("私聊记忆目标") && !ReplyFor(recalled).C
     !ReplyFor(recalled).Contains("群聊已完成的目标") &&
     !ReplyFor(recalled).Contains("验证重启恢复"), "recall only lists completed goals in the current private room");
 await Send("取消", empty.Message.Sequence); await Drain();
+
+string memoryProject = Path.GetFullPath(Path.Combine("data", "experience-checks", Guid.NewGuid().ToString("N")));
+Directory.CreateDirectory(memoryProject);
+File.WriteAllText(Path.Combine(memoryProject, "code.txt"), "fixture");
+File.WriteAllText(Path.Combine(memoryProject, "verify.txt"), "protected fixture");
+var memoryFiles = new ProjectFiles(new(memoryProject, ["code.txt"],
+    [new("verify", Environment.ProcessPath!, ["--verify-fixture"], true, ["verify.txt"])], [".txt"]));
+var patchResult = new ActionResult("fixture-patch", "fixture-decision", "patch", "fixture", ExecutionStatus.Completed,
+    ["code.changed"], "fixture", "REPORT BODY MUST NOT BE COPIED", true)
+{
+    ToolReceipt = new("project.patch", "1", memoryProject,
+        [new("code.txt", "input", 7, "old-hash"), new("code.txt", "output", 7, "new-hash"),
+            new("verify.txt", "output", 7, "protected-hash")], "TOOL BODY MUST NOT BE COPIED")
+};
+var experience = VerifiedGoalExperience.FromReceipts(memoryFiles, [new(null!, patchResult, [])])
+    ?? throw new Exception("No experience derived from fixture patch");
+Check(experience.Paths.SequenceEqual(["code.txt"]) &&
+    VerifiedGoalExperience.FromReceipts(memoryFiles, [new(null!, patchResult with { Status = ExecutionStatus.Failed }, [])]) is null,
+    "distillation keeps only authorized paths from successful patch outputs");
+
+const string repeatObjective = "任务：更新示例文字并通过固定测试";
+async Task<(SendResult Message, BotWork Work)> ClaimExperienceTask(bool other = false)
+{
+    var sent = await Send(repeatObjective, to: other ? otherPrivate.Id : null, sender: other ? stranger : null);
+    await Drain();
+    var work = await store.ClaimBotWork(lease) ?? throw new Exception("Experience fixture was not claimed");
+    return (sent, work);
+}
+var beforeOptIn = await ClaimExperienceTask();
+await store.FinishGoal(beforeOptIn.Work, "completed", experience: experience);
+await Send("启用经验"); await Drain();
+var training = await ClaimExperienceTask();
+Check(await store.ReadGoalExperience(training.Work, experience.GrantHash) is null,
+    "successful tasks before opt-in provide the no-memory baseline");
+await store.FinishGoal(training.Work, "completed", experience: experience);
+store = new ChatStore(connection, false, provider);
+var repeat = await ClaimExperienceTask();
+var hint = await store.ReadGoalExperience(repeat.Work, experience.GrantHash);
+string repeatPrompt = LittleLoopChatAdapter.BuildPrompt(repeat.Work with { ExperienceHint = hint });
+Check(hint is not null && hint.SourceSequence == training.Message.Message.Sequence &&
+    repeatPrompt.Contains("code.txt") && !repeatPrompt.Contains("REPORT BODY") && !repeatPrompt.Contains("new-hash") &&
+    !LittleLoopChatAdapter.BuildPrompt(repeat.Work).Contains("code.txt"),
+    "restart preserves source provenance and matching work gets only the bounded hint");
+Check(await store.ReadGoalExperience(repeat.Work, new string('A', 64)) is null,
+    "experience does not cross development grants");
+await Send("补充：保持输出格式", repeat.Message.Message.Sequence); await Drain();
+await store.FinishGoal(repeat.Work, "completed", experience: experience);
+var revisedExperience = await store.ClaimBotWork(lease) ?? throw new Exception("Revised experience fixture missing");
+Check(await store.ReadGoalExperience(revisedExperience, experience.GrantHash) is null,
+    "new requirements prevent reuse and stale completion cannot replace the current version");
+await Send("取消", repeat.Message.Message.Sequence); await Drain();
+
+await Send("启用经验", to: otherPrivate.Id, sender: stranger); await Drain();
+var otherRepeat = await ClaimExperienceTask(other: true);
+Check(await store.ReadGoalExperience(otherRepeat.Work, experience.GrantHash) is null, "experience does not cross users or private rooms");
+await store.FinishGoal(otherRepeat.Work, "failed", experience: experience);
+await Send("停用经验"); await Drain();
+var disabledRepeat = await ClaimExperienceTask();
+Check(await store.ReadGoalExperience(disabledRepeat.Work, experience.GrantHash) is null, "disable stops matching experience reuse");
+await store.FinishGoal(disabledRepeat.Work, "completed", experience: experience);
+await Send("启用经验"); await Drain();
+await Send("撤回经验", training.Message.Message.Sequence); await Drain();
+var revokedRepeat = await ClaimExperienceTask();
+Check(await store.ReadGoalExperience(revokedRepeat.Work, experience.GrantHash) is null,
+    "revocation removes the source and completion while disabled does not create a replacement");
+await store.FinishGoal(revokedRepeat.Work, "failed", experience: experience);
+
 if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_EXECUTABLE") is { Length: > 0 } executable)
 {
     var task = await Send("任务：把 code.txt 的 broken 改成 fixed，运行 verify 测试并检查通过。仅使用宿主 project 工具。");

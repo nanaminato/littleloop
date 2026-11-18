@@ -2841,6 +2841,56 @@
       "delivery": "implemented",
       "body": "本地对照默认与已记忆偏好的完成通知。测试还覆盖重新打开同一数据库、重复消息、更正、忘记和跨账号及群聊隔离。",
       "type": "evidence"
+    },
+    {
+      "delivery": "planned",
+      "attributes": {},
+      "verification": "unverified",
+      "authorization": "confirmed",
+      "id": "INTENT-CHAT-EXPERIENCE-LOOP",
+      "actor": "Human",
+      "type": "intent",
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ],
+      "body": "设计并实现从已执行任务自动提炼经验、在后续任务中复用的闭环。",
+      "authorization_basis": "用户明确要求：“继续设计和实现自动提炼经验、在后续任务中复用的闭环。”",
+      "title": "自动提炼并复用后续任务经验"
+    },
+    {
+      "authorization": "not_applicable",
+      "title": "从验收回执提炼并复用私聊任务经验",
+      "verification_basis": [
+        "EVIDENCE-CHAT-EXPERIENCE-LOOP-SQLITE"
+      ],
+      "id": "CAP-CHAT-EXPERIENCE-LOOP",
+      "type": "capability",
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY",
+        "REF-CHAT-GOAL-EXPERIENCE"
+      ],
+      "attributes": {},
+      "body": "明确启用后，默认 Codex 任务的成功补丁回执提供最多三个可优先重新查阅的路径。同账号、会话、项目授权及目标要求匹配时在首次派发提供来源线索；可查看、停用或撤回。",
+      "actor": "AI",
+      "verification": "passed",
+      "delivery": "implemented"
+    },
+    {
+      "authorization": "not_applicable",
+      "title": "SQLite 经验提炼、命中与撤回回归",
+      "id": "EVIDENCE-CHAT-EXPERIENCE-LOOP-SQLITE",
+      "type": "evidence",
+      "references": [
+        "REF-CONTINUOUS-GOAL-CHECKS",
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ],
+      "attributes": {
+        "observation": "回归命令 dotnet run --no-build --project tests/LittleLoop.ChatChecks。测试覆盖无经验基线和已启用的匹配任务。"
+      },
+      "body": "本地用受控回执验证提炼及实际提示构造，以及重启、版本、授权、范围、关闭和撤回边界。真实代理工作收益需要独立对照。",
+      "actor": "AI",
+      "verification": "not_applicable",
+      "delivery": "implemented"
     }
   ],
   "relations": [
@@ -3893,6 +3943,24 @@
       "source": "CAP-CHAT-PRIVATE-MEMORY",
       "type": "depends_on",
       "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "target": "INTENT-CHAT-EXPERIENCE-LOOP",
+      "source": "GOAL-CONTINUOUS-COLLABORATOR",
+      "id": "REL-CONTINUOUS-COLLABORATOR-EXPERIENCE",
+      "type": "decomposes"
+    },
+    {
+      "target": "INTENT-CHAT-EXPERIENCE-LOOP",
+      "type": "implements",
+      "source": "CAP-CHAT-EXPERIENCE-LOOP",
+      "id": "REL-CHAT-EXPERIENCE-LOOP-IMPLEMENTS"
+    },
+    {
+      "target": "CAP-CHAT-PRIVATE-MEMORY",
+      "type": "depends_on",
+      "source": "CAP-CHAT-EXPERIENCE-LOOP",
+      "id": "REL-CHAT-EXPERIENCE-LOOP-USES-MEMORY"
     }
   ],
   "references": [
@@ -4623,6 +4691,13 @@
       "tracking": "live",
       "purpose": "私聊目标偏好与完成经历读取实现",
       "target": "src/LittleLoop.Chat/Bot/ChatGoalMemory.cs"
+    },
+    {
+      "target": "src/LittleLoop.Chat/Bot/ChatGoalExperience.cs",
+      "kind": "project_file",
+      "purpose": "由宿主补丁回执提炼和按授权范围检索经验",
+      "tracking": "live",
+      "id": "REF-CHAT-GOAL-EXPERIENCE"
     }
   ],
   "views": [

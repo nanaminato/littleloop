@@ -4,11 +4,14 @@ using LittleLoop.Core;
 sealed partial class ChatStore
 {
     private static async Task<string?> HandleGoalMemory(DbConnection db, DbTransaction tx, string room, string? roomType,
-        string owner, long sequence, string text)
+        string owner, long sequence, long? replyTo, string text)
     {
         string command = text.Trim();
         if (command.StartsWith("@littleloop", StringComparison.OrdinalIgnoreCase))
             command = command[11..].TrimStart(' ', '：', ':', '，', ',');
+        if (command is "启用经验" or "停用经验" or "查看经验" or "撤回经验")
+            return roomType == "direct" ? await HandleGoalExperience(db, tx, room, owner, replyTo, command) :
+                "长期记忆命令仅在 LittleLoop 私聊中可用。";
         if (command is not ("查看偏好" or "忘记偏好" or "回顾经验") && !command.StartsWith("记住偏好", StringComparison.Ordinal))
             return null;
         if (roomType != "direct") return "长期记忆命令仅在 LittleLoop 私聊中可用。";

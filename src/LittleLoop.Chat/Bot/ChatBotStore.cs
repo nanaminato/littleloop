@@ -9,7 +9,11 @@ sealed record MessageCard(string Kind, SourceCitation? Source = null, Guid? Task
 sealed record BotInput(string Text, string? Anchor = null, SourceCitation? Source = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null);
 sealed record BotWork(Guid Id, string Room, string Owner, long Sequence, string Kind, string Status, BotInput Input,
-    string? Error = null, string? Output = null, ContinuousGoal? Goal = null);
+    string? Error = null, string? Output = null, ContinuousGoal? Goal = null)
+{
+    [JsonIgnore]
+    public GoalExperienceHint? ExperienceHint { get; init; }
+}
 sealed record BotInstall(bool Enabled);
 sealed record BotAsk(Guid ClientId, string Text, string Path, int Start, int End, long? ReplyTo, string? Provider);
 sealed record BotSchedule(Guid ClientId, long Sequence, string Goal, string? Provider);
@@ -199,9 +203,10 @@ sealed partial class ChatStore
         return await update.ExecuteNonQueryAsync() == 1 ? work with { Status = "running", Goal = goal } : null;
     }
 
-    public async Task SetBotStatus(BotWork work, string state, string? error = null, string? output = null)
+    public async Task SetBotStatus(BotWork work, string state, string? error = null, string? output = null,
+        VerifiedGoalExperience? experience = null)
     {
-        if (work.Goal is not null) { await FinishGoal(work, state, error, output); return; }
+        if (work.Goal is not null) { await FinishGoal(work, state, error, output, experience); return; }
         await using var db = await Open();
         await using var cmd = Command(db, null, "UPDATE chat_bot_work SET status=@status,error=@error,output=@output WHERE id=@id AND status='running'",
             ("status", state), ("error", error), ("output", output), ("id", work.Id.ToString()));

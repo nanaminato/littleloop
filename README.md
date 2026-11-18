@@ -25,7 +25,7 @@
 - [S1 持续任务稳定性验证](docs/50-continuous-stability.md) — 多轮真实执行、积压调度、通知去重和故障恢复
 - [S1 24 小时长稳验证](docs/51-continuous-24h.md) — 持续负载、进程资源、日志增长及实际运行状态
 - [S2 聊天多任务协作](docs/55-chat-multitask.md) — 独立工作区并发、同工作区互斥、问答与任务进度
-- [S3 私聊长期记忆](docs/56-chat-long-term-memory.md) — 可更正的完成通知偏好与已验收任务回顾
+- [S3 私聊长期记忆](docs/56-chat-long-term-memory.md) — 通知偏好、已验收任务回顾与经验提炼和复用
 
 - [初版架构与阶段路线](docs/06-design-baseline.md) — 当前设计基线与第一阶段验收
 
