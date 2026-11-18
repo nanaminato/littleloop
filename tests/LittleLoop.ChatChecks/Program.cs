@@ -22,6 +22,10 @@ bool conflict = false; try { paused.Change("resume", "", 1); } catch (InvalidOpe
 Check(conflict, "goal updates require current version");
 Check(GoalMessageRouter.Parse("你好", false).Action == "help" && GoalMessageRouter.Parse("帮我修复登录问题", false).Action == "create",
     "greeting is not a task; explicit natural-language request is");
+Check(GoalMessageRouter.Parse("查询进度？", true).Action == "status", "progress questions route without changing the goal");
+foreach (string discussion in new[] { "如果修改数据库会怎样", "“帮我修改配置”", "> 帮我修复登录", "帮我修复登录问题？" })
+    Check(GoalMessageRouter.Parse(discussion, false).Action == "help" && GoalMessageRouter.Parse(discussion, true).Action == "help",
+        "discussion does not authorize creation or revision: " + discussion);
 
 await SqliteChecks.Run();
 await CommitmentHostChecks.Run();
@@ -90,6 +94,23 @@ running = await store.ClaimBotWork(lease);
 await store.FinishGoal(running!, "completed", output: "Verified receipts");
 Check((await Read(id)).Status == "completed", "answered clarification resumes and delivers result");
 Check(await store.ReadBotWork(id, stranger.Id) is null, "nonmember cannot read goal");
+var progress = await Send("查询进度？"); await Drain();
+Check(await GoalFor(progress) == id && (await Read(id)).Status == "completed", "unanchored progress resolves completed goal without requeuing it");
+
+var discussionMessage = await Send("你好"); await Drain();
+var activeMessage = await Send("帮我修改配置并通过现有测试"); await Drain();
+Guid activeId = await GoalFor(activeMessage);
+await Send("取消", discussionMessage.Message.Sequence); await Drain();
+Check((await Read(activeId)).Status == "queued", "reply to unrelated message cannot cancel active work");
+var activeDiscussion = await Send("如果修改数据库会怎样"); await Drain();
+Check((await Read(activeId)).Goal!.Version == 1, "hypothetical discussion cannot revise live work");
+Check((await store.FindMessage(room.Id, activeDiscussion.Message.Sequence, owner.Id))!.Card is null,
+    "discussion during active work does not become an implicit task reference");
+await Send("取消", activeDiscussion.Message.Sequence); await Drain();
+Check((await Read(activeId)).Status == "queued", "reply to discussion during work cannot cancel that work");
+await Send("取消", activeMessage.Message.Sequence); await Drain();
+var cancelledProgress = await Send("进度"); await Drain();
+Check(await GoalFor(cancelledProgress) == activeId && (await Read(activeId)).Status == "cancelled", "plain progress can find cancelled work without resuming");
 
 // Simulate crash between message commit and inbox processing; recreate store and recover.
 var pending = await Send("任务：验证重启恢复");

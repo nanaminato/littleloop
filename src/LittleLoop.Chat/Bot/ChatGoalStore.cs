@@ -80,17 +80,33 @@ sealed partial class ChatStore
         await using (var select = Command(db, tx, """
             SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work
             WHERE room_id=@room AND owner_id=@user AND goal IS NOT NULL
-              AND ((@target IS NOT NULL AND id=@target) OR (@target IS NULL AND status NOT IN ('completed','cancelled','failed','needs-reconciliation','disabled')))
+              AND ((@target IS NOT NULL AND id=@target) OR (@unanchored=TRUE AND status NOT IN ('completed','cancelled','failed','needs-reconciliation','disabled')))
             ORDER BY created,id FOR UPDATE
-            """, ("room", room), ("user", user), ("target", target?.ToString())))
+            """, ("room", room), ("user", user), ("target", target?.ToString()), ("unanchored", replyTo is null)))
         await using (var r = await select.ExecuteReaderAsync())
             while (await r.ReadAsync()) candidates.Add(ReadWork(r));
         var intent = GoalMessageRouter.Parse(text, candidates.Count > 0);
+        // A plain progress question still works after completion/cancellation. Explicit replies
+        // must resolve their own task; never silently redirect them to another active goal.
+        if (intent.Action == "status" && replyTo is null && candidates.Count == 0)
+        {
+            await using var latest = Command(db, tx, """
+                SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work
+                WHERE room_id=@room AND owner_id=@user AND goal IS NOT NULL
+                ORDER BY seq DESC LIMIT 1 FOR UPDATE
+                """, ("room", room), ("user", user));
+            await using var reader = await latest.ExecuteReaderAsync();
+            if (await reader.ReadAsync()) candidates.Add(ReadWork(reader));
+        }
         BotWork? work = candidates.Count == 1 ? candidates[0] : null;
         string response;
         try
         {
-            if (intent.Action == "help") response = "可以发送“任务：具体目标和验收要求”，或说“帮我修复…”；回复任务卡可补充要求、查询进度、暂停、恢复或取消。";
+            if (intent.Action == "help")
+            {
+                work = null;
+                response = "可以发送“任务：具体目标和验收要求”，或说“帮我修复…”；回复任务卡可补充要求、查询进度、暂停、恢复或取消。";
+            }
             else if (intent.Action == "create")
             {
                 var goal = ContinuousGoal.Create(intent.Text);

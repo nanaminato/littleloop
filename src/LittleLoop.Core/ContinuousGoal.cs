@@ -51,7 +51,10 @@ public static class GoalMessageRouter
         if (command is "暂停" or "暂停任务" or "先暂停" or "先停一下" or "/pause") return new("pause", "");
         if (command is "恢复" or "恢复任务" or "继续" or "继续工作" or "/resume") return new("resume", "");
         if (command is "取消" or "取消任务" or "/cancel") return new("cancel", "");
-        if (command is "进度" or "任务状态" or "进展如何" or "做到哪了" or "/status") return new("status", "");
+        if (command is "进度" or "查询进度" or "查询任务" or "任务状态" or "进展如何" or "进度如何" or "做到哪了" or "/status") return new("status", "");
+        // Discussion and quoted examples are context, not new work or implicit revisions.
+        if (text.StartsWith('>') || text.StartsWith('"') || text.StartsWith('“') || text.StartsWith('「') ||
+            new[] { "如果", "假如", "为什么", "怎么", "如何" }.Any(text.StartsWith)) return new("help", "");
         foreach (string prefix in new[] { "新任务：", "新任务:", "任务：", "任务:", "/task " })
             if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return new("create", text[prefix.Length..].Trim());
         if (command is "新任务" or "任务" or "/task") return new("create", "");
@@ -59,7 +62,8 @@ public static class GoalMessageRouter
             if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return new("revise", text[prefix.Length..].Trim());
         if (hasGoal && text.Length > 0 && !text.EndsWith('?') && !text.EndsWith('？') &&
             text is not ("你好" or "谢谢" or "好的")) return new("revise", text);
-        if (!hasGoal && new[] { "请修复", "帮我修复", "修复", "请实现", "帮我实现", "实现", "请修改", "帮我修改", "修改" }.Any(text.StartsWith))
+        if (!hasGoal && !text.EndsWith('?') && !text.EndsWith('？') &&
+            new[] { "请修复", "帮我修复", "修复", "请实现", "帮我实现", "实现", "请修改", "帮我修改", "修改" }.Any(text.StartsWith))
             return new("create", text);
         return new("help", "");
     }

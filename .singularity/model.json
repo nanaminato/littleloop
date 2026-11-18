@@ -2721,6 +2721,41 @@
         "REF-CHAT-SQLITE",
         "REF-CHAT-COMMITMENTS"
       ]
+    },
+    {
+      "id": "TEST-PRIVATE-DEVELOPMENT-HTTP",
+      "type": "test",
+      "title": "真实私聊开发任务闭环验收",
+      "body": "复用现有 ChatBot 收件箱和 ContinuousGoal；验证普通私聊创建、查询、补充、暂停、恢复、取消，以及讨论引用隔离、重启、实际补丁与测试。用户本轮明确要求此范围，授权原文及结果边界见文档。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-PRIVATE-DEVELOPMENT-HTTP"
+      ],
+      "verification_basis": [
+        "EVIDENCE-PRIVATE-DEVELOPMENT-HTTP"
+      ]
+    },
+    {
+      "id": "EVIDENCE-PRIVATE-DEVELOPMENT-HTTP",
+      "type": "evidence",
+      "title": "私聊真实 Codex 与独立 SQLite 实跑",
+      "body": "2026-11-18 最终构建完成真实私聊开发闭环；不将独立模拟承诺入口视为真实开发执行器。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "data/direct-http/34397ec1/result.json: task 571b4b45-3b69-4c2a-b001-363ba1aad599 v4 completed on original thread; two patches, host test receipt and independent verification passed. A second real task was cancelled at approval, confirmed suspended, stale approval rejected; restart retained terminal states. Final binary and driver hashes recorded. Core 315 checks and SQLite 108 goal checks passed. No production deployment, UI interaction or 24h soak performed."
+      },
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-PRIVATE-DEVELOPMENT-HTTP"
+      ]
     }
   ],
   "relations": [
@@ -3731,6 +3766,18 @@
       "id": "REL-CHAT-STORAGE-INTEGRATION-EVIDENCE",
       "target": "MOD-CHAT-COMMITMENTS",
       "source": "EVIDENCE-CHAT-STORAGE-INTEGRATION"
+    },
+    {
+      "id": "REL-PRIVATE-DEVELOPMENT-VERIFIES-S1",
+      "type": "verifies",
+      "source": "TEST-PRIVATE-DEVELOPMENT-HTTP",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "id": "REL-PRIVATE-DEVELOPMENT-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-PRIVATE-DEVELOPMENT-HTTP",
+      "target": "TEST-PRIVATE-DEVELOPMENT-HTTP"
     }
   ],
   "references": [
@@ -4418,6 +4465,20 @@
       "kind": "project_file",
       "target": "docs/53-chat-commitments.md",
       "purpose": "Ordinary-turn bounded synthetic commitment stage",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-PRIVATE-DEVELOPMENT-WORK",
+      "kind": "project_file",
+      "target": "docs/54-private-development-work.md",
+      "purpose": "Real private-message development lifecycle and current evidence boundaries",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-PRIVATE-DEVELOPMENT-HTTP",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/direct_http_e2e.py",
+      "purpose": "Isolated SQLite and real Codex private-message acceptance driver",
       "tracking": "live"
     }
   ],
