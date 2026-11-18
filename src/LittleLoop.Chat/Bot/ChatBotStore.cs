@@ -211,6 +211,21 @@ sealed partial class ChatStore
         return await reader.ReadAsync() ? ReadWork(reader) : null;
     }
 
+    public async Task<BotWork[]> RunningPrivateWork()
+    {
+        await using var db = await Open();
+        await using var cmd = Command(db, null, """
+            SELECT w.id,w.room_id,w.owner_id,w.seq,w.kind,w.status,w.input,w.error,w.output,w.goal
+            FROM chat_bot_work w JOIN chat_rooms r ON r.id=w.room_id
+            JOIN chat_bot_rooms b ON b.room_id=r.id AND b.enabled
+            WHERE r.type='direct' AND w.kind='task' AND w.status='running'
+            """);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var works = new List<BotWork>();
+        while (await reader.ReadAsync()) works.Add(ReadWork(reader));
+        return works.ToArray();
+    }
+
     private static BotWork ReadWork(DbDataReader r) => new(Guid.Parse(r.GetString(0)), r.GetString(1), r.GetString(2),
         r.GetInt64(3), r.GetString(4), r.GetString(5), FromJson<BotInput>(r.GetString(6)), r.IsDBNull(7) ? null : r.GetString(7),
         r.IsDBNull(8) ? null : r.GetString(8), r.IsDBNull(9) ? null : FromJson<ContinuousGoal>(r.GetString(9)));

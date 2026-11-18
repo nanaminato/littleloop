@@ -9,6 +9,27 @@
       [attr.title]="store.t(store.connection())"></span>
   </header>
 
+  @if (store.bot().canApprove) {
+    <button type="button" class="archive-row" [disabled]="approvalBusy()" (click)="refreshApprovals()">查看待审批操作</button>
+    @if (approvalError()) { <p role="alert">审批请求失败或已失效，请刷新。</p> }
+    @if (approvals(); as pending) {
+      <section aria-label="私聊待审批操作">
+        <button type="button" class="quiet" [disabled]="approvalBusy()" (click)="approvals.set(null)">收起审批</button>
+        @for (item of pending; track item.nonce) {
+          <details open>
+            <summary>{{ item.arguments.path || item.arguments.command }}</summary>
+            @if (item.tool === 'project_patch') {
+              <p>原内容</p><pre>{{ item.arguments.oldText }}</pre>
+              <p>新内容</p><pre>{{ item.arguments.newText }}</pre>
+            }
+            <button type="button" [disabled]="approvalBusy()" (click)="refreshApprovals(item, 'accept')">批准</button>
+            <button type="button" [disabled]="approvalBusy()" (click)="refreshApprovals(item, 'decline')">拒绝</button>
+          </details>
+        } @empty { <p>暂无待审批操作。</p> }
+      </section>
+    }
+  }
+
   <form class="search-bar" (ngSubmit)="store.toggleSearch(false); store.search()">
     <span class="search-icon" aria-hidden="true">⌕</span>
     <input id="search" name="search" [attr.aria-label]="store.t('搜索消息')" [placeholder]="store.t('搜索')"

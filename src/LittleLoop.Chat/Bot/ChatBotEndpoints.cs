@@ -15,6 +15,49 @@ static class ChatBotEndpoints
         });
         if (bot is null) return;
 
+        api.MapGet("/private-approvals", async (ClaimsPrincipal user) =>
+        {
+            if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
+            var pending = new List<object>();
+            foreach (var work in await store.RunningPrivateWork())
+                if (PrivateApproval(work) is { } request)
+                    pending.Add(new { work.Id, request.Nonce, request.Tool, request.Arguments });
+            return Results.Ok(pending);
+        });
+
+        api.MapPost("/private-approvals/{id:guid}/decision", async (Guid id, BotDecision input, ClaimsPrincipal user) =>
+        {
+            if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
+            if (!Guid.TryParseExact(input.Nonce, "N", out _) || input.Value is not ("accept" or "decline")) return Results.BadRequest();
+            var work = (await store.RunningPrivateWork()).FirstOrDefault(w => w.Id == id);
+            if (work is null || PrivateApproval(work)?.Nonce != input.Nonce)
+                return Results.Conflict("审批已失效或已处理。");
+            try
+            {
+                new AgentDelegationHost(bot.Folder(work)).Answer(input.Nonce, input.Value, Id(user));
+                return Results.NoContent();
+            }
+            catch (Exception e) when (e is IOException or ArgumentException) { return Results.Conflict("审批已失效或已处理。"); }
+        });
+
+        (string Nonce, string Tool, object Arguments)? PrivateApproval(BotWork work)
+        {
+            if (!bot.SupportsApproval(work.Input.Provider) ||
+                AgentConversationSupport.PendingApproval(bot.Folder(work)) is not { } pending ||
+                !pending.Parameters.TryGetProperty("tool", out var tool) ||
+                !pending.Parameters.TryGetProperty("arguments", out var args)) return null;
+            var name = tool.GetString();
+            object? details = name switch
+            {
+                "project_patch" => new { path = ReadArgument("path"), oldText = ReadArgument("oldText"), newText = ReadArgument("newText") },
+                "project_command" => new { command = ReadArgument("command") },
+                _ => null
+            };
+            return details is null ? null : (pending.Nonce, name!, details);
+
+            string? ReadArgument(string key) => args.TryGetProperty(key, out var value) ? value.GetString() : null;
+        }
+
         api.MapPost("/direct", async (ClaimsPrincipal user, string? provider) =>
         {
             if (!bot.CanOperate(Id(user))) return Results.StatusCode(403);

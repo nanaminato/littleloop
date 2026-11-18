@@ -88,9 +88,12 @@ public static class AgentConversationSupport
     }
 
     public static bool IsApprovalPending(string folder, string nonce) =>
+        PendingApproval(folder)?.Nonce == nonce;
+
+    public static AgentApprovalRequest? PendingApproval(string folder) =>
         File.Exists(Path.Combine(folder, "agent.json")) &&
         new AgentDelegationHost(folder).Read().Status == "awaiting-approval" &&
-        ReadPendingApproval(folder)?.Nonce == nonce;
+        ReadPendingApproval(folder) is { } pending ? pending : null;
 
     private static AgentApprovalRequest? ReadPendingApproval(string folder)
     {
