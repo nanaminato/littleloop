@@ -1,0 +1,3 @@
+[submodule "tools/singularity"]
+	path = tools/singularity
+	url = https://github.com/nanaminato/singularity.git

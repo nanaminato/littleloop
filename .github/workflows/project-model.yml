@@ -1,0 +1,23 @@
+name: Project model
+on:
+  push:
+    paths: [".singularity/**", ".gitmodules", "tools/**", "tests/model_tools/**", ".github/workflows/project-model.yml", "docs/**", "src/**", "tests/**"]
+  pull_request:
+    paths: [".singularity/**", ".gitmodules", "tools/**", "tests/model_tools/**", ".github/workflows/project-model.yml", "docs/**", "src/**", "tests/**"]
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python tools/check_model.py
+      - run: python -m unittest discover -s tests/model_tools -v

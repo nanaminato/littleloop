@@ -50,6 +50,9 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 
 ## 项目构建模型
 
+工具链已固定为仓库内 Git submodule，首次克隆使用 `--recurse-submodules`；已有工作区运行 `git submodule update --init --recursive`。使用 Python 3.11+ 执行 `python tools/model.py find "SQLite"` 按需查找，或 `python tools/check_model.py` 校验。详见[安装、读取和事务写入说明](.singularity/README.md)。这不是 LittleLoop 运行时依赖。
+
+
 [Codex 独立开发工具闭环](docs/21-codex-development.md)已接入：通过宿主管理的文件与测试工具完成真实 RelaxKonOS 应用 ID 校验修复，保留核心判断、按源码快照匹配的经验、授权等待与独立测试验收。
 
 已增加[插件与开放决策](docs/07-plugins-deliberation.md)、[角色审议流程](docs/08-role-deliberation.md)和[执行反馈学习闭环](docs/09-execution-learning.md)：结合目标、偏好、证据与持久化经历，检验前提、提出新方案、拒绝冲突目标。执行回执自动形成经历，关联反馈可修正判断，后续任务自动检索。当前是符号推理和情境经历学习；开放领域语言理解与角色性格的自动训练仍未实现。
