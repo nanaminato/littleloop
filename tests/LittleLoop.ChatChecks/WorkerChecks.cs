@@ -25,7 +25,8 @@ internal static class WorkerChecks
         var independentRobot = await store.GetRobot(independent.Name);
         var otherRoom = await store.CreateRoom(owner, new("direct", "", [independentRobot.Name]));
         await store.InstallRobot(otherRoom.Id, owner.Id, [independentRobot.Id], true);
-        ChatBot Create() => new(store, new QuietHub(), config, NullLogger<ChatBot>.Instance, [executor, independent]);
+        ChatBot Create(ControlledAdapter? primary = null) =>
+            new(store, new QuietHub(), config, NullLogger<ChatBot>.Instance, [primary ?? executor, independent]);
         async Task<SendResult> Send(string text, long? reply = null) =>
             await store.Send(owner.Id, owner.Name, room, new(Guid.NewGuid().ToString(), text, reply), goalRobot: robot.Id)
                 ?? throw new Exception("Worker fixture message not sent");
@@ -123,6 +124,30 @@ internal static class WorkerChecks
                 check(restored?.Goal is { Version: 4, Status: "completed", Objective: "保留已有数据并完成测试" },
                     "batch goal retains supplemented objective, version and terminal state after restart");
             }
+            await worker.StopAsync(CancellationToken.None); worker.Dispose();
+            var inFlight = new ControlledAdapter();
+            worker = Create(inFlight);
+            var friend = new Account(Guid.NewGuid().ToString(), "worker_friend_" + Guid.NewGuid().ToString("N")[..8], "!fixture");
+            await store.Register(friend);
+            await store.SetBotFriendAllowlist(robot.Id, friend.Name, true);
+            var friendGrant = await store.RequestBotFriend(friend.Id, robot.Id);
+            var friendRoom = friendGrant?.RoomId ?? throw new InvalidOperationException("Could not establish a room for the worker test.");
+            await worker.StartAsync(CancellationToken.None);
+            check(!worker.CanOperate(friend.Id) && await worker.CanOperateRoom(friend.Id, friendRoom),
+                "friend access is scoped to its room, independently of static operators");
+            await store.Send(friend.Id, friend.Name, friendRoom,
+                new(Guid.NewGuid().ToString(), "任务：验证执行中撤销机器人访问", null), goalRobot: robot.Id, legacyBotOperator: false);
+            var friendWork = await inFlight.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
+            await store.SetBotFriendAllowlist(robot.Id, friend.Name, false);
+            await inFlight.Yielded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                while ((await store.ReadBotWork(friendWork.Id, friend.Id))?.Status != "cancelled")
+                    await Task.Delay(50, deadline.Token);
+            await store.SetBotFriendAllowlist(robot.Id, friend.Name, true);
+            await store.RequestBotFriend(friend.Id, robot.Id);
+            await Task.Delay(900);
+            check(inFlight.Calls == 1 && (await store.ReadBotWork(friendWork.Id, friend.Id))?.Status == "cancelled",
+                "revoked in-flight work yields and granting future access does not replay the old task");
         }
         finally { await worker.StopAsync(CancellationToken.None); worker.Dispose(); }
     }

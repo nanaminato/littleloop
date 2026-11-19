@@ -3076,6 +3076,56 @@
           "独立文件与宿主测试分别通过"
         ]
       }
+    },
+    {
+      "id": "INTENT-CHAT-LITTLELOOP-FRIEND-ACCESS",
+      "type": "intent",
+      "title": "通过 LittleLoop 好友申请启用受控私聊",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "用户确认好友接入、实时名单、独立工具审批并要求部署体验。",
+      "delivery": "planned",
+      "verification": "unverified",
+      "body": "使用已有机器人账号和好友入口，通过数据库中的访问名单与管理员决定开通私聊。名单调整实时生效，工具维持逐项审批，并部署既有 Chat 以供用户亲自发出申请。",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "attributes": {}
+    },
+    {
+      "id": "CAP-CHAT-LITTLELOOP-FRIEND-ACCESS",
+      "type": "capability",
+      "title": "好友申请开通 LittleLoop 私聊",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "body": "名单内自动、名单外管理员审核。数据库管理真实私聊访问，名单调整和撤销即时生效。审批权限继续独立。撤销保留历史，在既有可核对边界停止旧任务。",
+      "attributes": {},
+      "references": [
+        "REF-CHAT-LITTLELOOP-FRIEND-ACCESS",
+        "REF-CHAT-LITTLELOOP-FRIEND-ACCESS-HTTP"
+      ],
+      "verification_basis": [
+        "EVIDENCE-CHAT-LITTLELOOP-FRIEND-ACCESS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-LITTLELOOP-FRIEND-ACCESS",
+      "type": "evidence",
+      "title": "好友接入真实 HTTP、隔离 MySQL 与现有 Chat 部署",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "body": "SQLite 和隔离 MySQL 各通过 213 项，真实 HTTP 与 Codex 8 项，Chrome 通过申请、待审、房间开启和实时撤销。生产 5190 以验证版本上线，体验账号已列名并保留其首次申请。",
+      "attributes": {
+        "observation": "隔离真实运行 data/direct-http/0bb8a98e/result.json，现有服务 data/continuous-deployment/bot-friend-access-deployment.json。"
+      },
+      "references": [
+        "REF-CHAT-LITTLELOOP-FRIEND-ACCESS",
+        "REF-CHAT-LITTLELOOP-FRIEND-ACCESS-HTTP"
+      ]
     }
   ],
   "relations": [
@@ -4200,6 +4250,24 @@
       "type": "references",
       "source": "EXP-CHAT-GENERALIZED-MEMORY-HELDOUT",
       "target": "EVIDENCE-CHAT-GENERALIZED-MEMORY-DEPLOYED"
+    },
+    {
+      "id": "REL-CHAT-LITTLELOOP-FRIEND-ACCESS-INTENT",
+      "type": "implements",
+      "source": "CAP-CHAT-LITTLELOOP-FRIEND-ACCESS",
+      "target": "INTENT-CHAT-LITTLELOOP-FRIEND-ACCESS"
+    },
+    {
+      "id": "REL-CONTINUOUS-COLLABORATOR-FRIEND-ACCESS",
+      "type": "decomposes",
+      "source": "GOAL-CONTINUOUS-COLLABORATOR",
+      "target": "INTENT-CHAT-LITTLELOOP-FRIEND-ACCESS"
+    },
+    {
+      "id": "REL-CHAT-LITTLELOOP-FRIEND-ACCESS-S1",
+      "type": "depends_on",
+      "source": "CAP-CHAT-LITTLELOOP-FRIEND-ACCESS",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
     }
   ],
   "references": [
@@ -4964,6 +5032,20 @@
       "kind": "project_file",
       "target": "tests/ChatContinuousLive/memory_generalization.py",
       "purpose": "留出私聊任务、预计来源集合和独立文件校验",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-LITTLELOOP-FRIEND-ACCESS",
+      "kind": "project_file",
+      "target": "docs/39-chat-friends-and-group-members.md",
+      "purpose": "好友接入、数据库名单、撤销、角色与部署证据",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-LITTLELOOP-FRIEND-ACCESS-HTTP",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/friend_access.py",
+      "purpose": "真实私聊好友接入、工具审批隔离和文件复核",
       "tracking": "live"
     }
   ],

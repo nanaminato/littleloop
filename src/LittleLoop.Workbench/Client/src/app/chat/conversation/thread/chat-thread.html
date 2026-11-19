@@ -28,7 +28,7 @@
               <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.installBot(true)">{{ store.t('更新机器人') }}</button>
             }
           }
-          @if (store.bot().canOperate && store.botInstalled()) {
+          @if (store.roomCanOperateBot()) {
             <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.openSources()">{{ store.sources() === null ? store.t('引用源码提问') : store.t('关闭源码提问') }}</button>
           }
         </div>

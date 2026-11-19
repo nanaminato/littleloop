@@ -2,7 +2,8 @@
 
 Build Chat first. Set LITTLELOOP_CODEX_EXECUTABLE and optionally LITTLELOOP_CODEX_HOME,
 CODEX_CA_CERTIFICATE and LITTLELOOP_CHAT_DLL. Pass --memory for the sourced conditional-memory experiment
-or --memory-generalization for held-out tasks and both retrieval and outcome metrics.
+or --memory-generalization for held-out tasks and both retrieval and outcome metrics. Pass --friend-access
+for robot onboarding and --friend-tools as well to exercise a real Codex patch and test with a separate approver.
 """
 import argparse
 import hashlib
@@ -21,15 +22,20 @@ import urllib.request
 import uuid
 
 from memory_generalization import TRIALS, run as run_memory_generalization
+from friend_access import ACCOUNTS as FRIEND_ACCOUNTS, run as run_friend_access
 
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
 mode.add_argument('--memory', action='store_true', help='run the private memory and override experiment')
 mode.add_argument('--memory-generalization', action='store_true', help='measure held-out private task recall and outcomes')
+mode.add_argument('--friend-access', action='store_true', help='verify robot friend access through its real HTTP routes')
+parser.add_argument('--friend-tools', action='store_true', help='also verify a real patch and test with a separate approver')
 parser.add_argument('--trial', action='append', choices=[trial.name for trial in TRIALS], help='run selected generalization trials')
 options = parser.parse_args()
 if options.trial and not options.memory_generalization:
     parser.error('--trial requires --memory-generalization')
+if options.friend_tools and not options.friend_access:
+    parser.error('--friend-tools requires --friend-access')
 REPO = Path(__file__).resolve().parents[2]
 DLL = Path(os.environ.get('LITTLELOOP_CHAT_DLL', REPO / 'src/LittleLoop.Chat/bin/Debug/net10.0/LittleLoop.Chat.dll')).resolve()
 EXECUTABLE = Path(os.environ['LITTLELOOP_CODEX_EXECUTABLE']).resolve()
@@ -54,6 +60,11 @@ if options.memory or options.memory_generalization:
     (PROJECT / 'verify.py').write_text(
         "from pathlib import Path\nvalue = Path('notes.txt').read_text().splitlines()\n"
         "assert 1 <= len(value) <= 2 and all(x != 'PENDING' and x.isascii() for x in value)\nprint('PASS note updated')\n",
+        encoding='utf-8')
+if options.friend_access:
+    policy['development']['writableFiles'] = ['code.txt']
+    (PROJECT / 'verify.py').write_text(
+        "from pathlib import Path\nassert Path('code.txt').read_text().strip() == 'fixed'\nprint('PASS code updated')\n",
         encoding='utf-8')
 (ROOT / 'policy.json').write_text(json.dumps(policy), encoding='utf-8')
 with socket.socket() as probe:
@@ -116,14 +127,15 @@ def start(label, bot=False):
     global process
     child = dict(env)
     if bot:
-        # Explicit test-only grant: the private-room owner is both operator and approver.
         child.update(ChatBot__Policy=str(ROOT / 'policy.json'), ChatBot__Data=str(ROOT / 'bot'),
             ChatBot__Operators='direct_owner', ChatBot__Approvers='direct_owner')
+        if options.friend_access:
+            child.update(ChatBot__AccessAdmins='access_admin', ChatBot__Approvers='tool_approver')
     log = open(ROOT / (label + '.log'), 'wb')
     streams.append(log)
-    options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}
+    launch_options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}
     process = subprocess.Popen([os.environ.get('DOTNET', 'dotnet'), str(DLL)], cwd=REPO, env=child,
-        stdout=log, stderr=log, **options)
+        stdout=log, stderr=log, **launch_options)
 
     def ready():
         try:
@@ -329,12 +341,15 @@ print('Evidence: ' + str(ROOT), flush=True)
 try:
     start('bootstrap')
     password = secrets.token_hex(20)
-    for name in ('direct_owner', 'direct_other'):
-        request(owner, '/register', dict(name=name, password=password, invite=env['Chat__Invite']), 204)
+    sessions = dict(direct_owner=owner, direct_other=outsider)
+    if options.friend_access:
+        sessions.update((name, client()) for name in FRIEND_ACCOUNTS)
+    for name, session in sessions.items():
+        request(session, '/register', dict(name=name, password=password, invite=env['Chat__Invite']), 204)
     stop()
     start('private-live', True)
-    for who, name in ((owner, 'direct_owner'), (outsider, 'direct_other')):
-        request(who, '/login', dict(name=name, password=password))
+    for name, session in sessions.items():
+        request(session, '/login', dict(name=name, password=password))
     request(anonymous, '/bot/direct', {}, 401)
     request(outsider, '/bot/direct', {}, 403)
     room = request(owner, '/bot/direct', {})['id']
@@ -342,7 +357,9 @@ try:
     assert request(owner, f'/bot/rooms/{room}')['type'] == 'direct'
     request(outsider, f'/rooms/{room}/messages', expected=404)
     record('authenticated private Codex room, idempotent enrollment and operator isolation')
-    if options.memory_generalization:
+    if options.friend_access:
+        details = run_friend_access(sessions, request, wait, record, PROJECT, tools=options.friend_tools)
+    elif options.memory_generalization:
         def decide(task, nonce, decision):
             request(owner, f'/bot/work/{task}/decision', dict(nonce=nonce, value=decision), 204)
 

@@ -3,6 +3,10 @@ using System.Security.Claims;
 using LittleLoop.Tools;
 using MySqlConnector;
 
+sealed record BotAccessListChange(string Username, bool Allowed);
+sealed record BotAccessDecision(string Decision);
+sealed class BotFriendshipRequiredException : Exception;
+
 static class ChatBotEndpoints
 {
     public static void Map(RouteGroupBuilder routes, ChatStore store, ChatBot? bot)
@@ -11,16 +15,48 @@ static class ChatBotEndpoints
         api.MapGet("/capabilities", (ClaimsPrincipal user) => new
         {
             enabled = bot is not null, canOperate = bot?.CanOperate(Id(user)) == true,
-            canApprove = bot?.CanApprove(Id(user)) == true, providers = bot?.Providers ?? [],
+            canApprove = bot?.CanApprove(Id(user)) == true, canManageAccess = bot?.CanManageAccess(Id(user)) == true,
+            providers = bot?.Providers ?? [],
         });
         if (bot is null) return;
+
+        api.MapGet("/access", async (ClaimsPrincipal user) =>
+        {
+            if (!bot.CanManageAccess(Id(user))) return Results.StatusCode(403);
+            var rows = await store.GetBotFriendAccess(bot.Robot(null).Id);
+            return Results.Ok(new { entries = rows.Select(row => new
+                { id = row.UserId, row.Username, displayName = row.Username, allowed = row.Listed, row.State, row.RoomId }) });
+        });
+
+        api.MapPost("/access/allowlist", async (ClaimsPrincipal user, BotAccessListChange input) =>
+        {
+            if (!bot.CanManageAccess(Id(user))) return Results.StatusCode(403);
+            var name = input.Username?.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(name)) return Results.BadRequest();
+            var change = await store.SetBotFriendAllowlist(bot.Robot(null).Id, name, input.Allowed);
+            if (change is null) return Results.NotFound();
+            await bot.NotifyFriendAccess(change);
+            return Results.NoContent();
+        });
+
+        api.MapPost("/access/{id:guid}/decision", async (ClaimsPrincipal user, Guid id, BotAccessDecision input) =>
+        {
+            if (!bot.CanManageAccess(Id(user))) return Results.StatusCode(403);
+            if (input.Decision is not ("accept" or "reject" or "revoke")) return Results.BadRequest();
+            string robot = bot.Robot(null).Id;
+            var change = input.Decision == "revoke" ? await store.RevokeBotFriend(robot, id.ToString()) :
+                await store.DecideBotFriend(robot, id.ToString(), input.Decision == "accept");
+            if (change is null) return Results.Conflict("申请或访问授权状态已变化。");
+            await bot.NotifyFriendAccess(change);
+            return Results.NoContent();
+        });
 
         api.MapGet("/private-approvals", async (ClaimsPrincipal user) =>
         {
             if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
             var pending = new List<object>();
             foreach (var work in await store.RunningPrivateWork())
-                if (PrivateApproval(work) is { } request)
+                if (PrivateApproval(work) is { } request && await bot.CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
                     pending.Add(new { work.Id, request.Nonce, request.Tool, request.Arguments });
             return Results.Ok(pending);
         });
@@ -30,7 +66,8 @@ static class ChatBotEndpoints
             if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
             if (!Guid.TryParseExact(input.Nonce, "N", out _) || input.Value is not ("accept" or "decline")) return Results.BadRequest();
             var work = (await store.RunningPrivateWork()).FirstOrDefault(w => w.Id == id);
-            if (work is null || PrivateApproval(work)?.Nonce != input.Nonce)
+            if (work is null || PrivateApproval(work)?.Nonce != input.Nonce ||
+                !await bot.CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
                 return Results.Conflict("审批已失效或已处理。");
             try
             {
@@ -60,12 +97,16 @@ static class ChatBotEndpoints
 
         api.MapPost("/direct", async (ClaimsPrincipal user, string? provider) =>
         {
-            if (!bot.CanOperate(Id(user))) return Results.StatusCode(403);
             if (ChatStore.IsProjectTaskOnly(provider)) return Results.BadRequest("请在包含审批人的群聊中安排项目任务。");
             if (!bot.CanUse(provider)) return Results.BadRequest("未知机器人。");
             var robot = bot.Robot(provider);
+            var access = provider is null or ChatStore.BotName
+                ? await store.ReadBotFriendAccess(Id(user), robot.Id) : BotFriendAccessState.Unmanaged;
+            if (access != BotFriendAccessState.Active &&
+                (access != BotFriendAccessState.Unmanaged || !bot.CanOperate(Id(user)))) return Results.StatusCode(403);
             var room = await store.CreateRoom(new(Id(user), user.Identity!.Name!, ""), new("direct", "", [robot.Name]));
-            await store.InstallRobot(room.Id, Id(user), [robot.Id], true);
+            if (access == BotFriendAccessState.Unmanaged)
+                await store.InstallRobot(room.Id, Id(user), [robot.Id], true);
             await bot.Notify(room.Members, room.Id);
             return Results.Ok(new { room.Id });
         });
@@ -78,7 +119,8 @@ static class ChatBotEndpoints
             if (current.Installed)
                 foreach (var name in bot.Providers)
                     if (await store.RobotIsMember(room.ToString(), bot.Robot(name).Id)) providers.Add(name);
-            return Results.Ok(new { current.Installed, current.Type, providers });
+            return Results.Ok(new { current.Installed, current.Type, providers,
+                canOperate = current.Installed && await bot.CanOperateRoom(Id(user), room.ToString()) });
         });
 
         api.MapPost("/rooms/{room:guid}/install", async (Guid room, BotInstall input, ClaimsPrincipal user) =>
@@ -92,14 +134,14 @@ static class ChatBotEndpoints
 
         api.MapGet("/rooms/{room:guid}/sources", async (Guid room, ClaimsPrincipal user) =>
         {
-            if (!bot.CanOperate(Id(user))) return Results.StatusCode(403);
+            if (!await bot.CanOperateRoom(Id(user), room.ToString())) return Results.StatusCode(403);
             var current = await store.BotRoom(room.ToString(), Id(user));
             return !current.Member || !current.Installed ? Results.NotFound() : Results.Ok(bot.Sources());
         });
 
         api.MapPost("/rooms/{room:guid}/ask", async (Guid room, BotAsk ask, ClaimsPrincipal user) =>
         {
-            if (!bot.CanOperate(Id(user))) return Results.StatusCode(403);
+            if (!await bot.CanOperateRoom(Id(user), room.ToString(), ask.Provider)) return Results.StatusCode(403);
             if (ChatStore.IsProjectTaskOnly(ask.Provider)) return Results.BadRequest("请使用项目执行器的安排任务入口。");
             if (ask.ClientId == Guid.Empty || string.IsNullOrWhiteSpace(ask.Text) || ask.Text.Length > 4000 || string.IsNullOrWhiteSpace(ask.Path))
                 return Results.BadRequest("请输入问题和引用。");
@@ -116,7 +158,7 @@ static class ChatBotEndpoints
 
         api.MapPost("/rooms/{room:guid}/schedule", async (Guid room, BotSchedule input, ClaimsPrincipal user) =>
         {
-            if (!bot.CanOperate(Id(user))) return Results.StatusCode(403);
+            if (!await bot.CanOperateRoom(Id(user), room.ToString(), input.Provider)) return Results.StatusCode(403);
             if (input.ClientId == Guid.Empty || input.Sequence <= 0 || string.IsNullOrWhiteSpace(input.Goal) || input.Goal.Length > 6000)
                 return Results.BadRequest("请输入目标、验收要求和来源消息。");
             var current = await store.BotRoom(room.ToString(), Id(user));
@@ -133,7 +175,8 @@ static class ChatBotEndpoints
         {
             var job = await store.ReadBotWork(id, Id(user));
             if (job is null) return Results.NotFound();
-            bool canApprove = job.Kind == "task" && bot.SupportsApproval(job.Input.Provider) && bot.CanApprove(Id(user));
+            bool canApprove = job.Kind == "task" && bot.SupportsApproval(job.Input.Provider) && bot.CanApprove(Id(user)) &&
+                await bot.CanOperateRoom(job.Owner, job.Room, job.Input.Provider);
             bool seeEvidence = bot.CanApprove(Id(user)) || job.Owner == Id(user);
             object? execution = job.Kind != "question" && seeEvidence && (job.Kind != "legacy" || bot.HasLegacyEvidence)
                 ? AgentConversationSupport.Details(bot.Folder(job), canApprove && job.Status == "running") : null;
@@ -147,7 +190,8 @@ static class ChatBotEndpoints
             var job = await store.ReadBotWork(id, Id(user));
             if (job is null) return Results.NotFound();
             if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
-            if (job.Kind != "task" || !bot.SupportsApproval(job.Input.Provider) || job.Status != "running")
+            if (job.Kind != "task" || !bot.SupportsApproval(job.Input.Provider) || job.Status != "running" ||
+                !await bot.CanOperateRoom(job.Owner, job.Room, job.Input.Provider))
                 return Results.Conflict("任务没有待处理的授权。");
             if (!Guid.TryParseExact(input.Nonce, "N", out _) || input.Value is not ("accept" or "decline")) return Results.BadRequest();
             try
@@ -167,6 +211,7 @@ static class ChatBotEndpoints
             }
             catch (ArgumentException e) { return Results.BadRequest(e.Message); }
             catch (InvalidOperationException e) { return Results.Conflict(e.Message); }
+            catch (BotFriendshipRequiredException) { return Results.StatusCode(403); }
             catch (DbException e) when (ChatStore.IsDuplicate(e)) { return Results.Conflict("任务 ID 已使用。"); }
         }
 

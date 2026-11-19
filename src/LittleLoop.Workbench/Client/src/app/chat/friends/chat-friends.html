@@ -1,41 +1,101 @@
 <div class="friends-overlay">
-  <button type="button" class="backdrop" [attr.aria-label]="store.t('关闭好友')" (click)="store.friendsOpen.set(false)"></button>
+  <button type="button" class="backdrop" [attr.aria-label]="store.t('关闭好友')" (click)="store.closeFriends()"></button>
   <aside class="friends-panel" [attr.aria-label]="store.t('好友')">
     <div class="panel-top">
       <strong>{{ store.t('好友') }}</strong>
-      <button type="button" class="icon" [attr.aria-label]="store.t('关闭好友列表')" (click)="store.friendsOpen.set(false)">×</button>
+      <button type="button" class="icon" [attr.aria-label]="store.t('关闭好友列表')" (click)="store.closeFriends()">×</button>
     </div>
-    <form class="inline-form" (ngSubmit)="store.requestFriend()">
-      <input name="friendUsername" [(ngModel)]="store.friendUsername" [attr.aria-label]="store.t('好友用户名')"
-        [placeholder]="store.t('好友用户名')" maxlength="32" required>
-      <button type="submit" [disabled]="store.busy() || !store.friendUsername.trim()">{{ store.t('添加好友') }}</button>
-    </form>
-    @if (store.error()) { <p class="friends-error" role="alert">{{ store.error() }}</p> }
-    <div class="friends-list">
-      @for (friend of store.friends(); track friend.id) {
-        <div class="member">
-          <span class="avatar" aria-hidden="true">{{ store.initial(friend.displayName) }}</span>
-          <span class="member-copy">
-            <strong>{{ friend.displayName }}</strong>
-            <small>@{{ friend.username }}</small>
-          </span>
-          @switch (friend.state) {
-            @case ('incoming') {
-              <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.respondFriend(friend, true)">{{ store.t('接受') }}</button>
-              <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.respondFriend(friend, false)">{{ store.t('拒绝') }}</button>
-            }
-            @case ('outgoing') { <small class="state-copy">{{ store.t('等待对方接受') }}</small> }
-            @case ('friend') {
-              <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.directFriend(friend)">{{ store.t('发起私聊') }}</button>
-            }
-          }
+    @if (store.bot().canManageAccess) {
+      <div class="friend-views" role="group" [attr.aria-label]="store.t('好友视图')">
+        <button type="button" class="quiet" [attr.aria-pressed]="!store.botAccessOpen()" (click)="store.showBotAccess(false)">
+          {{ store.t('好友') }}
+        </button>
+        <button type="button" class="quiet" [attr.aria-pressed]="store.botAccessOpen()" (click)="store.showBotAccess(true)">
+          {{ store.t('LittleLoop 访问管理') }}
+        </button>
+      </div>
+    }
+    @if (store.botAccessOpen() && store.bot().canManageAccess) {
+      <form class="inline-form" (ngSubmit)="store.setBotAllowlist(true)">
+        <input type="text" name="botAccessUsername" [(ngModel)]="store.botAccessUsername"
+          [attr.aria-label]="store.t('自动通过名单用户名')" [placeholder]="store.t('自动通过名单用户名')" maxlength="32" required>
+        <button type="submit" [disabled]="store.busy() || !store.botAccessUsername.trim()">{{ store.t('加入名单') }}</button>
+      </form>
+      @if (store.error()) { <p class="friends-error" role="alert">{{ store.error() }}</p> }
+      @if (store.botAccess() !== null) {
+        <div class="friends-list access-list">
+          <section>
+            <h2>{{ store.t('待确认申请') }}</h2>
+            @for (entry of requests(); track entry.id) {
+              <div class="member access-member">
+                <span class="member-copy">
+                  <strong>{{ entry.displayName }}</strong><small>@{{ entry.username }}</small>
+                </span>
+                <div class="access-actions">
+                  <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.decideBotAccess(entry, 'accept')">{{ store.t('接受') }}</button>
+                  <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.decideBotAccess(entry, 'reject')">{{ store.t('拒绝') }}</button>
+                </div>
+              </div>
+            } @empty { <p>{{ store.t('暂无待确认申请') }}</p> }
+          </section>
+          <section>
+            <h2>{{ store.t('名单及已通过的账号') }}</h2>
+            @for (entry of access(); track entry.id) {
+              <div class="member access-member">
+                <span class="member-copy">
+                  <strong>{{ entry.displayName }}</strong><small>@{{ entry.username }}</small>
+                  @if (entry.state === 'automatic') { <small>{{ store.t('已自动通过') }}</small> }
+                  @else if (entry.state === 'manual') { <small>{{ store.t('已由管理员通过') }}</small> }
+                  @else { <small>{{ store.t('等待申请') }}</small> }
+                </span>
+                <div class="access-actions">
+                  @if (entry.allowed) {
+                    <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.setBotAllowlist(false, entry.username)">{{ store.t('移出名单') }}</button>
+                  }
+                  @if (entry.state === 'manual') {
+                    <button type="button" class="quiet" [disabled]="store.busy()" (click)="store.decideBotAccess(entry, 'revoke')">{{ store.t('撤销访问') }}</button>
+                  }
+                </div>
+              </div>
+            } @empty { <p>{{ store.t('暂无名单或获准账号') }}</p> }
+          </section>
         </div>
-      } @empty {
-        <div class="friends-empty">
-          <span aria-hidden="true">♧</span>
-          <p>{{ store.t('暂无好友或申请') }}</p>
-        </div>
-      }
-    </div>
+      } @else if (!store.error()) { <p class="access-loading" role="status">{{ store.t('正在加载访问状态') }}</p> }
+    } @else {
+      <form class="inline-form" (ngSubmit)="store.requestFriend()">
+        <input name="friendUsername" [(ngModel)]="store.friendUsername" [attr.aria-label]="store.t('好友用户名')"
+          [placeholder]="store.t('好友用户名')" maxlength="32" required>
+        <button type="submit" [disabled]="store.busy() || !store.friendUsername.trim()">{{ store.t('添加好友') }}</button>
+      </form>
+      @if (store.error()) { <p class="friends-error" role="alert">{{ store.error() }}</p> }
+      <div class="friends-list">
+        @for (friend of store.friends(); track friend.id) {
+          <div class="member">
+            <span class="avatar" aria-hidden="true">{{ store.initial(friend.displayName) }}</span>
+            <span class="member-copy">
+              <strong>{{ friend.displayName }}</strong>
+              <small>@{{ friend.username }}</small>
+            </span>
+            @switch (friend.state) {
+              @case ('incoming') {
+                <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.respondFriend(friend, true)">{{ store.t('接受') }}</button>
+                <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.respondFriend(friend, false)">{{ store.t('拒绝') }}</button>
+              }
+              @case ('outgoing') {
+                <small class="state-copy">{{ store.t(friend.username === 'littleloop' ? '等待管理员确认' : '等待对方接受') }}</small>
+              }
+              @case ('friend') {
+                <button class="quiet" type="button" [disabled]="store.busy()" (click)="store.directFriend(friend)">{{ store.t('发起私聊') }}</button>
+              }
+            }
+          </div>
+        } @empty {
+          <div class="friends-empty">
+            <span aria-hidden="true">♧</span>
+            <p>{{ store.t('暂无好友或申请') }}</p>
+          </div>
+        }
+      </div>
+    }
   </aside>
 </div>

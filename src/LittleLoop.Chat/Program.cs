@@ -158,6 +158,14 @@ secured.MapPost("/rooms", async (OpenRoom request, ClaimsPrincipal user, IHubCon
         || (request.Type == "group" && string.IsNullOrWhiteSpace(request.Title))) return Results.BadRequest("请填写会话类型、名称和已注册成员。");
     try
     {
+        if (request.Type == "direct" && request.Members.Any(name => Normalize(name) == ChatStore.BotName) &&
+            app.Services.GetService<ChatBot>() is { } bot && Id(user) != bot.Robot(null).Id)
+        {
+            var access = await store.ReadBotFriendAccess(Id(user), bot.Robot(null).Id);
+            if (access != BotFriendAccessState.Active &&
+                (access != BotFriendAccessState.Unmanaged || !bot.CanOperate(Id(user))))
+                return Results.Json(new { code = "bot_friendship_required" }, statusCode: 403);
+        }
         var room = await store.CreateRoom(new(Id(user), user.Identity!.Name!, ""), request);
         await Push(hub, room.Members, room.Id);
         return Results.Ok(new { room.Id });
@@ -181,7 +189,7 @@ secured.MapPost("/rooms/{room:guid}/messages", async (Guid room, PostMessage req
     {
         var chatBot = app.Services.GetService<ChatBot>();
         var result = await store.Send(Id(user), user.Identity!.Name!, room.ToString(), request with { ClientId = clientId.ToString() },
-            goalRobot: chatBot?.CanOperate(Id(user)) == true ? chatBot.Robot(null).Id : null);
+            goalRobot: chatBot?.Robot(null).Id, legacyBotOperator: chatBot?.CanOperate(Id(user)) == true);
         if (result is null) return Results.NotFound();
         if (result.IsNew) await Push(hub, result.Recipients, room.ToString());
         if (app.Services.GetService<ChatCommitments>() is { } commitments)
@@ -195,6 +203,7 @@ secured.MapPost("/rooms/{room:guid}/messages", async (Guid room, PostMessage req
     catch (DiscussionClosedException) { return Results.Json(new { code = "discussion_closed" }, statusCode: 403); }
     catch (GroupSilencedException) { return Results.Json(new { code = "group_silenced" }, statusCode: 403); }
     catch (ChannelWriteDeniedException) { return Results.StatusCode(403); }
+    catch (BotFriendshipRequiredException) { return Results.Json(new { code = "bot_friendship_required" }, statusCode: 403); }
     catch (DirectMessageBlockedException) { return Results.Json(new { code = "communication_unavailable" }, statusCode: 403); }
 });
 secured.MapPost("/rooms/{room:guid}/read", async (Guid room, ReadTo request, ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
@@ -204,7 +213,7 @@ secured.MapPost("/rooms/{room:guid}/read", async (Guid room, ReadTo request, Cla
     await hub.Clients.User(Id(user)).SendAsync("readChanged", room.ToString());
     return Results.NoContent();
 });
-ChatFeatureEndpoints.Map(secured, store);
+ChatFeatureEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
 ChatSpaceEndpoints.Map(secured, store);
 ChatChannelAdminEndpoints.Map(secured, store);
 ChatChannelDiscussionEndpoints.Map(secured, store);
@@ -212,7 +221,7 @@ ChatSettingsEndpoints.Map(secured, store);
 IdentityEndpoints.Map(secured, store);
 ChatPush.Map(secured, store, pushIdentity);
 ChatFcm.Map(secured, store, app.Services.GetService<ChatBot>(), fcmProject);
-ChatSocialEndpoints.Map(secured, store);
+ChatSocialEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
 ChatBotEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
 ChatCommitments.Map(secured, app.Services.GetService<ChatCommitments>());
 await app.RunAsync();

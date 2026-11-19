@@ -84,7 +84,10 @@ sealed partial class ChatStore
         await using var done = Command(db, tx, "UPDATE chat_goal_inbox SET processed=TRUE WHERE id=@id AND NOT processed", ("id", inbox));
         if (await done.ExecuteNonQueryAsync() != 1) return true;
         await using var installed = Command(db, tx, "SELECT enabled FROM chat_bot_rooms WHERE room_id=@room FOR SHARE", ("room", room));
-        if (!canOperate(user) || !await IsMember(db, tx, room, user) || !await IsMember(db, tx, room, robot) ||
+        var access = roomType == "direct"
+            ? await ReadBotFriendAccess(db, tx, user, robot, room) : BotFriendAccessState.Unmanaged;
+        bool permitted = access == BotFriendAccessState.Active || access == BotFriendAccessState.Unmanaged && canOperate(user);
+        if (!permitted || !await IsMember(db, tx, room, user) || !await IsMember(db, tx, room, robot) ||
             await installed.ExecuteScalarAsync() is not { } enabled || !Convert.ToBoolean(enabled))
         { await tx.CommitAsync(); return true; }
 

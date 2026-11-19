@@ -101,17 +101,25 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
             "legacy" => "legacy:" + user.Id,
             _ => null,
         };
-        string id = Guid.NewGuid().ToString();
         await using var tx = await db.BeginTransactionAsync();
+        string id = await SaveRoom(db, tx, request.Type, request.Title ?? "", directKey,
+            request.Type == "group" ? user.Id : null, members);
+        await tx.CommitAsync();
+        return (id, members);
+    }
+
+    private static async Task<string> SaveRoom(DbConnection db, DbTransaction tx, string type, string title,
+        string? directKey, string? owner, string[] members)
+    {
+        string id = Guid.NewGuid().ToString();
         await using (var insert = Command(db, tx, """
             INSERT INTO chat_rooms(id,type,title,direct_key,owner_id) VALUES(@id,@type,@title,@key,@owner)
             ON DUPLICATE KEY UPDATE id=id
-            """, ("id", id), ("type", request.Type), ("title", request.Title ?? ""), ("key", directKey),
-            ("owner", request.Type == "group" ? user.Id : null)))
+            """, ("id", id), ("type", type), ("title", title), ("key", directKey), ("owner", owner)))
             await insert.ExecuteNonQueryAsync();
         if (directKey is not null)
         {
-            await using var select = Command(db, tx, "SELECT id FROM chat_rooms WHERE direct_key=@key", ("key", directKey));
+            await using var select = Command(db, tx, "SELECT id FROM chat_rooms WHERE direct_key=@key FOR UPDATE", ("key", directKey));
             id = (string)(await select.ExecuteScalarAsync())!;
         }
         foreach (var member in members.Order(StringComparer.Ordinal))
@@ -122,8 +130,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
                 """, ("id", id), ("user", member));
             await insert.ExecuteNonQueryAsync();
         }
-        await tx.CommitAsync();
-        return (id, members);
+        return id;
     }
 
     public async Task<Room[]> Rooms(string user)
@@ -182,7 +189,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
     }
 
     public async Task<SendResult?> Send(string user, string name, string room, PostMessage input, ForwardMessage? forward = null,
-        MessageCard? card = null, BotWork? job = null, string? goalRobot = null)
+        MessageCard? card = null, BotWork? job = null, string? goalRobot = null, bool legacyBotOperator = true)
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -221,6 +228,13 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
         if (roomType == "direct")
             foreach (string peer in await MemberIds(db, tx, room))
                 if (peer != user && await Blocked(db, tx, user, peer)) throw new DirectMessageBlockedException();
+        bool routeToBot = legacyBotOperator;
+        if (roomType == "direct" && goalRobot is not null && user != goalRobot && await IsMember(db, tx, room, goalRobot))
+        {
+            var access = await ReadBotFriendAccess(db, tx, user, goalRobot, room);
+            routeToBot = access == BotFriendAccessState.Active || access == BotFriendAccessState.Unmanaged && legacyBotOperator;
+            if (!routeToBot) throw new BotFriendshipRequiredException();
+        }
         if (job?.Status == "queued")
         {
             await using var installed = Command(db, tx, "SELECT enabled FROM chat_bot_rooms WHERE room_id=@room FOR SHARE", ("room", room));
@@ -264,7 +278,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
             await comment.ExecuteNonQueryAsync();
         }
         if (job is not null) await InsertJob(db, tx, job with { Sequence = seq });
-        if (goalRobot is not null && forward is null && card is null && !string.IsNullOrWhiteSpace(input.Text))
+        if (goalRobot is not null && routeToBot && forward is null && card is null && !string.IsNullOrWhiteSpace(input.Text))
             await EnqueueGoalMessage(db, tx, room, roomType, user, seq, input, goalRobot);
         if (roomType != "legacy")
         {

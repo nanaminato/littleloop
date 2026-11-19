@@ -12,8 +12,10 @@ sealed class ChatBot : BackgroundService
     private readonly HttpSemanticModelClient? memorySemantics;
     private readonly HashSet<string> operators;
     private readonly HashSet<string> approvers;
+    private readonly HashSet<string> accessAdmins;
     private readonly HashSet<string> operatorIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> approverIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> accessAdminIds = new(StringComparer.Ordinal);
     private readonly string directory;
     private readonly string? legacyDirectory;
     private readonly Dictionary<string, IChatRobotAdapter> adapters;
@@ -95,6 +97,7 @@ sealed class ChatBot : BackgroundService
         adapters = configured.ToDictionary(adapter => adapter.Name, StringComparer.Ordinal);
         operators = Names(config["ChatBot:Operators"]);
         approvers = Names(config["ChatBot:Approvers"]);
+        accessAdmins = Names(config["ChatBot:AccessAdmins"] ?? config["ChatBot:Approvers"]);
         if (operators.Count == 0 || approvers.Count == 0) throw new InvalidOperationException("Configure bot operators and approvers.");
         memorySemantics = ChatProcedureRecall.Configure(config["ChatBot:MemorySemantics"]);
     }
@@ -126,6 +129,20 @@ sealed class ChatBot : BackgroundService
 
     public bool CanOperate(string? user) => user is not null && operatorIds.Contains(user);
     public bool CanApprove(string? user) => user is not null && approverIds.Contains(user);
+    public bool CanManageAccess(string user) => accessAdminIds.Contains(user);
+
+    public async Task<bool> CanOperateRoom(string user, string room, string? provider = null)
+    {
+        if (provider is not (null or ChatStore.BotName)) return CanOperate(user);
+        var access = await store.ReadBotFriendAccess(user, Robot(null).Id, room);
+        return access == BotFriendAccessState.Active || access == BotFriendAccessState.Unmanaged && CanOperate(user);
+    }
+
+    public async Task NotifyFriendAccess(BotFriendAccessChange change)
+    {
+        await hub.Clients.Users(accessAdminIds.Append(change.UserId).Distinct().ToArray()).SendAsync("socialChanged", "");
+        if (change.RoomId is not null) await Notify([change.UserId], change.RoomId);
+    }
     public string[] Sources() => files.List();
     public SourceCitation Cite(string path, int start, int end) => AgentConversationSupport.Cite(files, path, start, end);
     public string Folder(BotWork work) => Path.Combine(work.Kind == "legacy" ? legacyDirectory ?? directory : directory, work.Id.ToString("N"));
@@ -135,6 +152,7 @@ sealed class ChatBot : BackgroundService
         if (notice.Work is not { } id || notice.Nonce is not { } nonce || !CanApprove(notice.User)) return false;
         var work = await store.ReadBotWork(id, notice.User);
         return work is { Kind: "task", Status: "running" } && SupportsApproval(work.Input.Provider) &&
+            await CanOperateRoom(work.Owner, work.Room, work.Input.Provider) &&
             AgentConversationSupport.IsApprovalPending(Folder(work), nonce);
     }
 
@@ -145,6 +163,8 @@ sealed class ChatBot : BackgroundService
             if (await store.ResolveConfiguredAccount(name) is { } account && !ChatStore.IsRobot(account.Name)) operatorIds.Add(account.Id);
         foreach (var name in approvers)
             if (await store.ResolveConfiguredAccount(name) is { } account && !ChatStore.IsRobot(account.Name)) approverIds.Add(account.Id);
+        foreach (var name in accessAdmins)
+            if (await store.ResolveConfiguredAccount(name) is { } account && !ChatStore.IsRobot(account.Name)) accessAdminIds.Add(account.Id);
         await LegacyWorkbenchImport.Import(store, Robot(null), config);
         await base.StartAsync(cancellationToken);
     }
@@ -235,7 +255,8 @@ sealed class ChatBot : BackgroundService
                 var provider = work.Input.Provider ?? ChatStore.BotName;
                 var robot = Robot(provider);
                 var adapter = adapters[provider];
-                if (!(await store.BotRoom(work.Room, work.Owner)).Installed || !await store.RobotIsMember(work.Room, robot.Id))
+                if (!(await store.BotRoom(work.Room, work.Owner)).Installed || !await store.RobotIsMember(work.Room, robot.Id) ||
+                    !await CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
                 {
                     await store.SetBotStatus(work, "disabled");
                     return;
@@ -244,6 +265,12 @@ sealed class ChatBot : BackgroundService
                 {
                     var source = work.Input.Source ?? throw new InvalidDataException("Question has no citation.");
                     var text = await adapter.Answer(work.Input, token);
+                    if (!await CanOperateRoom(work.Owner, work.Room, work.Input.Provider) ||
+                        (await store.ReadBotWork(work.Id, work.Owner))?.Status != "running")
+                    {
+                        await store.SetBotStatus(work, "disabled");
+                        return;
+                    }
                     var result = await store.Send(robot.Id, robot.Name, work.Room,
                         new(work.Id.ToString(), text[..Math.Min(text.Length, 12000)], work.Sequence),
                         card: new("citation", source));
@@ -259,14 +286,15 @@ sealed class ChatBot : BackgroundService
                     await store.SetBotStatus(work, "stale-source", "文件已变化，请重新引用后安排任务。");
                     return;
                 }
-                bool learns = adapter is LittleLoopChatAdapter && CanOperate(work.Owner) && ChatStore.SupportsGoalExperience(work);
+                bool learns = adapter is LittleLoopChatAdapter && ChatStore.SupportsGoalExperience(work);
                 if (learns && !File.Exists(Path.Combine(Folder(work), "agent.json")))
                     work = await store.PrepareGoalMemory(work, files, memorySemantics, token);
                 var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
                 {
                     try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }
                     catch (System.Data.Common.DbException e) { log.LogWarning(e, "Could not queue approval notification."); }
-                }, token, work.Goal is null ? null : _ => store.GoalShouldYield(work));
+                }, token, async _ => !await CanOperateRoom(work.Owner, work.Room, work.Input.Provider) ||
+                    work.Goal is not null && await store.GoalShouldYield(work));
                 VerifiedGoalExperience? experience = null;
                 if (learns && outcome.Status == "completed")
                 {
@@ -307,7 +335,8 @@ sealed class ChatBot : BackgroundService
             ? LittleLoop.Core.ContinuousGoal.Create(input.Text) : null;
         var work = new BotWork(id, room, user, 0, kind, goal?.Status ?? "queued", input, Goal: goal);
         var result = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),
-            card: new(kind, kind == "question" ? input.Source : null, id), job: work);
+            card: new(kind, kind == "question" ? input.Source : null, id), job: work,
+            goalRobot: Robot(null).Id, legacyBotOperator: CanOperate(user));
         if (result is not null && result.IsNew) await Notify(result.Recipients, room);
         return result?.Message;
     }

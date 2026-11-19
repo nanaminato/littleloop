@@ -39,6 +39,14 @@ export interface Friend {
   state: 'friend' | 'incoming' | 'outgoing';
 }
 
+export interface BotAccessEntry {
+  id: string;
+  username: string;
+  displayName: string;
+  allowed: boolean;
+  state: 'pending' | 'automatic' | 'manual' | 'rejected' | 'revoked' | 'none';
+}
+
 export interface Channel {
   id: string;
   title: string;

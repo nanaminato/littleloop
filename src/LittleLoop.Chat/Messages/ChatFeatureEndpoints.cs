@@ -5,7 +5,7 @@ static class ChatFeatureEndpoints
 {
     private const int MaxFileSize = 5 * 1024 * 1024;
 
-    public static void Map(RouteGroupBuilder api, ChatStore store)
+    public static void Map(RouteGroupBuilder api, ChatStore store, ChatBot? bot = null)
     {
         api.MapPost("/saved", async (ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
         {
@@ -85,7 +85,8 @@ static class ChatFeatureEndpoints
             if (input.ClientId == Guid.Empty || input.Sequence <= 0) return Results.BadRequest();
             try
             {
-                var result = await store.Send(Id(user), user.Identity!.Name!, room.ToString(), new(input.ClientId.ToString(), "", null), input);
+                var result = await store.Send(Id(user), user.Identity!.Name!, room.ToString(), new(input.ClientId.ToString(), "", null),
+                    input, goalRobot: bot?.Robot(null).Id, legacyBotOperator: bot?.CanOperate(Id(user)) == true);
                 if (result is null) return Results.NotFound();
                 if (result.IsNew) await Notify(hub, result.Recipients, room.ToString());
                 if (result.Discussion is { } discussion)
@@ -97,6 +98,7 @@ static class ChatFeatureEndpoints
             catch (DiscussionClosedException) { return Results.Json(new { code = "discussion_closed" }, statusCode: 403); }
             catch (GroupSilencedException) { return Results.Json(new { code = "group_silenced" }, statusCode: 403); }
             catch (ChannelWriteDeniedException) { return Results.StatusCode(403); }
+            catch (BotFriendshipRequiredException) { return Results.Json(new { code = "bot_friendship_required" }, statusCode: 403); }
             catch (DirectMessageBlockedException) { return Results.Json(new { code = "communication_unavailable" }, statusCode: 403); }
         });
 

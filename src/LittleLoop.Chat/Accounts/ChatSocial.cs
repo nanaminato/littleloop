@@ -22,6 +22,7 @@ sealed partial class ChatStore
             );
             """);
         await create.ExecuteNonQueryAsync();
+        await UpgradeBotFriendAccess(db);
         // SQLite starts with the corrected schema; this migrates only historical MySQL schemas.
         if (db is Microsoft.Data.Sqlite.SqliteConnection) return;
         await using var lookup = Command(db, null, """
@@ -211,7 +212,7 @@ sealed partial class ChatStore
 
 static class ChatSocialEndpoints
 {
-    public static void Map(RouteGroupBuilder api, ChatStore store)
+    public static void Map(RouteGroupBuilder api, ChatStore store, ChatBot? bot = null)
     {
         api.MapGet("/friends", (ClaimsPrincipal user) => store.Friends(Id(user)));
         api.MapPost("/friends", async (FriendRequest input, ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
@@ -219,6 +220,14 @@ static class ChatSocialEndpoints
             string id = Id(user);
             string? name = Username(input.Username);
             if (name is null) return Results.BadRequest();
+            if (name == ChatStore.BotName && bot is not null)
+            {
+                var change = await store.RequestBotFriend(id, bot.Robot(null).Id);
+                if (change is null) return Results.NotFound();
+                await bot.NotifyFriendAccess(change);
+                return change.RoomId is not null && change.State is ("automatic" or "manual")
+                    ? Results.Ok(new { change.RoomId }) : Results.NoContent();
+            }
             var peer = await store.RequestFriend(id, name);
             if (peer is null) return Results.NotFound();
             await hub.Clients.Users([id, peer]).SendAsync("socialChanged", "");
@@ -227,6 +236,8 @@ static class ChatSocialEndpoints
         api.MapPost("/friends/{peer:guid}/respond", async (Guid peer, FriendDecision input, ClaimsPrincipal user, IHubContext<ChatHub> hub) =>
         {
             string id = Id(user), other = peer.ToString();
+            if (bot is not null && (id == bot.Robot(null).Id || other == bot.Robot(null).Id))
+                return Results.StatusCode(403);
             if (!await store.RespondFriend(id, other, input.Accepted)) return Results.NotFound();
             await hub.Clients.Users([id, other]).SendAsync("socialChanged", "");
             return Results.NoContent();

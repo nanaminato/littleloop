@@ -56,7 +56,7 @@
                   {{ store.currentRoom()?.pinnedMessage === message().sequence ? store.t('取消置顶消息') : store.t('置顶消息') }}
                 </button>
               }
-              @if (store.bot().canOperate && store.botInstalled() && message().card?.kind !== 'task') {
+              @if (store.roomCanOperateBot() && message().card?.kind !== 'task') {
                 <button type="button" class="quiet" (click)="store.beginTask(message())">{{ store.t('安排开发任务') }}</button>
               }
               @if (canChange(2)) {

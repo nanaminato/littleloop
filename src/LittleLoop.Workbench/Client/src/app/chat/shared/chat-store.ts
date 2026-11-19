@@ -3,8 +3,20 @@ import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } fro
 import { AccountSettings, DeviceSettings, accountDefaults, deviceDefaults } from '../settings/chat-settings';
 import { ChatI18n } from './chat-i18n';
 import {
-  Attachment, Channel, ChatMessage, Friend, Member, Notice, Outgoing, Room,
+  Attachment, BotAccessEntry, Channel, ChatMessage, Friend, Member, Notice, Outgoing, Room,
 } from './chat-model';
+
+interface BotCapabilities {
+  enabled: boolean;
+  canOperate: boolean;
+  canApprove: boolean;
+  canManageAccess: boolean;
+  providers: string[];
+}
+
+const unavailableBot: BotCapabilities = {
+  enabled: false, canOperate: false, canApprove: false, canManageAccess: false, providers: [],
+};
 
 @Injectable({ providedIn: 'root' })
 export class ChatStore {
@@ -16,7 +28,10 @@ export class ChatStore {
   readonly detailsOpen = signal(false);
   readonly friendsOpen = signal(false);
   readonly friends = signal<Friend[]>([]);
+  readonly botAccessOpen = signal(false);
+  readonly botAccess = signal<BotAccessEntry[] | null>(null);
   friendUsername = '';
+  botAccessUsername = '';
   memberUsername = '';
   readonly detailMembers = signal<Member[]>([]);
   readonly inRoomSearch = signal(false);
@@ -61,7 +76,8 @@ export class ChatStore {
   searchTerm = '';
   editText = '';
   forwardRoom = '';
-  readonly bot = signal({ enabled: false, canOperate: false, canApprove: false, providers: [] as string[] });
+  readonly bot = signal(unavailableBot);
+  readonly roomCanOperateBot = signal(false);
   readonly roomProviders = signal<string[]>([]);
   readonly directory = signal<Channel[] | null>(null);
   readonly topicDialog = signal(false);
@@ -92,6 +108,7 @@ export class ChatStore {
   private syncQueued = false;
   private syncing?: Promise<void>;
   private historyVersion = 0;
+  private botAccessVersion = 0;
   private loadedRoom = '';
 
   constructor() {
@@ -117,8 +134,7 @@ export class ChatStore {
   private enter(name: string) {
     this.user.set(name);
     void this.refreshAccount();
-    void this.api<{ enabled: boolean; canOperate: boolean; canApprove: boolean; providers: string[] }>('/bot/capabilities')
-      .then(info => { if (this.user() === name) { this.bot.set(info); this.requestSync(); } }).catch(() => {});
+    void this.refreshBotCapabilities();
     this.pending.set(JSON.parse(sessionStorage.getItem('chat-outbox:' + name) ?? '{}'));
     this.connection.set('正在连接');
     const hub = new HubConnectionBuilder().withUrl('/hubs/chat')
@@ -141,6 +157,7 @@ export class ChatStore {
     hub.onreconnected(() => {
       this.connection.set('已连接');
       void this.refreshAccount();
+      void this.refreshBotCapabilities();
       this.requestSync();
     });
     hub.onclose(() => {
@@ -167,6 +184,19 @@ export class ChatStore {
     }
   }
 
+  private async refreshBotCapabilities() {
+    const user = this.user();
+    if (!user) return;
+    try {
+      const info = await this.api<BotCapabilities>('/bot/capabilities');
+      if (this.user() !== user) return;
+      this.bot.set(info);
+      if (!info.canManageAccess) this.showBotAccess(false);
+      if (!info.enabled) this.resetBotForms();
+      this.requestSync();
+    } catch { /* Leave the last confirmed capabilities until reconnect. */ }
+  }
+
   async logout() {
     await this.action(async () => {
       await this.api('/logout', {});
@@ -174,7 +204,6 @@ export class ChatStore {
       this.hub = undefined;
       this.clearAccount();
       this.user.set('');
-      this.bot.set({ enabled: false, canOperate: false, canApprove: false, providers: [] });
       this.directory.set(null);
       this.resetBotForms();
       this.historyVersion++;
@@ -293,6 +322,10 @@ export class ChatStore {
         const friends = await this.api<Friend[]>('/friends');
         if (this.hub !== hub) continue;
         this.friends.set(friends);
+        if (this.botAccessOpen() && this.bot().canManageAccess) {
+          await this.refreshBotAccess();
+          if (this.hub !== hub) continue;
+        }
       }
       if (this.linkRoom && rooms.some(item => item.id === this.linkRoom)) {
         const target = this.linkRoom;
@@ -312,9 +345,12 @@ export class ChatStore {
       const version = this.historyVersion;
       if (this.detailsOpen()) await this.refreshMembers(room);
       if (this.bot().enabled) {
-        const info = await this.api<{ installed: boolean; providers: string[] }>('/bot/rooms/' + room);
+        const info = await this.api<{ installed: boolean; canOperate?: boolean; providers: string[] }>('/bot/rooms/' + room);
         if (version !== this.historyVersion) continue;
+        const canOperate = info.canOperate ?? this.bot().canOperate;
+        if ((!canOperate || !info.installed) && this.roomCanOperateBot()) this.resetBotForms();
         this.botInstalled.set(info.installed);
+        this.roomCanOperateBot.set(canOperate && info.installed);
         this.roomProviders.set(info.providers);
         if (!info.providers.includes(this.provider)) this.provider = info.providers[0] ?? '';
       }
@@ -382,6 +418,7 @@ export class ChatStore {
 
   private resetBotForms() {
     this.botInstalled.set(false);
+    this.roomCanOperateBot.set(false);
     this.roomProviders.set([]);
     this.provider = '';
     this.sources.set(null);
@@ -745,9 +782,10 @@ export class ChatStore {
 
   private clearAccount() {
     this.drawer.set(false);
-    this.friendsOpen.set(false);
+    this.closeFriends();
     this.friends.set([]);
     this.friendUsername = '';
+    this.bot.set(unavailableBot);
     this.settingsOpen.set(false);
     this.detailsOpen.set(false);
     this.channelDialog.set(false);
@@ -785,14 +823,63 @@ export class ChatStore {
 
   openFriends() {
     this.drawer.set(false);
+    this.error.set('');
     this.friendsOpen.set(true);
     this.requestSync();
   }
 
+  closeFriends() {
+    this.friendsOpen.set(false);
+    this.showBotAccess(false);
+  }
+
+  showBotAccess(open: boolean) {
+    this.botAccessOpen.set(open && this.bot().canManageAccess);
+    if (this.botAccessOpen()) {
+      this.error.set('');
+      this.requestSync();
+    } else {
+      this.botAccessVersion++;
+      this.botAccess.set(null);
+      this.botAccessUsername = '';
+    }
+  }
+
+  private async refreshBotAccess() {
+    if (!this.botAccessOpen() || !this.bot().canManageAccess) return;
+    const version = ++this.botAccessVersion;
+    const view = await this.api<{ entries: BotAccessEntry[] }>('/bot/access');
+    if (version === this.botAccessVersion) this.botAccess.set(view.entries);
+  }
+
+  async setBotAllowlist(allowed: boolean, username = this.botAccessUsername) {
+    username = username.trim();
+    if (!this.bot().canManageAccess || this.busy() || !username) return;
+    await this.action(async () => {
+      await this.api('/bot/access/allowlist', { username, allowed });
+      if (allowed && this.botAccessUsername.trim() === username) this.botAccessUsername = '';
+      await this.refreshBotAccess();
+      this.requestSync();
+    });
+  }
+
+  async decideBotAccess(entry: BotAccessEntry, decision: 'accept' | 'reject' | 'revoke') {
+    if (!this.bot().canManageAccess || this.busy()) return;
+    await this.action(async () => {
+      await this.api('/bot/access/' + entry.id + '/decision', { decision });
+      await this.refreshBotAccess();
+      this.requestSync();
+    });
+  }
+
   async requestFriend() {
     await this.action(async () => {
-      await this.api('/friends', { username: this.friendUsername.trim() });
+      const result = await this.api<{ roomId?: string } | undefined>('/friends', { username: this.friendUsername.trim() });
       this.friendUsername = '';
+      if (result?.roomId) {
+        this.closeFriends();
+        this.select(result.roomId);
+      }
       this.requestSync();
     });
   }
@@ -807,7 +894,7 @@ export class ChatStore {
   async directFriend(friend: Friend) {
     await this.action(async () => {
       const result = await this.api<{ id: string }>('/rooms', { type: 'direct', title: '', members: [friend.username] });
-      this.friendsOpen.set(false);
+      this.closeFriends();
       this.select(result.id);
     });
   }
@@ -925,7 +1012,7 @@ export class ChatStore {
     const menu = document.querySelector<HTMLDetailsElement>('details.popover[open]');
     if (menu) { menu.open = false; menu.querySelector<HTMLElement>('summary')?.focus(); }
     else if (this.settingsOpen()) this.settingsOpen.set(false);
-    else if (this.friendsOpen()) this.friendsOpen.set(false);
+    else if (this.friendsOpen()) this.closeFriends();
     else if (this.detailsOpen()) this.detailsOpen.set(false);
     else if (this.drawer()) this.drawer.set(false);
     else if (this.inRoomSearch()) this.toggleSearch(false);

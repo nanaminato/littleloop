@@ -312,6 +312,7 @@ if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_EXECUTABLE") is { Lengt
 await lease.DisposeAsync();
 await NaturalMemoryChecks.Run(connection, provider, memoryFiles, experience, Check);
 await WorkerChecks.Run(store, owner, stranger, robot, room.Id, Check);
+await BotFriendAccessChecks.Run(store, robot, Check);
 Console.WriteLine($"All {checks} chat goal checks passed on {provider}.");
 
 sealed class TemporaryChatDatabase : IDisposable
