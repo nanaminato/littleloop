@@ -310,6 +310,7 @@ if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_EXECUTABLE") is { Lengt
     Console.WriteLine("Live evidence: " + root);
 }
 await lease.DisposeAsync();
+await NaturalMemoryChecks.Run(connection, provider, memoryFiles, experience, Check);
 await WorkerChecks.Run(store, owner, stranger, robot, room.Id, Check);
 Console.WriteLine($"All {checks} chat goal checks passed on {provider}.");
 

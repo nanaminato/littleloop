@@ -43,6 +43,7 @@ sealed partial class ChatStore
             );
             """);
         await cmd.ExecuteNonQueryAsync();
+        await UpgradeConversationMemory(db);
     }
 
     private static async Task EnqueueGoalMessage(DbConnection db, DbTransaction tx, string room,
@@ -66,7 +67,7 @@ sealed partial class ChatStore
         await insert.ExecuteNonQueryAsync();
     }
 
-    public async Task<bool> ProcessGoalMessage(string robot, Func<string, bool> canOperate)
+    public async Task<bool> ProcessGoalMessage(string robot, Func<string, bool> canOperate, string? grantHash = null)
     {
         await using var db = await Open();
         // The single worker processes inbox messages. All goal writers lock room, then work.
@@ -87,13 +88,6 @@ sealed partial class ChatStore
             await installed.ExecuteScalarAsync() is not { } enabled || !Convert.ToBoolean(enabled))
         { await tx.CommitAsync(); return true; }
 
-        if (await HandleGoalMemory(db, tx, room, roomType, user, seq, replyTo, text) is { } memoryReply)
-        {
-            await AddGoalNotice(db, tx, room, seq, memoryReply, null);
-            await tx.CommitAsync();
-            return true;
-        }
-
         Guid? target = null;
         if (replyTo is { } reply)
         {
@@ -109,7 +103,13 @@ sealed partial class ChatStore
             """, ("room", room), ("user", user), ("target", target?.ToString()), ("unanchored", replyTo is null)))
         await using (var r = await select.ExecuteReaderAsync())
             while (await r.ReadAsync()) candidates.Add(ReadWork(r));
-        var intent = GoalMessageRouter.Parse(text, candidates.Count > 0);
+        if (await HandleGoalMemory(db, tx, room, roomType, user, seq, replyTo, text, candidates, grantHash) is { } memoryReply)
+        {
+            await AddGoalNotice(db, tx, room, seq, memoryReply, null);
+            await tx.CommitAsync();
+            return true;
+        }
+        var intent = GoalMessageRouter.Parse(text, candidates.Count > 0, privateDocumentRequests: roomType == "direct");
         // A plain progress question still works after completion/cancellation. Explicit replies
         // must resolve their own task; never silently redirect them to another active goal.
         if (intent.Action == "status" && replyTo is null && candidates.Count == 0)
@@ -221,7 +221,7 @@ sealed partial class ChatStore
             if (next.Status == "completed" && roomType == "direct" && experience is not null && SupportsGoalExperience(executed))
                 await SaveGoalExperience(db, tx, executed, experience);
             bool includeObjective = next.Status == "completed" && roomType == "direct" &&
-                await ReadGoalPreference(db, tx, executed.Room, executed.Owner) is true;
+                await CompletionIncludesGoal(db, tx, executed);
             await AddGoalNotice(db, tx, executed.Room, executed.Sequence,
                 $"任务 v{next.Version}：{GoalStatusText(next.Status)}" + (error is null ? "" : "\n" + error) +
                 (next.Status == "waiting-input" && output is not null ? "\n" + output[..Math.Min(output.Length, 3000)] : "") +

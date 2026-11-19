@@ -9,6 +9,7 @@ sealed class ChatBot : BackgroundService
     private readonly IConfiguration config;
     private readonly AgentHostPolicy policy;
     private readonly ProjectFiles files;
+    private readonly HttpSemanticModelClient? memorySemantics;
     private readonly HashSet<string> operators;
     private readonly HashSet<string> approvers;
     private readonly HashSet<string> operatorIds = new(StringComparer.Ordinal);
@@ -95,6 +96,13 @@ sealed class ChatBot : BackgroundService
         operators = Names(config["ChatBot:Operators"]);
         approvers = Names(config["ChatBot:Approvers"]);
         if (operators.Count == 0 || approvers.Count == 0) throw new InvalidOperationException("Configure bot operators and approvers.");
+        memorySemantics = ChatProcedureRecall.Configure(config["ChatBot:MemorySemantics"]);
+    }
+
+    public override void Dispose()
+    {
+        memorySemantics?.Dispose();
+        base.Dispose();
     }
 
     private static bool Overlaps(string first, string second) => Contains(first, second) || Contains(second, first);
@@ -169,11 +177,12 @@ sealed class ChatBot : BackgroundService
         });
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(600));
         var active = new List<(BotWork Work, string? Root, Task Execution)>();
+        string projectGrant = files.PolicyHash;
         try
         {
             while (await timer.WaitForNextTickAsync(token))
             {
-                for (int i = 0; i < 32 && await store.ProcessGoalMessage(Robot(null).Id, CanOperate); i++) { }
+                for (int i = 0; i < 32 && await store.ProcessGoalMessage(Robot(null).Id, CanOperate, projectGrant); i++) { }
                 for (int i = 0; i < 32 && await store.NextGoalNotice() is { } notice; i++)
                 {
                     var robot = Robot(null);
@@ -252,7 +261,7 @@ sealed class ChatBot : BackgroundService
                 }
                 bool learns = adapter is LittleLoopChatAdapter && CanOperate(work.Owner) && ChatStore.SupportsGoalExperience(work);
                 if (learns && !File.Exists(Path.Combine(Folder(work), "agent.json")))
-                    work = work with { ExperienceHint = await store.ReadGoalExperience(work, files.PolicyHash) };
+                    work = await store.PrepareGoalMemory(work, files, memorySemantics, token);
                 var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
                 {
                     try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }

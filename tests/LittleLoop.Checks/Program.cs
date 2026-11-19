@@ -42,6 +42,7 @@ foreach (var path in Directory.GetFiles("examples/phase1", "*.json"))
     Check(receipt.DecisionId == oldInput.Id, $"legacy scenario {path}");
 }
 RoleChecks.Run();
+ConversationMemoryChecks.Run();
 LearningChecks.Run();
 await LearningLockChecks.Run();
 await SchedulingChecks.Run();

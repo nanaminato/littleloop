@@ -1,13 +1,16 @@
 """Real Codex + ordinary private messages, isolated SQLite and bounded fixture files.
 
 Build Chat first. Set LITTLELOOP_CODEX_EXECUTABLE and optionally LITTLELOOP_CODEX_HOME,
-CODEX_CA_CERTIFICATE and LITTLELOOP_CHAT_DLL. Never uses production chat state.
+CODEX_CA_CERTIFICATE and LITTLELOOP_CHAT_DLL. Pass --memory for the sourced conditional-memory experiment
+or --memory-generalization for held-out tasks and both retrieval and outcome metrics.
 """
+import argparse
 import hashlib
 import http.cookiejar
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import subprocess
@@ -17,6 +20,16 @@ import urllib.error
 import urllib.request
 import uuid
 
+from memory_generalization import TRIALS, run as run_memory_generalization
+
+parser = argparse.ArgumentParser(description=__doc__)
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument('--memory', action='store_true', help='run the private memory and override experiment')
+mode.add_argument('--memory-generalization', action='store_true', help='measure held-out private task recall and outcomes')
+parser.add_argument('--trial', action='append', choices=[trial.name for trial in TRIALS], help='run selected generalization trials')
+options = parser.parse_args()
+if options.trial and not options.memory_generalization:
+    parser.error('--trial requires --memory-generalization')
 REPO = Path(__file__).resolve().parents[2]
 DLL = Path(os.environ.get('LITTLELOOP_CHAT_DLL', REPO / 'src/LittleLoop.Chat/bin/Debug/net10.0/LittleLoop.Chat.dll')).resolve()
 EXECUTABLE = Path(os.environ['LITTLELOOP_CODEX_EXECUTABLE']).resolve()
@@ -35,6 +48,13 @@ for name, value in [('code.txt', 'broken'), ('notes.txt', 'pending')]:
 policy = dict(executable=str(EXECUTABLE), project=str(PROJECT), maxTurns=8, timeoutSeconds=300, maxRepairs=1,
     development=dict(root=str(PROJECT), writableFiles=['code.txt', 'notes.txt'], readExtensions=['.txt', '.py'], budget=40,
         commands=[dict(id='verify', executable=sys.executable, arguments=['verify.py'], isTest=True, protectedFiles=['verify.py'])]))
+if options.memory or options.memory_generalization:
+    # The independently checked convention is deliberately absent from both the workspace and test command.
+    policy['development']['writableFiles'] = ['notes.txt']
+    (PROJECT / 'verify.py').write_text(
+        "from pathlib import Path\nvalue = Path('notes.txt').read_text().splitlines()\n"
+        "assert 1 <= len(value) <= 2 and all(x != 'PENDING' and x.isascii() for x in value)\nprint('PASS note updated')\n",
+        encoding='utf-8')
 (ROOT / 'policy.json').write_text(json.dumps(policy), encoding='utf-8')
 with socket.socket() as probe:
     probe.bind(('127.0.0.1', 0))
@@ -173,24 +193,66 @@ def progress(task, status):
     assert reply['card']['taskId'] == task and status in reply['text'], reply
 
 
-print('Evidence: ' + str(ROOT), flush=True)
-try:
-    start('bootstrap')
-    password = secrets.token_hex(20)
-    for name in ('direct_owner', 'direct_other'):
-        request(owner, '/register', dict(name=name, password=password, invite=env['Chat__Invite']), 204)
-    stop()
-    start('private-live', True)
-    for who, name in ((owner, 'direct_owner'), (outsider, 'direct_other')):
-        request(who, '/login', dict(name=name, password=password))
-    request(anonymous, '/bot/direct', {}, 401)
-    request(outsider, '/bot/direct', {}, 403)
-    room = request(owner, '/bot/direct', {})['id']
-    assert request(owner, '/bot/direct', {})['id'] == room
-    assert request(owner, f'/bot/rooms/{room}')['type'] == 'direct'
-    request(outsider, f'/rooms/{room}/messages', expected=404)
-    record('authenticated private Codex room, idempotent enrollment and operator isolation')
+def complete_with_approvals(task, allowed_paths):
+    approvals = []
+    def advance():
+        current = state(task)
+        if current['status'] == 'completed':
+            return current
+        assert current['status'] in ('queued', 'running'), (task, current['status'], ROOT)
+        pending = (current.get('execution') or {}).get('approval')
+        if pending and pending.get('status') == 'pending' and pending['nonce'] not in approvals:
+            parameters = pending['parameters']
+            tool, args = parameters['tool'], parameters['arguments']
+            assert (tool == 'project_patch' and args['path'] in allowed_paths) or (
+                tool == 'project_command' and args['command'] == 'verify'), parameters
+            request(owner, f'/bot/work/{task}/decision', dict(nonce=pending['nonce'], value='accept'), 204)
+            approvals.append(pending['nonce'])
+        return None
+    return wait(advance, 300), approvals
 
+
+def check_memory():
+    prefix = 'REL-' + secrets.token_hex(4).upper() + '-'
+    source = send('以后处理发布说明时，写版本编号时在数字前紧接前缀 ' + prefix + '。')
+    learned = reply_for(source)
+    assert prefix in learned['text'], learned['text']
+    stop()
+    start('memory-restart', True)
+    record('natural project convention acknowledged and isolated chat service restarted')
+    cases = [
+        ('unrelated', '请整理库存清点记录。把 notes.txt 的 PENDING 替换成单行的数字 17。', '17', False),
+        ('related', '请撰写版本说明。把 notes.txt 的 PENDING 改成版本编号，数字是 42。请沿用本项目惯例，文件只放最终编号。', prefix + '42', True),
+        ('override', '请撰写发布说明。这次不要使用任何前缀，把 notes.txt 的 PENDING 改成数字 43。文件只放这个数字。', '43', False),
+    ]
+    trials = []
+    for name, objective, expected, should_recall in cases:
+        (PROJECT / 'notes.txt').write_bytes(b'PENDING\n')
+        message = send('任务：' + objective + ' 修改后运行宿主 verify 测试。')
+        task = task_for(message)
+        current, approvals = complete_with_approvals(task, {'notes.txt'})
+        execution = current['execution']
+        folder = ROOT / 'bot' / task.replace('-', '')
+        calls = [json.loads(line) for line in (folder / 'requests.jsonl').read_text(encoding='utf-8').splitlines()]
+        prompt = next(call['params']['input'][0]['text'] for call in calls if call.get('method') == 'turn/start')
+        present = prefix in prompt
+        provenance = bool(re.search(r'"sourceSequence"\s*:\s*' + str(source['sequence']) + r'[,}]', prompt, re.I))
+        content = (PROJECT / 'notes.txt').read_text(encoding='ascii').splitlines()
+        trial = dict(case=name, objective=objective, task=task, thread=execution['threadId'], promptHasConvention=present,
+            promptHasSource=provenance, expected=expected, actual=content, changes=execution['changes'],
+            receipts=execution['receipts'], approvals=approvals, sourceSequence=source['sequence'])
+        trials.append(trial)
+        (ROOT / 'memory-trials.json').write_text(json.dumps(trials, ensure_ascii=False, indent=2), encoding='utf-8')
+        assert (present, provenance) == (should_recall, should_recall), (name, 'outgoing request', folder)
+        assert content == [expected], (name, expected, content)
+        assert set(trial['changes']) == {'notes.txt'} and any(r['exitCode'] == 0 for r in trial['receipts']), trial
+        assert (PROJECT / 'code.txt').read_text() == 'broken'
+        record(name + ': actual Codex prompt, independent file value and successful host test')
+    assert len({trial['thread'] for trial in trials}) == len(trials)
+    return dict(mode='memory', sourceSequence=source['sequence'], trials=trials)
+
+
+def check_direct():
     greeting = send('你好')
     assert reply_for(greeting).get('card') is None
     discussion = send('如果修改数据库会怎样')
@@ -229,23 +291,7 @@ try:
     record('confirmed tool-boundary pause, stale approval rejected, supplement persists paused across restart')
 
     send('恢复')
-    approvals = []
-
-    def finish():
-        current = state(task)
-        if current['status'] == 'completed':
-            return current
-        pending = approval(task)
-        if pending and pending['nonce'] not in approvals:
-            parameters = pending['parameters']
-            tool, args = parameters['tool'], parameters['arguments']
-            assert (tool == 'project_patch' and args['path'] in ('code.txt', 'notes.txt')) or (
-                tool == 'project_command' and args['command'] == 'verify'), parameters
-            request(owner, f'/bot/work/{task}/decision', dict(nonce=pending['nonce'], value='accept'), 204)
-            approvals.append(pending['nonce'])
-        return None
-
-    completed = wait(finish, 300)
+    completed, approvals = complete_with_approvals(task, {'code.txt', 'notes.txt'})
     assert completed['goal']['version'] == 4 and completed['execution']['threadId'] == thread
     assert set(completed['execution']['changes']) == {'code.txt', 'notes.txt'}
     assert any(r['exitCode'] == 0 for r in completed['execution']['receipts'])
@@ -275,9 +321,42 @@ try:
         m.get('replyTo') == message['sequence']]) == 1
     record('cancel running task, confirm real turn stopped, invalidate approval; restart preserves terminal tasks and one completion')
 
-    result = dict(status='passed', checks=checks, elapsedSeconds=time.monotonic() - started,
-        room=room, task=task, thread=thread, completed=completed, cancelledTask=cancelled_task, cancelled=cancelled,
-        approvals=approvals, verifier=verified.stdout,
+    return dict(task=task, thread=thread, completed=completed, cancelledTask=cancelled_task, cancelled=cancelled,
+        approvals=approvals, verifier=verified.stdout)
+
+
+print('Evidence: ' + str(ROOT), flush=True)
+try:
+    start('bootstrap')
+    password = secrets.token_hex(20)
+    for name in ('direct_owner', 'direct_other'):
+        request(owner, '/register', dict(name=name, password=password, invite=env['Chat__Invite']), 204)
+    stop()
+    start('private-live', True)
+    for who, name in ((owner, 'direct_owner'), (outsider, 'direct_other')):
+        request(who, '/login', dict(name=name, password=password))
+    request(anonymous, '/bot/direct', {}, 401)
+    request(outsider, '/bot/direct', {}, 403)
+    room = request(owner, '/bot/direct', {})['id']
+    assert request(owner, '/bot/direct', {})['id'] == room
+    assert request(owner, f'/bot/rooms/{room}')['type'] == 'direct'
+    request(outsider, f'/rooms/{room}/messages', expected=404)
+    record('authenticated private Codex room, idempotent enrollment and operator isolation')
+    if options.memory_generalization:
+        def decide(task, nonce, decision):
+            request(owner, f'/bot/work/{task}/decision', dict(nonce=nonce, value=decision), 204)
+
+        def restart():
+            stop()
+            start('memory-generalization-restart', True)
+
+        details = run_memory_generalization(ROOT, PROJECT, send, reply_for, task_for, state, wait, decide, restart,
+                                            names=options.trial)
+        details['scenarioSha256'] = hashlib.sha256(Path(__file__).with_name('memory_generalization.py').read_bytes()).hexdigest()
+    else:
+        details = check_memory() if options.memory else check_direct()
+    result = dict(**details, status='measured' if options.memory_generalization else 'passed',
+        checks=checks, elapsedSeconds=time.monotonic() - started, room=room,
         assemblyHashes={name: hashlib.sha256(DLL.with_name(name).read_bytes()).hexdigest()
             for name in ('LittleLoop.Chat.dll', 'LittleLoop.Core.dll', 'LittleLoop.Tools.dll')},
         driverSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())

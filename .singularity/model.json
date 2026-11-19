@@ -2891,6 +2891,191 @@
       "actor": "AI",
       "verification": "not_applicable",
       "delivery": "implemented"
+    },
+    {
+      "actor": "AI",
+      "body": "提交 86b8545，隔离 SQLite 私聊，gpt-6-astra low，两种任务共四对。两组均 4/4，通过次数持平；调用 25 对 24，三对持平；总令牌上升 4.6%，非缓存输入下降 7.7%，实际扣费未知。该小样本没有显示稳定效率改善。",
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ],
+      "id": "EXP-CHAT-EXPERIENCE-REAL-CODEX",
+      "delivery": "implemented",
+      "verification_basis": [
+        "EVIDENCE-CHAT-EXPERIENCE-REAL-CODEX"
+      ],
+      "verification": "passed",
+      "type": "experiment",
+      "authorization": "not_applicable",
+      "title": "真实 Codex 经验开启与关闭配对评测",
+      "attributes": {
+        "baseline": "同一初始夹具、目标、模型、权限和预算，禁用经验并核对实际请求中无提示",
+        "metrics": [
+          "宿主及独立文件验收成功率",
+          "App Server 工具请求数",
+          "缓存输入、非缓存输入、输出及总令牌"
+        ]
+      }
+    },
+    {
+      "actor": "AI",
+      "body": "四对留出初始值，交换执行顺序，独立十个 thread。实跑包含两次训练，训练用量单列。",
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ],
+      "id": "EVIDENCE-CHAT-EXPERIENCE-REAL-CODEX",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "type": "evidence",
+      "authorization": "not_applicable",
+      "title": "真实 Codex 经验评测的结果和事件",
+      "attributes": {
+        "observation": "data/s3-experience-live/c8c6263b/result.json、driver.py 与逐任务请求和用量事件。无经验和有经验分别为 345715 与 361692 总令牌；工具次数 25 与 24。"
+      }
+    },
+    {
+      "id": "INTENT-CHAT-GENERALIZED-MEMORY",
+      "type": "intent",
+      "title": "从自然纠正与任务经历形成可泛化的私聊记忆",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "用户明确同意按自然纠正、跨任务召回和当前要求优先的思路实现，并允许重构。",
+      "delivery": "planned",
+      "verification": "unverified",
+      "body": "实现基于自然表达的记忆与跨任务适用性判断，允许为此重构。具体检索算法、确认次数、模型选择和效益阈值为工程决策。",
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ],
+      "attributes": {}
+    },
+    {
+      "id": "CAP-CHAT-GENERALIZED-MEMORY",
+      "type": "capability",
+      "title": "带来源、可纠正的私聊偏好与项目做法",
+      "body": "私聊区分当前与长期通知偏好，从独立任务反馈形成待确认候选。已教的条件做法及已验收补丁可在相符的新任务中使用。当前要求优先，作用域、来源、版本和执行权限由宿主检验。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "attributes": {},
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY",
+        "REF-CHAT-CONVERSATION-MEMORY-POLICY",
+        "REF-CHAT-NATURAL-MEMORY-CHECKS"
+      ],
+      "verification_basis": [
+        "EVIDENCE-CHAT-GENERALIZED-MEMORY-REGRESSION",
+        "EVIDENCE-CHAT-GENERALIZED-MEMORY-CODEX"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-GENERALIZED-MEMORY-REGRESSION",
+      "type": "evidence",
+      "title": "私聊记忆行为与语义边界回归",
+      "body": "检查普通消息到派发提示、完成通知的事务路径，覆盖重复投递、更正、范围隔离、重启、近似匹配、撤回及语义选择期间的竞态。可选语义模型使用受控回复。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "本次构建及 Core、ChatChecks 回归的命令和覆盖范围见 S3 文档。"
+      },
+      "references": [
+        "REF-CHAT-NATURAL-MEMORY-CHECKS",
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-GENERALIZED-MEMORY-CODEX",
+      "type": "evidence",
+      "title": "真实 Codex 对私聊项目约定的采用与覆盖",
+      "body": "从普通私聊教给系统一个合成项目特有的随机编号前缀，服务重启后在独立任务上核对真实请求和最终文件。无关任务、同义发布说明以及明确覆盖分别验证。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "隔离 SQLite + 默认 Codex。逐次结果、实际输入、真实工具回执及独立文件校验见 S3 文档所指运行目录。限定场景验证，不代表开放领域收益。"
+      },
+      "references": [
+        "REF-CHAT-PRIVATE-MEMORY-DRIVER",
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ]
+    },
+    {
+      "id": "INTENT-CHAT-MEMORY-DEPLOY-EVAL",
+      "type": "intent",
+      "title": "部署私聊记忆并实测未见任务的召回与误用",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "用户明确授权本版部署到现有服务，并要求验证未见私聊任务的改写召回和误用。",
+      "delivery": "planned",
+      "verification": "unverified",
+      "body": "将已实现的私聊记忆部署到现有服务。用未见过的私聊任务观察改写召回、漏召、误召及执行阶段对记忆的实际采用。",
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY",
+        "REF-CHAT-PRIVATE-MEMORY-DRIVER"
+      ],
+      "attributes": {}
+    },
+    {
+      "id": "EVIDENCE-CHAT-GENERALIZED-MEMORY-DEPLOYED",
+      "type": "evidence",
+      "title": "私聊记忆 Release 已部署到现有 5190 服务",
+      "body": "运行进程已切换到独立发布目录。HTTP、现有角色登录权限和记忆表检查通过，备份位置可追溯。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "data/continuous-deployment/generalized-memory-deployment.json 记录匹配的 PID、DLL 哈希、前后聚合数、健康和回滚目录。"
+      },
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY"
+      ]
+    },
+    {
+      "id": "EVIDENCE-CHAT-GENERALIZED-MEMORY-HELDOUT",
+      "type": "evidence",
+      "title": "部署同版真实 Codex 留出任务的召回与文件结果",
+      "body": "13 个私聊场景均最终完成，首次请求完全准确 8、漏召 3、误召 2。实际产物符合预期 8；两项错召均未写入旧前缀，两项正确召回未采用。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "data/continuous-deployment/generalized-memory-evaluation.json 汇总原始与补跑证据。另有 generalized-memory-core-probe.json 记录补丁相似度和条件重叠独立探针。"
+      },
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY",
+        "REF-CHAT-PRIVATE-MEMORY-DRIVER",
+        "REF-CHAT-MEMORY-HELDOUT-SCENARIOS"
+      ]
+    },
+    {
+      "id": "EXP-CHAT-GENERALIZED-MEMORY-HELDOUT",
+      "type": "experiment",
+      "title": "未见私聊任务的改写召回、误召及实际采用评测",
+      "body": "隔离 SQLite 使用与现有服务相同的 Release；真实 Codex 逐项运行预先定义的 13 组场景。模型容量失败用相同配置补跑，退货样本纠正夹具与初始记录可追溯。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-GENERALIZED-MEMORY-HELDOUT"
+      ],
+      "references": [
+        "REF-CHAT-LONG-TERM-MEMORY",
+        "REF-CHAT-PRIVATE-MEMORY-DRIVER",
+        "REF-CHAT-MEMORY-HELDOUT-SCENARIOS"
+      ],
+      "attributes": {
+        "baseline": "按预定义来源集合和随机前缀独立检查，用同一发布版的默认本地匹配。",
+        "metrics": [
+          "首次请求来源完全匹配与漏召误召",
+          "正确来源实际采用及旧错误标记写入",
+          "独立文件与宿主测试分别通过"
+        ]
+      }
     }
   ],
   "relations": [
@@ -3961,6 +4146,60 @@
       "type": "depends_on",
       "source": "CAP-CHAT-EXPERIENCE-LOOP",
       "id": "REL-CHAT-EXPERIENCE-LOOP-USES-MEMORY"
+    },
+    {
+      "id": "REL-EXPERIENCE-REAL-CODEX-VERIFIES",
+      "type": "verifies",
+      "source": "EXP-CHAT-EXPERIENCE-REAL-CODEX",
+      "target": "CAP-CHAT-EXPERIENCE-LOOP"
+    },
+    {
+      "id": "REL-CHAT-GENERALIZED-MEMORY-INTENT",
+      "type": "implements",
+      "source": "CAP-CHAT-GENERALIZED-MEMORY",
+      "target": "INTENT-CHAT-GENERALIZED-MEMORY"
+    },
+    {
+      "id": "REL-CHAT-GENERALIZED-MEMORY-GOAL",
+      "type": "decomposes",
+      "source": "GOAL-CONTINUOUS-COLLABORATOR",
+      "target": "INTENT-CHAT-GENERALIZED-MEMORY"
+    },
+    {
+      "id": "REL-CHAT-GENERALIZED-MEMORY-EXPERIENCE",
+      "type": "depends_on",
+      "source": "CAP-CHAT-GENERALIZED-MEMORY",
+      "target": "CAP-CHAT-EXPERIENCE-LOOP"
+    },
+    {
+      "id": "REL-CHAT-MEMORY-DEPLOY-EVAL-INTENT",
+      "type": "decomposes",
+      "source": "GOAL-CONTINUOUS-COLLABORATOR",
+      "target": "INTENT-CHAT-MEMORY-DEPLOY-EVAL"
+    },
+    {
+      "id": "REL-CHAT-MEMORY-DEPLOY-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-GENERALIZED-MEMORY-DEPLOYED",
+      "target": "INTENT-CHAT-MEMORY-DEPLOY-EVAL"
+    },
+    {
+      "id": "REL-CHAT-MEMORY-HELDOUT-INTENT",
+      "type": "implements",
+      "source": "EXP-CHAT-GENERALIZED-MEMORY-HELDOUT",
+      "target": "INTENT-CHAT-MEMORY-DEPLOY-EVAL"
+    },
+    {
+      "id": "REL-CHAT-MEMORY-HELDOUT-CAPABILITY",
+      "type": "references",
+      "source": "EXP-CHAT-GENERALIZED-MEMORY-HELDOUT",
+      "target": "CAP-CHAT-GENERALIZED-MEMORY"
+    },
+    {
+      "id": "REL-CHAT-MEMORY-HELDOUT-DEPLOYMENT",
+      "type": "references",
+      "source": "EXP-CHAT-GENERALIZED-MEMORY-HELDOUT",
+      "target": "EVIDENCE-CHAT-GENERALIZED-MEMORY-DEPLOYED"
     }
   ],
   "references": [
@@ -4698,6 +4937,34 @@
       "purpose": "由宿主补丁回执提炼和按授权范围检索经验",
       "tracking": "live",
       "id": "REF-CHAT-GOAL-EXPERIENCE"
+    },
+    {
+      "id": "REF-CHAT-CONVERSATION-MEMORY-POLICY",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/ConversationMemoryPolicy.cs",
+      "purpose": "自然表达的时效、条件做法与当前要求优先",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-NATURAL-MEMORY-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.ChatChecks/NaturalMemoryChecks.cs",
+      "purpose": "消息、召回、来源、权限、故障与模型匹配边界",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-PRIVATE-MEMORY-DRIVER",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/direct_http_e2e.py",
+      "purpose": "--memory 隔离私聊真实代理实跑及独立产物校验",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-CHAT-MEMORY-HELDOUT-SCENARIOS",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/memory_generalization.py",
+      "purpose": "留出私聊任务、预计来源集合和独立文件校验",
+      "tracking": "live"
     }
   ],
   "views": [

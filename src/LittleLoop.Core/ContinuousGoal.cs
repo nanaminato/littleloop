@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace LittleLoop.Core;
 
 // The host persists this aggregate atomically when consuming the originating message event.
@@ -43,7 +45,7 @@ public static class GoalMessageRouter
 {
     // Bounded-domain routing: free text within an active goal is supplemental context,
     // never a grant to expand tool permissions.
-    public static GoalMessageIntent Parse(string message, bool hasGoal)
+    public static GoalMessageIntent Parse(string message, bool hasGoal, bool privateDocumentRequests = false)
     {
         string text = message.Trim();
         if (text.StartsWith("@littleloop", StringComparison.OrdinalIgnoreCase)) text = text[11..].TrimStart(' ', '：', ':', '，', ',');
@@ -65,6 +67,13 @@ public static class GoalMessageRouter
         if (!hasGoal && !text.EndsWith('?') && !text.EndsWith('？') &&
             new[] { "请修复", "帮我修复", "修复", "请实现", "帮我实现", "实现", "请修改", "帮我修改", "修改" }.Any(text.StartsWith))
             return new("create", text);
+        if (!hasGoal && privateDocumentRequests && ConversationMemoryPolicy.IsStandaloneStatement(text) &&
+            PrivateDocumentRequest.IsMatch(text))
+            return new("create", text);
         return new("help", "");
     }
+
+    private static readonly Regex PrivateDocumentRequest = new(
+        @"^(?:(?:请|麻烦|帮我|请帮我)?(?:把|将)(?:另一份|这份|那份|一份|这个|那个|那篇|这篇)?(?:样稿|草稿|文稿|文档|文本|文件).{0,80}?(?:复制到|拷贝到|转存到|搬到|移到|原样搬过去)|(?:请|请帮我|帮我)(?:复制|整理|撰写|编写|更新)(?:这次的|这份|本次的|项目的|另一份)?(?:样稿|草稿|文稿|文档|发布说明|版本说明)|(?:please\s+)(?:copy|move|edit|draft|write)\s+(?:the |this |another )?(?:document|draft|release notes)\b)",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.NonBacktracking);
 }

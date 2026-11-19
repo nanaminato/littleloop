@@ -13,6 +13,10 @@ sealed record BotWork(Guid Id, string Room, string Owner, long Sequence, string 
 {
     [JsonIgnore]
     public GoalExperienceHint? ExperienceHint { get; init; }
+    [JsonIgnore]
+    public GoalLessonHint[] LessonHints { get; init; } = [];
+    [JsonIgnore]
+    public string? SemanticMatchQuote { get; init; }
 }
 sealed record BotInstall(bool Enabled);
 sealed record BotAsk(Guid ClientId, string Text, string Path, int Start, int End, long? ReplyTo, string? Provider);
