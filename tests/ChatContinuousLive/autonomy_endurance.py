@@ -3,6 +3,7 @@
 from collections import Counter
 import hashlib
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -42,6 +43,17 @@ def active_dispatch(root, task):
 def fixture_hashes(project):
     return {entry.relative_to(project).as_posix(): hashlib.sha256(entry.read_bytes()).hexdigest()
         for entry in project.rglob('*') if entry.is_file()}
+
+
+def goal_wait(events, task, current):
+    return next((row for row in reversed(events) if row['kind'] == 'BotDecision'
+        and row['observation'].get('goalId') == task
+        and row['observation'].get('goalVersion') == current['goal']['version']
+        and row['detail'].get('action') == 'Wait'), None)
+
+
+def technical_wait(planned):
+    return bool(planned and (planned['detail'].get('cognitionSource') or {}).get('engine') == 'host/decision-retry')
 
 
 def measure(events, task, markers, stamp, restart_at, probes, active_dispatch_id=None):
@@ -145,13 +157,20 @@ def measure(events, task, markers, stamp, restart_at, probes, active_dispatch_id
 
 
 def run(root, project, room, send, reply_for, task_for, state, wait, history, restart, record):
-    markers = {batch: 'LL-' + secrets.token_hex(8) for batch in STAGES}
+    seed = os.environ.get('LITTLELOOP_ENDURANCE_TRIAL_SEED')
+
+    def fixture_value(label, size):
+        if seed is None:
+            return secrets.token_hex(size)
+        return hashlib.sha256(f'{seed}/{label}'.encode()).hexdigest()[:2 * size]
+
+    markers = {batch: 'LL-' + fixture_value(batch, 8) for batch in STAGES}
     for batch, marker in markers.items():
         name = BACKUP if batch == 'B01' else f'{batch}.txt'
         (project / name).write_text(marker + '\n', encoding='ascii')
     initial_files = fixture_hashes(project)
-    memo = 'MEM-' + secrets.token_hex(8)
-    stamp = 'RPT-' + secrets.token_hex(6)
+    memo = 'MEM-' + fixture_value('memo', 8)
+    stamp = 'RPT-' + fixture_value('stamp', 6)
     task = restart_at = active_dispatch_id = None
     probes = []
     metadata = dict(workload='eight read-only audit batches', expectedMarkers=markers, finalNoticeStamp=stamp, outcome='incomplete')
@@ -185,8 +204,11 @@ def run(root, project, room, send, reply_for, task_for, state, wait, history, re
                     if 'B01/codex' in groups['verifiedStages']:
                         return running
             current = state(task)
-            assert current['status'] not in ('waiting-input', 'paused', 'completed', 'failed', 'cancelled',
+            assert current['status'] not in ('paused', 'completed', 'failed', 'cancelled',
                 'needs-reconciliation'), (current['status'], current.get('error'), 'stopped before the running revision')
+            if current['status'] == 'waiting-input':
+                assert current.get('wakeAtUnixMilliseconds') and technical_wait(goal_wait(rows(root, room), task, current)), (
+                    current['status'], current.get('error'), 'stopped before the running revision')
             return None
 
         active = wait(running_second_batch, 480)
@@ -202,17 +224,18 @@ def run(root, project, room, send, reply_for, task_for, state, wait, history, re
         record('the running native dispatch was observed before submitting a revision tied to its goal')
 
         def scheduled():
-            event = next((row for row in rows(root, room) if row['kind'] == 'BotDecision' and
-                row['observation'].get('goalId') == task and row['detail'].get('action') == 'Wait'
-                and row['detail'].get('wakeAfterSeconds')), None)
             current = state(task)
             assert current['status'] not in ('completed', 'failed', 'cancelled', 'needs-reconciliation'), (
                 current['status'], current.get('error'), 'before restart')
             if current['status'] == 'waiting-input':
-                # We already read the committed event and then the status; check the due time from the same job.
                 assert current.get('wakeAtUnixMilliseconds'), (
                     current.get('error'), 'a human-input wait stopped the autonomous run')
-                return event
+                events = rows(root, room)
+                event = goal_wait(events, task, current)
+                if event and not technical_wait(event):
+                    last_review = measure(events, task, markers, stamp, None, [], active_dispatch_id)['verifiedStages'].get('B04/codex')
+                    assert last_review and last_review < event['id'], 'business timer was scheduled before the verified B04 review'
+                    return event
             return None
 
         timer = wait(scheduled, 600)
@@ -242,8 +265,11 @@ def run(root, project, room, send, reply_for, task_for, state, wait, history, re
             and (row.get('card') or {}).get('taskId') == task], 60)
         assert len(notices) == 1, notices
         metadata['finalNotice'] = notices[0]
-        timers = [row for row in events if row['kind'] == 'Timer' and row['observation'].get('goalId') == task]
-        assert len(timers) == 1 and timers[0]['id'] > restart_at, 'persisted timer did not enter the Bot once after restart'
+        timers = [row for row in events if row['kind'] == 'Timer' and row['observation'].get('goalId') == task
+            and row['observation'].get('status') != 'decision-retry']
+        assert len(timers) == 1 and timers[0]['id'] > restart_at and timers[0]['observation'].get(
+            'wakeAtUnixMilliseconds') == before['wakeAtUnixMilliseconds'] and timers[0]['observation'].get(
+            'goalVersion') == before['goal']['version'], 'the persisted business timer did not enter the Bot once after restart'
         failed = {row['observation']['dispatchId'] for row in events if row['kind'] == 'ToolResult'
             and row['observation'].get('goalId') == task and row['observation'].get('status') == 'failed'
             and (MISSING in row['observation']['text'] or re.search(

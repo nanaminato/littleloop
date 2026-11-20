@@ -8,6 +8,8 @@ interface IBotHarness
     string RecoveryKey => GetType().FullName!;
     string Description => Name;
     string? ProjectRoot { get; }
+    BotHarnessOption Describe(bool isolated, string workspaceScope) =>
+        new(Name, Description, ["text-analysis"], workspaceScope, "adapter-configured", "available-to-queue");
     Task<HarnessReceipt> SendAsync(string sessionDirectory, Guid dispatchId, string instruction,
         Func<CancellationToken, Task<bool>>? shouldInterrupt, CancellationToken token, string? workspace = null);
     // Recover the original dispatch without submitting work. Only positive evidence permits resubmission.
@@ -56,6 +58,8 @@ abstract class NativeBotHarness : IBotHarness
     public abstract string Name { get; }
     public virtual string Description => Name;
     public abstract string ProjectRoot { get; }
+    public virtual BotHarnessOption Describe(bool isolated, string workspaceScope) =>
+        new(Name, Description, ["text-analysis"], workspaceScope, "adapter-configured", "available-to-queue");
 
     public async Task<HarnessReceipt> SendAsync(string sessionDirectory, Guid dispatchId, string instruction,
         Func<CancellationToken, Task<bool>>? shouldInterrupt, CancellationToken token, string? workspace = null)

@@ -5,47 +5,48 @@ using LittleLoop.Core;
 sealed partial class ChatStore
 {
     // The network call took place outside this transaction. Commit only against the observed source and version.
-    public async Task ApplyDecision(DecisionSnapshot snapshot, BotDecision decision, string robot, bool operatorAccess,
-        int turnLimit, string grant, string? failure = null, BotDecisionSource? cognitionSource = null)
+    public async Task<BotDecisionError?> ApplyDecision(DecisionSnapshot snapshot, BotDecision decision, string robot, bool operatorAccess,
+        int turnLimit, string grant, string? failure = null, BotDecisionSource? cognitionSource = null, bool retryCognition = false)
     {
         var input = snapshot.Input;
         var context = snapshot.Context;
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
         string? type = await LockGoalRoom(db, tx, input.Room);
-        if (!await Permitted(db, tx, input.Room, input.Owner, robot, operatorAccess, type)) return;
-        await using var rev = Command(db, tx, "SELECT revision FROM chat_rooms WHERE id=@room", ("room", input.Room));
-        if (snapshot.Revision != Convert.ToInt64(await rev.ExecuteScalarAsync())) return;
-        if (input.Inbox is long inbox && !await ConsumeInbox(db, tx, inbox)) return;
+        Guid? target = decision.GoalId;
+        var (error, work) = await DecisionCommitGate(db, tx, snapshot, robot, operatorAccess, type, target);
+        if (error is not null) return error;
+        if (input.Inbox is long inbox && !await ConsumeInbox(db, tx, inbox))
+            return new("input-consumed", "goal-version-conflict", "The user input was already consumed.");
         if (input.Inbox.HasValue)
         {
             await using var current = Command(db, tx, """
                 SELECT 1 FROM chat_messages WHERE room_id=@room AND seq=@seq AND sender_id=@owner AND NOT deleted AND NOT edited
                 """, ("room", input.Room), ("seq", input.Sequence), ("owner", input.Owner));
-            if (await current.ExecuteScalarAsync() is null) { await tx.CommitAsync(); return; }
-        }
-        Guid? target = decision.GoalId;
-        BotWork? work = target is Guid id ? await LockedWork(db, tx, id, input.Room, input.Owner) : null;
-        if (target is not null)
-        {
-            var observed = context.Goals.FirstOrDefault(g => g.Id == target);
-            if (work?.Goal is null || work.Goal.Version != observed?.Goal.Version || work.Status != observed.Goal.Status)
-                return; // Retry the inbox/decision event with the new state.
+            if (await current.ExecuteScalarAsync() is null)
+            {
+                await tx.CommitAsync();
+                return new("source-message-changed", "goal-version-conflict", "The source message was edited or deleted.");
+            }
         }
         if (input.Trigger.Kind == BotEventKind.ToolResult && input.Trigger.GoalId is null)
         {
-            if (!await ConsumeLocalResult(db, tx, input)) return;
+            if (!await ConsumeLocalResult(db, tx, input))
+                return new("result-consumed", "goal-version-conflict", "The local result was already consumed.");
         }
         else if (input.Inbox is null)
         {
             if (input.Trigger.Kind == BotEventKind.Timer)
             {
-                if (DueTimer(work, clock.GetUtcNow().ToUnixTimeMilliseconds()) != input.Trigger) return;
+                if (DueTimer(work, clock.GetUtcNow().ToUnixTimeMilliseconds()) != input.Trigger)
+                    return new("timer-changed", "goal-version-conflict", "The scheduled decision trigger changed.");
             }
-            else if (work?.Status is not ("deciding" or "needs-reconciliation") || work.Input.Loop?.Next != input.Trigger) return;
+            else if (work?.Status is not ("deciding" or "needs-reconciliation") || work.Input.Loop?.Next != input.Trigger)
+                return new("trigger-changed", "goal-version-conflict", "The pending goal observation changed.");
             await using var pending = Command(db, tx, "SELECT 1 FROM chat_goal_inbox WHERE room_id=@room AND owner_id=@owner AND NOT processed LIMIT 1",
                 ("room", input.Room), ("owner", input.Owner));
-            if (await pending.ExecuteScalarAsync() is not null) return;
+            if (await pending.ExecuteScalarAsync() is not null)
+                return new("pending-user-input", "goal-version-conflict", "User input superseded this pending decision.");
         }
 
         var goal = work?.Goal;
@@ -91,7 +92,7 @@ sealed partial class ChatStore
                 {
                     loop = loop with
                     {
-                        Wake = new(clock.GetUtcNow().AddSeconds(delay).ToUnixTimeMilliseconds(), goal.Version),
+                        Wake = new(clock.GetUtcNow().AddSeconds(delay).ToUnixTimeMilliseconds(), goal.Version, retryCognition),
                         ScheduledWakeups = loop.ScheduledWakeups + 1
                     };
                 }
@@ -181,6 +182,7 @@ sealed partial class ChatStore
         }
         if (!string.IsNullOrWhiteSpace(message)) await AddGoalNotice(db, tx, input.Room, input.Sequence, message, target);
         await tx.CommitAsync();
+        return null;
     }
 
     public async Task SaveHarnessReceipt(BotWork executed, HarnessReceipt receipt)

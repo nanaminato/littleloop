@@ -61,6 +61,8 @@ internal static partial class WorkerChecks
         }).Build();
         await CheckHarnessRecovery(config, project, owner, check);
         await CheckBotTimers(config, project, owner, check);
+        await CheckBotEvidence(config, project, owner, check);
+        await CheckBotDraftRecovery(config, project, owner, check);
 
         var deepseek = new ControlledHarness("deepseek", project);
         var codex = new ControlledHarness("codex", project);

@@ -3415,14 +3415,15 @@
       "type": "capability",
       "title": "统一聊天认知、持续 Harness 委派与可恢复目标",
       "actor": "AI",
-      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。到期检查进入相同的决策接口，派发结果可为本地策略提供提交边界，已提交决策附有模型请求与服务回报用量。",
+      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。到期检查进入相同的决策接口，派发结果可为本地策略提供提交边界，已提交决策附有模型请求与服务回报用量。模型草稿按结构化错误进行有限修复，提交时复查权限及版本。决策读取现有账本的派发、回执和验证投影，复核保留理由。",
       "authorization": "not_applicable",
       "delivery": "implemented",
       "verification": "passed",
       "verification_basis": [
         "EVIDENCE-BOT-DECISION-LOOP",
         "EVIDENCE-BOT-AUTONOMY-INCREMENTS",
-        "EVIDENCE-BOT-AUTONOMY-ENDURANCE"
+        "EVIDENCE-BOT-AUTONOMY-ENDURANCE",
+        "EVIDENCE-BOT-DRAFT-RECOVERY"
       ],
       "attributes": {},
       "references": [
@@ -3431,7 +3432,8 @@
         "REF-BOT-DECISION-STORE",
         "REF-BOT-AUTONOMY-RESEARCH",
         "REF-BOT-LOCAL-COGNITION",
-        "REF-BOT-AUTONOMY-ENDURANCE"
+        "REF-BOT-AUTONOMY-ENDURANCE",
+        "REF-BOT-DECISION-RELIABILITY"
       ]
     },
     {
@@ -3488,6 +3490,42 @@
         "REF-BOT-TIMER-CHECKS",
         "REF-BOT-ENDURANCE-DRIVER",
         "REF-BOT-COGNITION-EVALUATION"
+      ]
+    },
+    {
+      "id": "CAP-BOT-DRAFT-RECOVERY",
+      "type": "capability",
+      "title": "结构化决策草稿修复与耐久审计",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-BOT-DRAFT-RECOVERY"
+      ],
+      "body": "模型草稿无歧义规范化、结构化校验反馈和有界重新提案仍在同一认知入口。旧草稿受会话权限与目标版本隔离，调度只有限重试已知暂时故障。派发证据来自目标事件账本。",
+      "attributes": {},
+      "references": [
+        "REF-BOT-DECISION-RELIABILITY",
+        "REF-BOT-DECISION-REPAIR-CHECKS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-BOT-DRAFT-RECOVERY",
+      "type": "evidence",
+      "title": "决策修复、证据投影及在途崩溃的验收",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "body": "区分受控回归和独立 SQLite 中真实原生 Harness 试次，不将成功提交的结构修复等同于达成用户意图。",
+      "attributes": {
+        "observation": "2026-11-20，核心回归、102 项 SQLite 决策专项、311 项完整聊天回归和 14 项原生协议夹具通过。真实 DeepSeek 派发已有工具结果且仍在途时终止隔离服务，重启后原派发以不确定结果结算一次且不重发。冻结新旧版本的批次、失败及计量见验收文档。冻结双 Harness 对照两版各 10 次，严格通过 1/10 至 2/10，有缺陷评估同轮修复 11/17 至 23/23，重复 11 至 1，但错误完成 2 至 8，尚未达到连续全通过。"
+      },
+      "references": [
+        "REF-BOT-DECISION-RELIABILITY",
+        "REF-BOT-DECISION-REPAIR-CHECKS",
+        "REF-BOT-RELIABILITY-BATCH"
       ]
     }
   ],
@@ -4788,6 +4826,18 @@
       "type": "supports",
       "source": "EVIDENCE-BOT-AUTONOMY-ENDURANCE",
       "target": "CAP-BOT-DECISION-LOOP"
+    },
+    {
+      "id": "REL-BOT-DRAFT-RECOVERY-EVIDENCE",
+      "type": "supports",
+      "source": "EVIDENCE-BOT-DRAFT-RECOVERY",
+      "target": "CAP-BOT-DRAFT-RECOVERY"
+    },
+    {
+      "id": "REL-BOT-DRAFT-RECOVERY-SUPPORTS-LOOP",
+      "type": "supports",
+      "source": "EVIDENCE-BOT-DRAFT-RECOVERY",
+      "target": "CAP-BOT-DECISION-LOOP"
     }
   ],
   "references": [
@@ -5650,6 +5700,27 @@
       "kind": "project_file",
       "target": "tests/LittleLoop.Checks/LocalCognitionEvaluation.cs",
       "purpose": "同案本地优先与真实模型的动作、来源、请求量对照",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-DECISION-RELIABILITY",
+      "kind": "project_file",
+      "target": "docs/60-decision-reliability.md",
+      "purpose": "历史轨迹归因、受控回归和冻结双 Harness 可靠性对照",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-DECISION-REPAIR-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/BotDecisionRepairChecks.cs",
+      "purpose": "模型草稿原文、规范化、合法选项、错误边界和预算回归",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-RELIABILITY-BATCH",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/autonomy_reliability_batch.py",
+      "purpose": "冻结程序集、驱动、环境指纹和种子的配对真实验收",
       "tracking": "live"
     }
   ],

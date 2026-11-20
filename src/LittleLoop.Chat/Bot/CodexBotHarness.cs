@@ -8,6 +8,15 @@ sealed class CodexBotHarness(string executable, string project, TimeSpan timeout
     public override string Description => "Codex App Server，使用部署配置的工具权限";
     public override string ProjectRoot => project;
 
+    public override BotHarnessOption Describe(bool isolated, string workspaceScope)
+    {
+        bool available = Path.IsPathFullyQualified(executable) && File.Exists(executable);
+        return new(Name, Description,
+            isolated ? ["text-analysis", "workspace-read", "workspace-write", "workspace-command"] : ["text-analysis", "configured-tools"],
+            workspaceScope, isolated ? "private-workspace-sandbox" : "deployment-configured",
+            available ? "available-to-queue" : "unavailable", available ? null : "Configured Codex executable is unavailable.");
+    }
+
     protected override async Task<HarnessReceipt> Run(string directory, string workspace, bool isolated, string instruction,
         HarnessTurn turn, CancellationToken token)
     {

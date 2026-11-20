@@ -237,38 +237,73 @@ sealed class ChatBot : BackgroundService
         {
             var input = await store.NextBotInput(goal);
             if (input is null) return;
-            var snapshot = await store.DecisionContext(input, Robot(null).Id, CanOperate(input.Owner), projectGrant,
-                harnesses.Keys.ToArray(), maxTurns, config.GetValue("ChatBot:AutoFinalReport", true),
+            bool operatorAccess = CanOperate(input.Owner);
+            var harnessOptions = harnesses.Values.Select(h => h.Describe(!operatorAccess,
+                !operatorAccess ? "private-workspace" :
+                    ProjectFiles.Same(h.ProjectRoot ?? "", files.Root) ? "main-project" : "deployment-workspace")).ToArray();
+            var available = harnessOptions.Where(option => option.CanQueue).ToArray();
+            var snapshot = await store.DecisionContext(input, Robot(null).Id, operatorAccess, projectGrant,
+                available.Select(option => option.Id).ToArray(), maxTurns, config.GetValue("ChatBot:AutoFinalReport", true),
                 ChatConversation.Style(config["ChatBot:ConversationStyle"]));
             if (snapshot is null) return;
-            var capabilities = harnesses.Values.ToDictionary(h => h.Name, h => h.Description + " · " +
-                (!CanOperate(input.Owner) ? "此账号的私聊工作区" :
-                    ProjectFiles.Same(h.ProjectRoot ?? "", files.Root) ? "主项目工作区" : "独立部署工作区"),
-                StringComparer.Ordinal);
+            var observed = snapshot;
+            var capabilities = available.ToDictionary(option => option.Id, option => option.Description, StringComparer.Ordinal);
             var modelCalls = new List<BotModelCall>();
             snapshot = snapshot with { Context = snapshot.Context with
             {
                 Capabilities = capabilities,
-                ObserveModelCall = modelCalls.Add
+                HarnessOptions = harnessOptions,
+                ObserveModelCall = modelCalls.Add,
+                CheckFreshness = _ => store.DecisionFreshness(observed, Robot(null).Id, CanOperate(input.Owner))
             } };
             try
             {
                 var result = await engine.DecideWithSourceAsync(snapshot.Context, token);
-                await store.ApplyDecision(snapshot, result.Decision.Validate(snapshot.Context), Robot(null).Id,
-                    CanOperate(input.Owner), maxTurns, projectGrant,
-                    cognitionSource: result.Source with { ModelCalls = modelCalls.ToArray() });
+                var source = result.Source with { ModelCalls = modelCalls.ToArray() };
+                if (result.Decision.Check(snapshot.Context) is { } invalid)
+                {
+                    await ReportDecisionFailure(invalid, allowDelayedRetry: false);
+                    return;
+                }
+                var rejected = await store.ApplyDecision(snapshot, result.Decision, Robot(null).Id,
+                    CanOperate(input.Owner), maxTurns, projectGrant, cognitionSource: source);
+                if (rejected is not null) await store.RecordDecisionAudit(snapshot, source, rejected);
             }
-            catch (Exception error) when (!token.IsCancellationRequested && error is not System.Data.Common.DbException)
+            catch (BotDecisionSupersededException superseded)
+            {
+                await store.RecordDecisionAudit(snapshot, new("host/superseded") { ModelCalls = modelCalls.ToArray() }, superseded.Error);
+            }
+            catch (Exception error) when (!token.IsCancellationRequested && error is not (System.Data.Common.DbException or OutOfMemoryException))
             {
                 log.LogWarning(error, "Decision failed for room {Room}, message {Sequence}", input.Room, input.Sequence);
-                var reason = "本次决策未能执行：" + error.Message;
+                var lastError = modelCalls.LastOrDefault()?.Error;
+                await ReportDecisionFailure(lastError ?? new("decision-failed", "field", error.Message),
+                    error is SemanticModelException provider && IsTemporaryCognitionFailure(provider.Code));
+            }
+
+            async Task ReportDecisionFailure(BotDecisionError error, bool allowDelayedRetry)
+            {
+                if (error.Category is "permission-denied" or "goal-version-conflict")
+                {
+                    await store.RecordDecisionAudit(snapshot, new("host/superseded") { ModelCalls = modelCalls.ToArray() }, error);
+                    return;
+                }
+                string reason = "本次决策未能执行：" + error.Message;
                 if (snapshot.Context.Goals.Any(g => g.Id == input.Trigger.GoalId && g.RemainingTurns == 0))
                     reason = $"目标的 Harness 调用预算已用尽。{reason}";
                 if (reason.Length > 600) reason = reason[..600];
+                bool retry = allowDelayedRetry && input.Trigger.Status != "decision-retry" &&
+                    snapshot.Context.Goals.Any(g => g.Id == input.Trigger.GoalId &&
+                        g.Goal.Status is "deciding" or "waiting-input" && g.RemainingWakeups > 0);
+                if (retry) reason = "认知服务暂不可用，约 30 秒后重新评估。";
                 var fallback = input.Trigger.GoalId is Guid id
-                    ? new BotDecision(BotAction.Wait, id, reason) : new BotDecision(BotAction.Reply, Message: reason);
-                await store.ApplyDecision(snapshot, fallback, Robot(null).Id, CanOperate(input.Owner), maxTurns, projectGrant,
-                    reason, new("host/decision-error") { ModelCalls = modelCalls.ToArray() });
+                    ? new BotDecision(BotAction.Wait, id, reason, WakeAfterSeconds: retry ? 30 : null)
+                    : new BotDecision(BotAction.Reply, Message: reason);
+                var source = new BotDecisionSource(retry ? "host/decision-retry" : "host/decision-error")
+                { ModelCalls = modelCalls.ToArray(), Error = error };
+                var rejected = await store.ApplyDecision(snapshot, fallback, Robot(null).Id, CanOperate(input.Owner), maxTurns,
+                    projectGrant, retry ? null : reason, source, retryCognition: retry);
+                if (rejected is not null) await store.RecordDecisionAudit(snapshot, source, rejected);
             }
         }
 
@@ -338,6 +373,9 @@ sealed class ChatBot : BackgroundService
         }
 
     }
+
+    private static bool IsTemporaryCognitionFailure(string code) =>
+        code is "timeout" or "transport-unavailable" or "http-429" or "http-500" or "http-502" or "http-503" or "http-504";
 
     private async Task<HarnessRecovery> RecoverDispatch(BotDispatch dispatch, string session, CancellationToken token)
     {

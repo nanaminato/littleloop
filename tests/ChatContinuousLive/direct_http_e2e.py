@@ -29,7 +29,7 @@ from autonomy_endurance import run as run_autonomy_endurance
 
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
-mode.add_argument('--decision-loop', nargs='?', choices=['copy', 'review', 'search', 'handoff', 'private-copy', 'memory-result', 'endurance'], const='copy',
+mode.add_argument('--decision-loop', nargs='?', choices=['copy', 'review', 'search', 'handoff', 'private-copy', 'memory-result', 'endurance', 'inflight-crash'], const='copy',
     help='exercise real cognition, native Codex, DeepSeek ACP, or a two-Harness handoff')
 mode.add_argument('--conversation', action='store_true', help='check natural replies and preauthorized private project work')
 mode.add_argument('--memory', action='store_true', help='run the private memory and override experiment')
@@ -42,7 +42,7 @@ if options.trial and not options.memory_generalization:
     parser.error('--trial requires --memory-generalization')
 if options.friend_tools and not options.friend_access:
     parser.error('--friend-tools requires --friend-access')
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(os.environ.get('LITTLELOOP_REPO_ROOT', Path(__file__).resolve().parents[2])).resolve(strict=True)
 DLL = Path(os.environ.get('LITTLELOOP_CHAT_DLL', REPO / 'src/LittleLoop.Chat/bin/Debug/net10.0/LittleLoop.Chat.dll')).resolve()
 EXECUTABLE = Path(sys.executable if options.decision_loop == 'memory-result' else os.environ['LITTLELOOP_CODEX_EXECUTABLE']).resolve()
 assert DLL.is_file() and EXECUTABLE.is_file(), 'Build Chat and configure an installed Codex executable'
@@ -54,7 +54,8 @@ def assembly_hashes():
 
 
 BUILD_HASHES = assembly_hashes()
-ROOT = REPO / 'data' / 'direct-http' / uuid.uuid4().hex[:8]
+ROOT = Path(os.environ.get('LITTLELOOP_HTTP_TRIAL_PATH', REPO / 'data' / 'direct-http' / uuid.uuid4().hex[:8])).resolve()
+assert ROOT.is_relative_to((REPO / 'data').resolve()), 'Live trial artifacts must stay under the local data directory'
 PROJECT = ROOT / 'project'
 PROJECT.mkdir(parents=True)
 (ROOT / 'client').mkdir()
@@ -153,15 +154,15 @@ def start(label, bot=False):
             child['ChatBot__DecisionModel'] = str(Path(os.environ.get('LITTLELOOP_DECISION_MODEL',
                 REPO / 'examples/models/deepseek.json')).resolve(strict=True))
             child['ChatBot__MaxHarnessTurns'] = '24' if options.decision_loop == 'endurance' else '3'
-            if options.decision_loop in ('search', 'handoff', 'private-copy', 'endurance'):
+            if options.decision_loop in ('search', 'handoff', 'private-copy', 'endurance', 'inflight-crash'):
                 # Use the caller's deployed ACP command against this run's synthetic project.
                 options_prefix = 'chatbot__deepseek__'
                 child.update((k, v) for k, v in os.environ.items() if k.lower().startswith(options_prefix))
                 child['ChatBot__DeepSeek__Project'] = str(PROJECT)
                 assert any(k.lower() in (options_prefix + 'readonlylauncher', options_prefix + 'launcher')
                     for k in child), 'Set the deployed DeepSeek launcher and its arguments'
-                if options.decision_loop == 'endurance':
-                    assert any(k.lower() == options_prefix + 'readonlylauncher' for k in child), 'Endurance requires a read-only ACP launcher'
+                if options.decision_loop in ('endurance', 'inflight-crash'):
+                    assert any(k.lower() == options_prefix + 'readonlylauncher' for k in child), 'This trial requires a read-only ACP launcher'
         if options.friend_access:
             child.update(ChatBot__AccessAdmins='access_admin', ChatBot__Approvers='tool_approver')
     log = open(ROOT / (label + '.log'), 'wb')
@@ -504,6 +505,20 @@ try:
 
         details = run_autonomy_endurance(ROOT, PROJECT, room, send, reply_for, task_for, state, wait, history, restart, record)
         details['scenarioSha256'] = hashlib.sha256(Path(__file__).with_name('autonomy_endurance.py').read_bytes()).hexdigest()
+    elif options.decision_loop == 'inflight-crash':
+        from autonomy_inflight_crash import run as run_inflight_crash
+
+        def kill_fixture():
+            assert process is not None and process.poll() is None
+            pid = process.pid
+            stop()
+            return pid
+
+        def restart_fixture():
+            start('inflight-recovery', True)
+            return process.pid
+
+        details = run_inflight_crash(ROOT, PROJECT, room, send, task_for, state, wait, kill_fixture, restart_fixture, record)
     elif options.decision_loop:
         details = check_decision_loop()
     elif options.friend_access:

@@ -71,7 +71,8 @@ if (config["ChatBot:Policy"] is not null)
     });
     builder.Services.AddSingleton<ISemanticModelClient>(sp => new HttpSemanticModelClient(sp.GetRequiredService<SemanticModelConfig>()));
     builder.Services.AddSingleton<IBotDecisionEngine>(sp => new LocalBotCognition(new ModelBotDecisionEngine(
-        sp.GetRequiredService<ISemanticModelClient>(), sp.GetRequiredService<SemanticModelConfig>().MaxInputCharacters)));
+        sp.GetRequiredService<ISemanticModelClient>(), sp.GetRequiredService<SemanticModelConfig>().MaxInputCharacters,
+        maxFormatAttempts: 3)));
     builder.Services.AddSingleton<ChatBot>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatBot>());
 }

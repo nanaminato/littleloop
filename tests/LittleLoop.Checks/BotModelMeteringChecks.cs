@@ -30,22 +30,24 @@ internal static class BotModelMeteringChecks
         var engine = new ModelBotDecisionEngine(client);
         var result = await engine.DecideWithSourceAsync(context, default);
         Require(result.Decision.Action == BotAction.Reply && result.Source.Engine == "semantic-model" &&
-            calls.SequenceEqual([
+            Metered(calls).SequenceEqual([
                 new("invalid-decision", "served-model", new(10, 3, 13, 2, 8)),
                 new("accepted", "served-model", new(12, 4, 16, 0))
-            ]), "rejected draft and accepted correction each keep reported counts");
+            ]) && calls[0].Draft?.Raw == """{"action":"unknown"}""" && calls[0].Error is not null &&
+            calls[1].Draft?.Raw == """{"action":"reply","message":"可用。"}""" && calls[1].Error is null,
+            "rejected draft and accepted correction each keep reported counts and draft diagnostics");
 
         calls.Clear();
         await ProviderReject(() => engine.DecideAsync(context, default), "incomplete-response");
         await ProviderReject(() => engine.DecideAsync(context, default), "http-429");
-        Require(calls.SequenceEqual([
+        Require(Metered(calls).SequenceEqual([
             new("request-failed", Usage: new(12, 4)),
             new("request-failed")
         ]), "failed requests include only usage available on the response");
 
         calls.Clear();
         await engine.DecideAsync(context, default);
-        Require(calls.SequenceEqual([new("accepted", "served-model")]), "malformed usage does not reject a valid action");
+        Require(Metered(calls).SequenceEqual([new("accepted", "served-model")]), "malformed usage does not reject a valid action");
 
         calls.Clear();
         await InvalidReject(() => engine.DecideAsync(context, default));
@@ -61,10 +63,13 @@ internal static class BotModelMeteringChecks
             """));
         using var ollama = new HttpSemanticModelClient(Config with { Protocol = "ollama" }, ollamaResponse);
         await new ModelBotDecisionEngine(ollama).DecideAsync(context, default);
-        Require(calls.SequenceEqual([new("accepted", "served-model", new(15, 9, CachedInputTokens: 3))]),
+        Require(Metered(calls).SequenceEqual([new("accepted", "served-model", new(15, 9, CachedInputTokens: 3))]),
             "Ollama counts are kept and unreported totals remain unknown");
         Console.WriteLine("PASS model decision metering with retries, errors, partial usage and a pre-request rejection");
     }
+
+    private static IEnumerable<BotModelCall> Metered(IEnumerable<BotModelCall> calls) =>
+        calls.Select(call => new BotModelCall(call.Outcome, call.Model, call.Usage));
 
     private static string ChatCompletion(string content, string usage, string finishReason = "stop")
     {

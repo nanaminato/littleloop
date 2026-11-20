@@ -1,10 +1,25 @@
 using System.Text.Json;
+using LittleLoop.Core;
 
 sealed class DeepSeekBotHarness(DeepSeekAcpClient adapter) : NativeBotHarness
 {
     public override string Name => "deepseek";
     public override string Description => adapter.UseLauncherPermissions ? "ACP，使用启动器配置的工具权限" : "ACP，项目工作区只读";
     public override string ProjectRoot => adapter.ProjectRoot;
+
+    public override BotHarnessOption Describe(bool isolated, string workspaceScope)
+    {
+        (string[] capabilities, string permission) = isolated
+            ? adapter.ConversationWorkspaceFiles
+                ? (new[] { "text-analysis", "workspace-text-read", "workspace-text-write", "workspace-text-edit" }, "private-text-files")
+                : (new[] { "text-analysis" }, "text-only")
+            : adapter.UseLauncherPermissions
+                ? (new[] { "text-analysis", "configured-tools" }, "deployment-configured")
+                : (new[] { "text-analysis", "workspace-read" }, "read-only");
+        bool available = adapter.LauncherAvailable;
+        return new(Name, Description, capabilities, workspaceScope, permission, available ? "available-to-queue" : "unavailable",
+            available ? null : "Configured ACP launcher is unavailable.");
+    }
 
     protected override Task<HarnessReceipt> Run(string directory, string workspace, bool isolated, string instruction,
         HarnessTurn turn, CancellationToken token) => adapter.Delegate(instruction, directory, workspace, isolated, turn, token);

@@ -8,6 +8,7 @@ class DeepSeekAcpClient(string launcher, string[] arguments, string? harnessHome
     public string ProjectRoot => project;
     public bool ConversationWorkspaceFiles { get; init; }
     public bool UseLauncherPermissions { get; init; }
+    internal bool LauncherAvailable => File.Exists(launcher);
 
     internal async Task<HarnessReceipt> Delegate(string instruction, string directory, string workspace, bool isolated,
         HarnessTurn turn, CancellationToken token)

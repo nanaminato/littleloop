@@ -3,7 +3,7 @@ using LittleLoop.Core;
 
 // Stored in the existing job row, atomically with the goal, budget and next action.
 sealed record BotDispatch(Guid Id, string Harness, string Instruction, string? RecoveryKey = null);
-sealed record BotScheduledWake(long AtUnixMilliseconds, int GoalVersion);
+sealed record BotScheduledWake(long AtUnixMilliseconds, int GoalVersion, bool RetryDecision = false);
 sealed record BotGoalLoop(int Used, int Limit, BotDispatch? Dispatch = null, BotObservation? Next = null,
     BotScheduledWake? Wake = null, int ScheduledWakeups = 0);
 sealed record DecisionInput(long? Inbox, string Room, string Owner, long Sequence, long? ReplyTo,
@@ -43,7 +43,7 @@ sealed partial class ChatStore
     public async Task<BotObservation[]> GoalObservations(Guid id)
     {
         await using var db = await Open();
-        await using var query = Command(db, null, "SELECT observation FROM chat_bot_events WHERE work_id=@id ORDER BY id DESC LIMIT 128",
+        await using var query = Command(db, null, "SELECT observation FROM chat_bot_events WHERE work_id=@id AND kind<>'DecisionAudit' ORDER BY id DESC LIMIT 128",
             ("id", id.ToString()));
         var events = new List<BotObservation>();
         await using var reader = await query.ExecuteReaderAsync();
@@ -97,7 +97,8 @@ sealed partial class ChatStore
     private static BotObservation? DueTimer(BotWork? work, long now) =>
         work is { Status: "waiting-input", Goal: { } goal, Input.Loop.Wake: { } wake } &&
         wake.GoalVersion == goal.Version && wake.AtUnixMilliseconds > 0 && wake.AtUnixMilliseconds <= now
-            ? new(BotEventKind.Timer, "目标的下一次检查时间已到。", work.Id, Status: "due",
+            ? new(BotEventKind.Timer, wake.RetryDecision ? "认知服务的暂时故障已到重新评估时间。" : "目标的下一次检查时间已到。",
+                work.Id, Status: wake.RetryDecision ? "decision-retry" : "due",
                 Sequence: work.Sequence, GoalVersion: goal.Version, WakeAtUnixMilliseconds: wake.AtUnixMilliseconds)
             : null;
 
@@ -147,6 +148,50 @@ sealed partial class ChatStore
             """, ("room", room), ("owner", owner), ("seq", seq), ("work", observation.GoalId?.ToString()),
             ("kind", observation.Kind.ToString()), ("observation", ToJson(observation)), ("detail", detail));
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<BotDecisionError?> DecisionFreshness(DecisionSnapshot snapshot, string robot, bool operatorAccess)
+    {
+        await using var db = await Open();
+        await using var tx = await db.BeginTransactionAsync();
+        var input = snapshot.Input;
+        var type = await LockGoalRoom(db, tx, input.Room);
+        return (await DecisionCommitGate(db, tx, snapshot, robot, operatorAccess, type, input.Trigger.GoalId)).Error;
+    }
+
+    private static async Task<(BotDecisionError? Error, BotWork? Work)> DecisionCommitGate(DbConnection db, DbTransaction tx,
+        DecisionSnapshot snapshot, string robot, bool operatorAccess, string? roomType, Guid? target)
+    {
+        var input = snapshot.Input;
+        if (!await Permitted(db, tx, input.Room, input.Owner, robot, operatorAccess, roomType))
+            return (new("room-access-changed", "permission-denied", "Bot access to this conversation is no longer permitted."), null);
+        BotWork? current = null;
+        if (target is Guid id)
+        {
+            var observed = snapshot.Context.Goals.FirstOrDefault(g => g.Id == id);
+            current = await LockedWork(db, tx, id, input.Room, input.Owner);
+            if (current?.Goal is null || observed is null || current.Goal.Version != observed.Goal.Version || current.Status != observed.Goal.Status)
+                return (new("goal-version-changed", "goal-version-conflict", "The target goal changed while deciding.", "goalId"), null);
+        }
+        await using var rev = Command(db, tx, "SELECT revision FROM chat_rooms WHERE id=@room", ("room", input.Room));
+        return snapshot.Revision != Convert.ToInt64(await rev.ExecuteScalarAsync())
+            ? (new("conversation-changed", "goal-version-conflict", "The conversation changed while deciding."), null)
+            : (null, current);
+    }
+
+    public async Task RecordDecisionAudit(DecisionSnapshot snapshot, BotDecisionSource source, BotDecisionError error)
+    {
+        var input = snapshot.Input;
+        await using var db = await Open();
+        await using var tx = await db.BeginTransactionAsync();
+        await LockGoalRoom(db, tx, input.Room);
+        var observation = new BotObservation(BotEventKind.DecisionAudit, error.Code, input.Trigger.GoalId, Status: error.Category,
+            Sequence: input.Sequence, GoalVersion: input.Trigger.GoalVersion, DispatchId: input.Trigger.DispatchId);
+        await Record(db, tx, input.Room, input.Owner, input.Sequence, observation, ToJson(new
+        {
+            triggerKind = input.Trigger.Kind.ToString(), snapshot.Revision, error, cognitionSource = source
+        }));
+        await tx.CommitAsync();
     }
 
     public async Task<DecisionSnapshot?> DecisionContext(DecisionInput input, string robot, bool operatorAccess,
@@ -220,7 +265,7 @@ sealed partial class ChatStore
         var history = new List<BotObservation>();
         await using (var cmd = Command(db, tx, """
             SELECT e.observation FROM chat_bot_events e JOIN chat_messages m ON m.room_id=e.room_id AND m.seq=e.seq
-            WHERE e.room_id=@room AND e.owner_id=@owner AND NOT m.deleted AND NOT m.edited
+            WHERE e.room_id=@room AND e.owner_id=@owner AND e.kind<>'DecisionAudit' AND NOT m.deleted AND NOT m.edited
             ORDER BY CASE WHEN e.work_id=@target THEN 0 ELSE 1 END,e.id DESC LIMIT 32
             """, ("room", input.Room), ("owner", input.Owner), ("target", (input.Trigger.GoalId ?? quotedGoal)?.ToString())))
         await using (var r = await cmd.ExecuteReaderAsync())
@@ -261,8 +306,15 @@ sealed partial class ChatStore
         await using var pref = Command(db, tx, "SELECT enabled FROM chat_bot_report_settings WHERE room_id=@room AND owner_id=@owner",
             ("room", input.Room), ("owner", input.Owner));
         bool report = await pref.ExecuteScalarAsync() is { } value ? Convert.ToBoolean(value) : reportDefault;
+        Guid? addressedGoal = input.Trigger.GoalId ?? quotedGoal;
+        var evidenceGoal = addressedGoal is Guid target
+            ? goals.FirstOrDefault(goal => goal.Id == target)
+            : goals.FirstOrDefault(goal => goal.Goal.Status is "deciding" or "running" or "queued" or "paused" or "waiting-input");
+        BotGoalEvidence[] dispatchEvidence = evidenceGoal is null ? [] :
+            [await ReadDispatchEvidence(db, tx, input.Room, input.Owner, evidenceGoal)];
         await tx.CommitAsync();
-        return new(input, new(input.Trigger, goals.ToArray(), history.ToArray(), memory.ToArray(), harnesses, report,
-            quotedGoal, quote), roomRevision);
+        var context = new BotDecisionContext(input.Trigger, goals.ToArray(), history.ToArray(), memory.ToArray(), harnesses, report,
+            quotedGoal, quote) { DispatchEvidence = dispatchEvidence };
+        return new(input, context, roomRevision);
     }
 }

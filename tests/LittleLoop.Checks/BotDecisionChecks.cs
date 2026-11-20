@@ -104,6 +104,7 @@ internal static class BotDecisionChecks
         Require((await engine.DecideAsync(Discussion, default)).Action == BotAction.Reply && model.Calls == before + 2,
             "one invalid model draft may be corrected before execution");
         await CheckLocalCognition();
+        await BotDecisionRepairChecks.Run();
         await BotModelMeteringChecks.Run();
         Console.WriteLine("PASS structured API decisions, typed feedback, validation and bounded memory context");
     }
