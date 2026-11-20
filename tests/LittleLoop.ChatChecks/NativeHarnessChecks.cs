@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using LittleLoop.Core;
 using LittleLoop.Tools;
 
 static class NativeHarnessChecks
@@ -73,6 +74,33 @@ static class NativeHarnessChecks
                 { sessionUpdate = "tool_call_update", toolCallId = "1", rawOutput = "no such file", status = "failed" }));
             check(acp.Read()!.Tools is [{ Kind: "read", Status: "failed", Detail: "no such file" }],
                 "ACP tool update preserves the native tool identity, failure and diagnostic");
+
+            var overflowId = Guid.NewGuid();
+            var overflow = new HarnessTurn(session, overflowId, null);
+            overflow.Opening();
+            var overflowNames = new Dictionary<string, string>();
+            void Observe(string id, string status) => DeepSeekBotHarness.ObserveTool(overflow, overflowNames,
+                JsonSerializer.SerializeToElement(new { sessionUpdate = "tool_call_update", toolCallId = id,
+                    title = "test", status, rawOutput = new string('x', 1100) }));
+            for (int i = 0; i < 64; i++) Observe(i.ToString(), "completed");
+            check(overflow.Read()!.ToolsTruncated == false, "64 reported tools fit the journal without truncation");
+            Observe("65", "in_progress");
+            Observe("65", "failed");
+            Observe("65", "failed");
+            Observe("0", "failed");
+            overflow.Finish("returned", "finished");
+            var summary = NativeBotHarness.RecoverReceipt(session, overflowId)!.SummarizeTools();
+            check(overflowNames.Count == 64 && summary is { Recorded: 64, ReportedCompleted: 63, ReportedFailed: 1,
+                    Truncated: true, FirstFailure.ToolId: "0", FirstOmittedFailure: { ToolId: "65", Detail.Length: 256 } },
+                "reopened ACP journal preserves bounded failure evidence on both sides of the native tool cap");
+
+            var legacyId = Guid.NewGuid();
+            File.WriteAllText(Path.Combine(session, $"{legacyId:N}.json"),
+                """{"Status":"returned","SessionId":"old","Report":"done","Tools":[]}""");
+            var legacy = NativeBotHarness.RecoverReceipt(session, legacyId);
+            var observation = ChatStore.FromJson<BotObservation>("""{"kind":"HarnessReceipt","text":"done"}""");
+            check(legacy?.SummarizeTools() is { Recorded: 0, Truncated: null } &&
+                observation is { ToolEvidence: null, DispatchId: null }, "older journals and SQL observations retain unknown coverage");
 
             if (Environment.GetEnvironmentVariable("LITTLELOOP_TEST_NATIVE_ACP") is { Length: > 0 } launcher)
                 await LiveDeepSeek(launcher, directory, project, check);

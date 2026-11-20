@@ -8,7 +8,17 @@ public enum BotEventKind { UserMessage, BotDecision, HarnessReceipt, ToolResult 
 public enum BotAction { Reply, Delegate, Revise, Pause, Resume, Cancel, Wait, Complete, Remember, SetFinalReport, ManageMemory, Forget }
 
 public sealed record BotObservation(BotEventKind Kind, string Text, Guid? GoalId = null, string? Harness = null,
-    string? Status = null, long? Sequence = null, int? GoalVersion = null);
+    string? Status = null, long? Sequence = null, int? GoalVersion = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? DispatchId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolKind = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BotToolEvidence? ToolEvidence = null);
+
+/// <summary>Counts describe the last reported state of each recorded call. Null truncation means unknown coverage.</summary>
+public sealed record BotToolEvidence(int Recorded, int ReportedCompleted, int ReportedFailed, bool? Truncated,
+    BotToolFailure? FirstFailure, BotToolFailure? FirstOmittedFailure);
+
+public sealed record BotToolFailure(string ToolId, string ToolKind, string Status, string Detail);
 
 public sealed record BotGoalSnapshot(Guid Id, ContinuousGoal Goal, int RemainingTurns);
 

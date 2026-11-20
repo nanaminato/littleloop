@@ -138,24 +138,35 @@ internal static class WorkerChecks
             var firstEdit = await codex.Next();
             check(firstEdit.Instruction.Contains(finding) && firstEdit.Directory != analysis.Directory,
                 "E: the next Harness receives the Bot's instruction informed by the other Harness");
-            firstEdit.Return("我修改了实现。", new HarnessToolResult("verify", "test", "failed", "memory_test: expected one allocation"));
+            firstEdit.Return("我修改了实现。",
+                [new("verify", "test", "failed", "memory_test: expected one allocation"),
+                    .. Enumerable.Range(1, 40).Select(n => new HarnessToolResult($"read-{n}", "read", "completed", "inspected"))]);
             var evaluate = await engine.Next();
-            check(evaluate.Context.Trigger.Kind == BotEventKind.HarnessReceipt &&
-                evaluate.Context.History.Any(e => e.Kind == BotEventKind.ToolResult && e.Text.Contains("expected one allocation")) &&
-                evaluate.Context.History.Any(e => e.Kind == BotEventKind.BotDecision) &&
+            check(evaluate.Context.Trigger is { Kind: BotEventKind.HarnessReceipt, ToolEvidence: { Recorded: 41,
+                    ReportedFailed: 1, ReportedCompleted: 40, Truncated: null,
+                    FirstFailure: { ToolId: "verify", ToolKind: "test", Detail: "memory_test: expected one allocation" } } } &&
+                evaluate.Context.Trigger.DispatchId == firstEdit.Dispatch &&
+                !evaluate.Context.History.Any(e => e.Kind == BotEventKind.ToolResult && e.ToolId == "verify") &&
                 (await store.ReadBotWork(id, owner.Id))?.Status != "completed",
-                "C: a returned turn and its failed test are distinct observations before goal completion");
+                "C: a receipt retains a failed test outside the 32-event context before the Bot evaluates completion");
             evaluate.Choose(new(BotAction.Delegate, id, Instruction: "修复 memory_test，重新验证 allocation。", Harness: "codex"));
             var repair = await codex.Next();
             check(repair.Directory == firstEdit.Directory && repair.Dispatch != firstEdit.Dispatch &&
                 repair.Instruction.Contains("memory_test"), "C: the repair is a new dispatch in the original Codex session");
-            repair.Return("TOOL-PRIVATE-RECEIPT", new HarnessToolResult("verify2", "test", "completed", "memory_test passed"));
+            repair.Return("TOOL-PRIVATE-RECEIPT", new HarnessToolResult("verify", "test", "completed", "memory_test passed"));
             var final = await engine.Next();
             check(final.Context.Trigger.GoalId == id && final.Context.Goals.Single(g => g.Id == id).RemainingTurns == 0,
                 "C: the last budgeted receipt still receives a Bot decision");
             final.Choose(new(BotAction.Complete, id, Message: "已修复重复编码，记忆模块测试通过。"));
             await Notice("记忆模块测试通过");
             await UntilStatus(id, "completed");
+            var goalEvents = await store.GoalObservations(id);
+            check(goalEvents.Where(e => e.ToolId == "verify").Select(e => (e.DispatchId, e.ToolKind, e.Status))
+                    .SequenceEqual(new (Guid?, string?, string?)[] {
+                        (firstEdit.Dispatch, "test", "failed"), (repair.Dispatch, "test", "completed") }) &&
+                goalEvents.Where(e => e.Kind == BotEventKind.BotDecision && e.Status == "Delegate")
+                    .Select(e => e.DispatchId).SequenceEqual(goalEvents.Where(e => e.Kind == BotEventKind.HarnessReceipt).Select(e => e.DispatchId)),
+                "C: each delegation, receipt and reused native tool ID belongs to the correct dispatch");
             var transcript = await store.History(owner.Id, room.Id, null, null);
             check(!transcript!.Any(m => m.Sender == robot.Name && m.Text.Contains("TOOL-PRIVATE-RECEIPT")),
                 "C: only the Bot's chosen conclusion appears as the final report");

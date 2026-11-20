@@ -157,7 +157,10 @@ internal static class BotRecoveryChecks
                 twice.Count(o => o.Kind == BotEventKind.ToolResult) == 1,
                 "retried SQL settlement consumes one claim and records each receipt and tool result once");
             check(twice.Where(o => o.Kind is BotEventKind.ToolResult or BotEventKind.HarnessReceipt)
-                .All(o => o.GoalVersion == claim.Goal!.Version), "recovered evidence carries the executed version into decision history");
+                .All(o => o.GoalVersion == claim.Goal!.Version && o.DispatchId == dispatch.Id) &&
+                twice.Single(o => o.Kind == BotEventKind.ToolResult).ToolId == "test" &&
+                twice.Single(o => o.Kind == BotEventKind.HarnessReceipt).ToolEvidence is { Recorded: 1, ReportedFailed: 0 },
+                "recovered evidence carries the dispatch, tool identity, result counts and executed version into decision history");
             var current = await store.ReadBotWork(claim.Id, owner.Id) ?? throw new Exception("Recovery lost goal.");
             var next = await store.NextBotInput(goal: true);
             check(current.Input.Loop!.Used == 1 && current.Input.Loop.Dispatch is null,

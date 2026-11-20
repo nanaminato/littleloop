@@ -12,12 +12,11 @@ sealed class DeepSeekBotHarness(DeepSeekAcpClient adapter) : NativeBotHarness
     internal static void ObserveTool(HarnessTurn turn, Dictionary<string, string> names, JsonElement update)
     {
         string? type = update.GetProperty("sessionUpdate").GetString();
-        if (type is not ("tool_call" or "tool_call_update") || !update.TryGetProperty("toolCallId", out var key) ||
-            key.GetString() is not { Length: > 0 and <= 256 } id) return;
-        if (!names.ContainsKey(id) && names.Count >= 64) return;
+        if (type is not ("tool_call" or "tool_call_update")) return;
+        string id = update.TryGetProperty("toolCallId", out var key) ? key.GetString() ?? "" : "";
         string name = update.TryGetProperty("title", out var title) && title.GetString() is { Length: > 0 } provided
             ? provided : names.GetValueOrDefault(id) ?? "tool";
-        names[id] = name;
+        if (id.Length is > 0 and <= 256 && (names.Count < 64 || names.ContainsKey(id))) names[id] = name;
         string status = update.TryGetProperty("status", out var nativeStatus) ? nativeStatus.ToString() : "pending";
         string detail = update.TryGetProperty("rawOutput", out var output) ? output.ToString() :
             update.TryGetProperty("content", out var content) ? content.ToString() :

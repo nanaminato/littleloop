@@ -151,7 +151,8 @@ sealed partial class ChatStore
         var detail = JsonSerializer.SerializeToNode(decision, BotJson)!.AsObject();
         if (cognitionSource is not null) detail["cognitionSource"] = JsonSerializer.SerializeToNode(cognitionSource, BotJson);
         await Record(db, tx, input.Room, input.Owner, input.Sequence, new(BotEventKind.BotDecision,
-            decisionText, target, decision.Harness, decision.Action.ToString(), input.Sequence, goal?.Version), detail.ToJsonString());
+            decisionText, target, decision.Harness, decision.Action.ToString(), input.Sequence, goal?.Version,
+            DispatchId: decision.Action == BotAction.Delegate ? loop.Dispatch!.Id : null), detail.ToJsonString());
         if (decision.Action == BotAction.ManageMemory)
         {
             var observation = new BotObservation(BotEventKind.ToolResult, message!, Status: "memory", Sequence: input.Sequence);
@@ -177,10 +178,11 @@ sealed partial class ChatStore
             ("dispatch", dispatch.Id.ToString()), ("work", executed.Id.ToString()));
         if (await settled.ExecuteNonQueryAsync() != 1) return;
         var result = new BotObservation(BotEventKind.HarnessReceipt, Cut(receipt.Report, 16000), executed.Id,
-            dispatch.Harness, receipt.Status, executed.Sequence, executed.Goal!.Version);
+            dispatch.Harness, receipt.Status, executed.Sequence, executed.Goal!.Version, dispatch.Id, ToolEvidence: receipt.SummarizeTools());
         foreach (var tool in receipt.Tools)
             await Record(db, tx, executed.Room, executed.Owner, executed.Sequence, new(BotEventKind.ToolResult,
-                Cut($"{tool.Kind} [{tool.Id}] {tool.Detail}", 8000), executed.Id, dispatch.Harness, tool.Status, executed.Sequence, executed.Goal!.Version), ToJson(tool));
+                Cut($"{tool.Kind} [{tool.Id}] {tool.Detail}", 8000), executed.Id, dispatch.Harness, tool.Status,
+                executed.Sequence, executed.Goal!.Version, dispatch.Id, ToolId: tool.Id, ToolKind: tool.Kind), ToJson(tool));
         await Record(db, tx, executed.Room, executed.Owner, executed.Sequence, result,
             ToJson(new { dispatch.Id, receipt.SessionId, version = executed.Goal!.Version, receipt.Status }));
         if (current.Input.Loop?.Dispatch?.Id == dispatch.Id && current.Status == "running" &&

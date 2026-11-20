@@ -13,8 +13,22 @@ interface IBotHarness
 }
 
 sealed record HarnessRunState(string Status, string? SessionId = null);
-sealed record HarnessToolResult(string Id, string Kind, string Status, string Detail);
-sealed record HarnessReceipt(string Status, string? SessionId, string Report, HarnessToolResult[] Tools);
+sealed record HarnessToolResult(string Id, string Kind, string Status, string Detail)
+{
+    public bool ReportsFailure() => Status.ToLowerInvariant() is "failed" or "error" or "declined" or "denied";
+
+    public BotToolFailure FailureExample() => new(HarnessTurn.Limit(Id, 256), HarnessTurn.Limit(Kind, 128),
+        Status, HarnessTurn.Limit(Detail, 256));
+}
+
+sealed record HarnessReceipt(string Status, string? SessionId, string Report, HarnessToolResult[] Tools,
+    bool? ToolsTruncated = null, BotToolFailure? FirstOmittedFailure = null)
+{
+    public BotToolEvidence SummarizeTools() => new(Tools.Length,
+        Tools.Count(t => t.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)),
+        Tools.Count(t => t.ReportsFailure()), ToolsTruncated, Tools.FirstOrDefault(t => t.ReportsFailure())?.FailureExample(),
+        FirstOmittedFailure);
+}
 
 // Each goal owns one directory per harness. A dispatch identifies exactly one native prompt.
 // Journal submission before writing to the pipe. A lost reply must never replay side effects.
@@ -156,7 +170,7 @@ sealed class HarnessTurn(string directory, Guid dispatchId, Func<CancellationTok
         return current = saved;
     }
 
-    public void Opening() => Write(current with { Status = "opening" });
+    public void Opening() => Write(current with { Status = "opening", ToolsTruncated = false });
     public void Opened(string id) => Write(current with { SessionId = id });
     public void Sending()
     {
@@ -169,11 +183,21 @@ sealed class HarnessTurn(string directory, Guid dispatchId, Func<CancellationTok
 
     public void Tool(string id, string kind, string status, string detail)
     {
-        if (string.IsNullOrWhiteSpace(id) || id.Length > 256) return;
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 256)
+        {
+            if (current.ToolsTruncated != true) Write(current with { ToolsTruncated = true });
+            return;
+        }
         var existing = current.Tools.FirstOrDefault(t => t.Id == id);
-        if (existing is null && current.Tools.Length >= 64) return;
         if (detail.Length == 0 && existing is not null) detail = existing.Detail;
         var result = new HarnessToolResult(id, Limit(kind, 512), status, Limit(detail, 1000));
+        if (existing is null && current.Tools.Length >= 64)
+        {
+            var failure = current.FirstOmittedFailure ?? (result.ReportsFailure() ? result.FailureExample() : null);
+            if (current.ToolsTruncated != true || failure != current.FirstOmittedFailure)
+                Write(current with { ToolsTruncated = true, FirstOmittedFailure = failure });
+            return;
+        }
         if (result == existing) return;
         Write(current with { Tools = existing is null ? [.. current.Tools, result] :
             current.Tools.Select(t => t.Id == id ? result : t).ToArray() });

@@ -126,7 +126,10 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
     {
         var trigger = Excerpt(context.Trigger);
         var goals = context.Goals.ToList();
-        var history = context.History.TakeLast(32).Select(Excerpt).ToList();
+        var history = context.History.TakeLast(32)
+            .Where(h => !(trigger.Kind == BotEventKind.HarnessReceipt && trigger.DispatchId.HasValue &&
+                h.Kind == BotEventKind.HarnessReceipt && h.DispatchId == trigger.DispatchId))
+            .Select(Excerpt).ToList();
         var memory = context.Memory.ToList();
         // Always keep the addressed goal's full objective and requirements. The store orders other goals and
         // memories by relevance/recency. Remove optional evidence before dropping the latest relevant history.

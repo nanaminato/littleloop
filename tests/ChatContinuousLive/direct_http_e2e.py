@@ -289,6 +289,17 @@ def check_decision_loop():
     events = [dict(kind=kind, observation=json.loads(value)) for kind, value in rows]
     kinds = [event['kind'] for event in events]
     assert set(kinds) >= {'UserMessage', 'BotDecision', 'HarnessReceipt'}, kinds
+    turns = {e['observation']['dispatchId']: e['observation'] for e in events if e['kind'] == 'BotDecision'
+             and e['observation']['status'] == 'Delegate' and e['observation']['goalId'] == task}
+    for event in events:
+        obs = event['observation']
+        if obs.get('goalId') != task or event['kind'] not in ('HarnessReceipt', 'ToolResult'):
+            continue
+        assert turns[obs['dispatchId']]['harness'] == obs['harness'], obs
+        if event['kind'] == 'ToolResult':
+            assert obs['toolId'] and obs['toolKind'], obs
+        else:
+            assert 'recorded' in obs['toolEvidence'], obs
     if case != 'review':
         assert 'ToolResult' in kinds, kinds
     receipt = max(i for i, kind in enumerate(kinds) if kind == 'HarnessReceipt')

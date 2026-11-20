@@ -54,8 +54,7 @@ sealed class CodexBotHarness(string executable, string project, TimeSpan timeout
         string? type = item.GetProperty("type").GetString();
         if (type is not ("commandExecution" or "fileChange" or "mcpToolCall" or "dynamicToolCall" or
             "collabAgentToolCall" or "webSearch" or "imageView" or "imageGeneration")) return;
-        string? id = item.GetProperty("id").GetString();
-        if (id is null) return;
+        string id = item.TryGetProperty("id", out var key) ? key.GetString() ?? "" : "";
         string status = item.TryGetProperty("status", out var nativeStatus) ? nativeStatus.ToString() : started ? "inProgress" : "completed";
         if (item.TryGetProperty("exitCode", out var exit) && exit.ValueKind == JsonValueKind.Number && exit.GetInt32() != 0)
             status = "failed";

@@ -27,6 +27,21 @@ internal static class BotDecisionChecks
             Goals = [Snapshot], History = [new(BotEventKind.ToolResult, "test Recall: exit 1", GoalId, "deepseek")] };
         model.Output = $$"""{"action":"delegate","goalId":"{{GoalId}}","harness":"codex","instruction":"根据测试日志修复召回逻辑。"}""";
         Require((await engine.DecideAsync(receipt, default)).Harness == "codex", "decision selects another harness for same goal");
+        var dispatch = Guid.NewGuid();
+        var withEvidence = receipt.Trigger with { DispatchId = dispatch,
+            ToolEvidence = new(40, 39, 1, false, new("call-1", "test", "failed", "exit=1"), null) };
+        var tool = receipt.History[0] with { DispatchId = dispatch, ToolId = "call-2", ToolKind = "read" };
+        await engine.DecideAsync(receipt with { Trigger = withEvidence, History = [tool, withEvidence] }, default);
+        using (var doc = JsonDocument.Parse(model.Input!))
+        {
+            var trigger = doc.RootElement.GetProperty("trigger");
+            var history = doc.RootElement.GetProperty("history");
+            Require(trigger.GetProperty("dispatchId").GetGuid() == dispatch &&
+                trigger.GetProperty("toolEvidence").GetProperty("firstFailure").GetProperty("toolId").GetString() == "call-1" &&
+                history.GetArrayLength() == 1 && history[0].GetProperty("toolKind").GetString() == "read" &&
+                history[0].GetProperty("toolId").GetString() == "call-2",
+                "model receives the correlated failure summary once and retains distinct tool evidence");
+        }
         model.Output = $$"""{"action":"delegate","goalId":"{{GoalId}}","harness":" Codex ","instruction":"核对测试。"}""";
         Require((await engine.DecideAsync(receipt, default)).Harness == "codex", "provider ID casing and whitespace resolve to one registered capability");
         foreach (string invalid in new[] {
