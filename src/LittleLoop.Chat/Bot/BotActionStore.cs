@@ -38,7 +38,11 @@ sealed partial class ChatStore
         }
         else if (input.Inbox is null)
         {
-            if (work?.Status is not ("deciding" or "needs-reconciliation") || work.Input.Loop?.Next != input.Trigger) return;
+            if (input.Trigger.Kind == BotEventKind.Timer)
+            {
+                if (DueTimer(work, clock.GetUtcNow().ToUnixTimeMilliseconds()) != input.Trigger) return;
+            }
+            else if (work?.Status is not ("deciding" or "needs-reconciliation") || work.Input.Loop?.Next != input.Trigger) return;
             await using var pending = Command(db, tx, "SELECT 1 FROM chat_goal_inbox WHERE room_id=@room AND owner_id=@owner AND NOT processed LIMIT 1",
                 ("room", input.Room), ("owner", input.Owner));
             if (await pending.ExecuteScalarAsync() is not null) return;
@@ -83,6 +87,14 @@ sealed partial class ChatStore
                     Status = decision.Action == BotAction.Complete ? "completed" :
                         work!.Status == "needs-reconciliation" ? work.Status : "waiting-input" };
                 loop = loop with { Dispatch = null, Next = null };
+                if (decision.WakeAfterSeconds is int delay)
+                {
+                    loop = loop with
+                    {
+                        Wake = new(clock.GetUtcNow().AddSeconds(delay).ToUnixTimeMilliseconds(), goal.Version),
+                        ScheduledWakeups = loop.ScheduledWakeups + 1
+                    };
+                }
                 if (decision.Action == BotAction.Complete)
                 {
                     output = message;
@@ -145,10 +157,15 @@ sealed partial class ChatStore
                 await card.ExecuteNonQueryAsync();
             }
         }
+        else if (input.Trigger.Kind == BotEventKind.Timer)
+            await Record(db, tx, input.Room, input.Owner, input.Sequence, input.Trigger);
         var decisionText = decision.Instruction is not null && decision.Message is not null
             ? $"{decision.Instruction}\n给用户的说明：{decision.Message}"
             : decision.Instruction ?? decision.Message ?? decision.Action.ToString();
         var detail = JsonSerializer.SerializeToNode(decision, BotJson)!.AsObject();
+        detail["triggerKind"] = input.Trigger.Kind.ToString();
+        if (input.Trigger.GoalVersion is int triggerVersion) detail["triggerGoalVersion"] = triggerVersion;
+        if (input.Trigger.DispatchId is Guid triggerDispatchId) detail["triggerDispatchId"] = triggerDispatchId;
         if (cognitionSource is not null) detail["cognitionSource"] = JsonSerializer.SerializeToNode(cognitionSource, BotJson);
         await Record(db, tx, input.Room, input.Owner, input.Sequence, new(BotEventKind.BotDecision,
             decisionText, target, decision.Harness, decision.Action.ToString(), input.Sequence, goal?.Version,
@@ -178,7 +195,8 @@ sealed partial class ChatStore
             ("dispatch", dispatch.Id.ToString()), ("work", executed.Id.ToString()));
         if (await settled.ExecuteNonQueryAsync() != 1) return;
         var result = new BotObservation(BotEventKind.HarnessReceipt, Cut(receipt.Report, 16000), executed.Id,
-            dispatch.Harness, receipt.Status, executed.Sequence, executed.Goal!.Version, dispatch.Id, ToolEvidence: receipt.SummarizeTools());
+            dispatch.Harness, receipt.Status, executed.Sequence, executed.Goal!.Version, dispatch.Id,
+            ToolEvidence: receipt.SummarizeTools(), DispatchSubmitted: receipt.DispatchSubmitted);
         foreach (var tool in receipt.Tools)
             await Record(db, tx, executed.Room, executed.Owner, executed.Sequence, new(BotEventKind.ToolResult,
                 Cut($"{tool.Kind} [{tool.Id}] {tool.Detail}", 8000), executed.Id, dispatch.Harness, tool.Status,

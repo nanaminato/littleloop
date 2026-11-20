@@ -16,7 +16,8 @@ static class NativeHarnessChecks
             var harness = new FixtureHarness(project, protocol);
             var firstId = Guid.NewGuid();
             var first = await harness.SendAsync(session, firstId, "检查测试用例", null, default);
-            check(first is { Status: "returned", Report: "fixture report", Tools: [{Kind: "commandExecution", Status: "failed"}] } &&
+            check(first is { Status: "returned", DispatchSubmitted: true, Report: "fixture report",
+                Tools: [{Kind: "commandExecution", Status: "failed"}] } &&
                 first.Tools[0].Detail.Contains("exitCode=1") && first.Tools[0].Detail.Contains("fixture test failed"),
                 "native Codex turn carries failed test evidence independently of its report");
             var cached = await harness.SendAsync(session, firstId, "检查测试用例", null, default);
@@ -41,6 +42,13 @@ static class NativeHarnessChecks
             var stopped = await active;
             check(stopped.Status == "interrupted" && protocol.Calls.Contains("turn/interrupt"),
                 "explicit cancellation waits for native Codex's interrupt receipt");
+            var notSent = Guid.NewGuid();
+            int callsBeforeCancel = protocol.Calls.Count;
+            var beforeSubmit = await restarted.SendAsync(session, notSent, "不得提交", _ => Task.FromResult(true), default);
+            check(beforeSubmit is { Status: "interrupted", DispatchSubmitted: false } &&
+                NativeBotHarness.ReadJournal(session, notSent)?.Receipt?.DispatchSubmitted == false &&
+                protocol.Calls.Count == callsBeforeCancel && stopped.DispatchSubmitted == true,
+                "durable submission evidence distinguishes preflight interruption from interruption of a submitted prompt");
             var lost = Guid.NewGuid();
             var journal = new HarnessTurn(session, lost, null);
             journal.Opened(first.SessionId!);
@@ -99,8 +107,9 @@ static class NativeHarnessChecks
                 """{"Status":"returned","SessionId":"old","Report":"done","Tools":[]}""");
             var legacy = NativeBotHarness.ReadJournal(session, legacyId)?.Receipt;
             var observation = ChatStore.FromJson<BotObservation>("""{"kind":"HarnessReceipt","text":"done"}""");
-            check(legacy?.SummarizeTools() is { Recorded: 0, Truncated: null } &&
-                observation is { ToolEvidence: null, DispatchId: null }, "older journals and SQL observations retain unknown coverage");
+            check(legacy?.SummarizeTools() is { Recorded: 0, Truncated: null } && legacy.DispatchSubmitted is null &&
+                observation is { ToolEvidence: null, DispatchId: null, DispatchSubmitted: null },
+                "older journals and SQL observations retain unknown coverage and submission evidence");
 
             if (Environment.GetEnvironmentVariable("LITTLELOOP_TEST_NATIVE_ACP") is { Length: > 0 } launcher)
                 await LiveDeepSeek(launcher, directory, project, check);

@@ -25,10 +25,11 @@ import uuid
 
 from memory_generalization import TRIALS, run as run_memory_generalization
 from friend_access import ACCOUNTS as FRIEND_ACCOUNTS, run as run_friend_access
+from autonomy_endurance import run as run_autonomy_endurance
 
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
-mode.add_argument('--decision-loop', nargs='?', choices=['copy', 'review', 'search', 'handoff', 'private-copy', 'memory-result'], const='copy',
+mode.add_argument('--decision-loop', nargs='?', choices=['copy', 'review', 'search', 'handoff', 'private-copy', 'memory-result', 'endurance'], const='copy',
     help='exercise real cognition, native Codex, DeepSeek ACP, or a two-Harness handoff')
 mode.add_argument('--conversation', action='store_true', help='check natural replies and preauthorized private project work')
 mode.add_argument('--memory', action='store_true', help='run the private memory and override experiment')
@@ -45,6 +46,14 @@ REPO = Path(__file__).resolve().parents[2]
 DLL = Path(os.environ.get('LITTLELOOP_CHAT_DLL', REPO / 'src/LittleLoop.Chat/bin/Debug/net10.0/LittleLoop.Chat.dll')).resolve()
 EXECUTABLE = Path(sys.executable if options.decision_loop == 'memory-result' else os.environ['LITTLELOOP_CODEX_EXECUTABLE']).resolve()
 assert DLL.is_file() and EXECUTABLE.is_file(), 'Build Chat and configure an installed Codex executable'
+
+
+def assembly_hashes():
+    return {name: hashlib.sha256(DLL.with_name(name).read_bytes()).hexdigest()
+        for name in ('LittleLoop.Chat.dll', 'LittleLoop.Core.dll', 'LittleLoop.Tools.dll')}
+
+
+BUILD_HASHES = assembly_hashes()
 ROOT = REPO / 'data' / 'direct-http' / uuid.uuid4().hex[:8]
 PROJECT = ROOT / 'project'
 PROJECT.mkdir(parents=True)
@@ -132,6 +141,7 @@ def wait(fn, seconds=240):
 
 def start(label, bot=False):
     global process
+    assert assembly_hashes() == BUILD_HASHES, 'Fixture assemblies changed during this run'
     child = dict(env)
     if bot:
         child.update(ChatBot__Policy=str(ROOT / 'policy.json'), ChatBot__Data=str(ROOT / 'bot'),
@@ -142,14 +152,16 @@ def start(label, bot=False):
                 child['ChatBot__AccessAdmins'] = 'direct_owner'
             child['ChatBot__DecisionModel'] = str(Path(os.environ.get('LITTLELOOP_DECISION_MODEL',
                 REPO / 'examples/models/deepseek.json')).resolve(strict=True))
-            child['ChatBot__MaxHarnessTurns'] = '3'
-            if options.decision_loop in ('search', 'handoff', 'private-copy'):
+            child['ChatBot__MaxHarnessTurns'] = '24' if options.decision_loop == 'endurance' else '3'
+            if options.decision_loop in ('search', 'handoff', 'private-copy', 'endurance'):
                 # Use the caller's deployed ACP command against this run's synthetic project.
                 options_prefix = 'chatbot__deepseek__'
                 child.update((k, v) for k, v in os.environ.items() if k.lower().startswith(options_prefix))
                 child['ChatBot__DeepSeek__Project'] = str(PROJECT)
                 assert any(k.lower() in (options_prefix + 'readonlylauncher', options_prefix + 'launcher')
                     for k in child), 'Set the deployed DeepSeek launcher and its arguments'
+                if options.decision_loop == 'endurance':
+                    assert any(k.lower() == options_prefix + 'readonlylauncher' for k in child), 'Endurance requires a read-only ACP launcher'
         if options.friend_access:
             child.update(ChatBot__AccessAdmins='access_admin', ChatBot__Approvers='tool_approver')
     log = open(ROOT / (label + '.log'), 'wb')
@@ -194,9 +206,9 @@ def send(text, reply=None, identifier=None):
     return request(owner, f'/rooms/{room}/messages', dict(clientId=identifier or str(uuid.uuid4()), text=text, replyTo=reply))
 
 
-def task_for(message):
+def task_for(message, seconds=20):
     return wait(lambda: next(((m.get('card') or {}).get('taskId') for m in history()
-        if m['sequence'] == message['sequence']), None), 20)
+        if m['sequence'] == message['sequence']), None), seconds)
 
 
 def state(task):
@@ -485,7 +497,14 @@ try:
         room = request(outsider, '/friends', dict(username='littleloop'))['roomId']
         assert not request(outsider, '/bot/capabilities')['canOperate']
         owner = outsider
-    if options.decision_loop:
+    if options.decision_loop == 'endurance':
+        def restart():
+            stop()
+            start('endurance-restart', True)
+
+        details = run_autonomy_endurance(ROOT, PROJECT, room, send, reply_for, task_for, state, wait, history, restart, record)
+        details['scenarioSha256'] = hashlib.sha256(Path(__file__).with_name('autonomy_endurance.py').read_bytes()).hexdigest()
+    elif options.decision_loop:
         details = check_decision_loop()
     elif options.friend_access:
         details = run_friend_access(sessions, request, wait, record, PROJECT, tools=options.friend_tools)
@@ -538,12 +557,11 @@ try:
         details = check_memory() if options.memory else check_direct()
     result = dict(**details, status='measured' if options.memory_generalization else 'passed',
         checks=checks, elapsedSeconds=time.monotonic() - started, room=room,
-        assemblyHashes={name: hashlib.sha256(DLL.with_name(name).read_bytes()).hexdigest()
-            for name in ('LittleLoop.Chat.dll', 'LittleLoop.Core.dll', 'LittleLoop.Tools.dll')},
+        assemblyHashes=BUILD_HASHES,
         driverSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     (ROOT / 'result.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
 except BaseException as error:
-    (ROOT / 'failure.json').write_text(json.dumps(dict(status='failed', error=str(error), checks=checks),
+    (ROOT / 'failure.json').write_text(json.dumps(dict(status='failed', error=str(error), checks=checks, assemblyHashes=BUILD_HASHES),
         ensure_ascii=False, indent=2), encoding='utf-8')
     raise
 finally:

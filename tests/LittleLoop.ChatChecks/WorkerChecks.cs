@@ -60,6 +60,7 @@ internal static partial class WorkerChecks
             ["ChatBot:Operators"] = owner.Name, ["ChatBot:MaxHarnessTurns"] = "3"
         }).Build();
         await CheckHarnessRecovery(config, project, owner, check);
+        await CheckBotTimers(config, project, owner, check);
 
         var deepseek = new ControlledHarness("deepseek", project);
         var codex = new ControlledHarness("codex", project);
@@ -276,24 +277,36 @@ internal static partial class WorkerChecks
             var card = (await store.FindMessage(room.Id, verify.Sequence, owner.Id))!.Card!;
             await UntilStatus(card.TaskId!.Value, "needs-reconciliation");
 
+            var unavailable = await Say("还有其它变化吗？");
+            var failedDecision = await engine.Next();
+            failedDecision.Context.ObserveModelCall?.Invoke(new("invalid-decision", "fixture-model", new(12, 3)));
+            failedDecision.Context.ObserveModelCall?.Invoke(new("request-failed"));
+            failedDecision.Result.SetException(new InvalidOperationException("controlled-model-outage"));
+            await Notice("controlled-model-outage");
+
             var auditConnection = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(fixture.Connection) { Pooling = false };
             await using var db = new Microsoft.Data.Sqlite.SqliteConnection(auditConnection.ConnectionString);
             await db.OpenAsync();
             await using var sources = db.CreateCommand();
             sources.CommandText = """
-                SELECT json_extract(detail,'$.action'),json_extract(detail,'$.cognitionSource.engine')
-                FROM chat_bot_events WHERE room_id=$room AND seq IN ($memory,$uncertain) AND kind='BotDecision'
+                SELECT json_extract(detail,'$.action'),json_extract(detail,'$.cognitionSource.engine'),
+                    json_array_length(detail,'$.cognitionSource.modelCalls'),
+                    json_extract(detail,'$.cognitionSource.modelCalls[0].usage.inputTokens')
+                FROM chat_bot_events WHERE room_id=$room AND seq IN ($memory,$uncertain,$unavailable) AND kind='BotDecision'
                 ORDER BY id
                 """;
             sources.Parameters.AddWithValue("$room", room.Id);
             sources.Parameters.AddWithValue("$memory", lookup.Sequence);
             sources.Parameters.AddWithValue("$uncertain", verify.Sequence);
-            var audit = new List<(string Action, string Source)>();
+            sources.Parameters.AddWithValue("$unavailable", unavailable.Sequence);
+            var audit = new List<(string Action, string Source, int Calls, int? FirstInputTokens)>();
             await using var reader = await sources.ExecuteReaderAsync();
-            while (await reader.ReadAsync()) audit.Add((reader.GetString(0), reader.GetString(1)));
-            check(audit.SequenceEqual([("ManageMemory", "ControlledEngine"), ("Reply", "local/memory-result/1"),
-                ("Delegate", "ControlledEngine"), ("Wait", "local/reconciliation/1")]),
-                "SQLite preserves each decision action and its actual source across the two feedback loops");
+            while (await reader.ReadAsync())
+                audit.Add((reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.IsDBNull(3) ? null : reader.GetInt32(3)));
+            check(audit.SequenceEqual([("ManageMemory", "ControlledEngine", 0, null), ("Reply", "local/memory-result/1", 0, null),
+                ("Delegate", "ControlledEngine", 0, null), ("Wait", "local/reconciliation/1", 0, null),
+                ("Reply", "host/decision-error", 2, 12)]),
+                "SQLite preserves decision provenance and model attempts even when the host must reply to an engine error");
         }
         finally
         {

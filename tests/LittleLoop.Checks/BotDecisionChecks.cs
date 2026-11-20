@@ -56,6 +56,13 @@ internal static class BotDecisionChecks
         }
         model.Output = """{"action":"reply","message":"已完成。"}""";
         await Reject(() => engine.DecideAsync(receipt, default));
+        model.Output = """{"action":"wait","wakeAfterSeconds":30}""";
+        Require(await engine.DecideAsync(receipt, default) == new BotDecision(BotAction.Wait, GoalId, WakeAfterSeconds: 30),
+            "goal-bound observations supply the only legal goal ID when a model omits it");
+        await Reject(() => engine.DecideAsync(Discussion, default));
+        var other = Snapshot with { Id = Guid.NewGuid() };
+        model.Output = $$"""{"action":"wait","goalId":"{{other.Id}}","wakeAfterSeconds":30}""";
+        await Reject(() => engine.DecideAsync(receipt with { Goals = [Snapshot, other] }, default));
         model.Output = $$"""{"action":"complete","goalId":"{{GoalId}}"}""";
         Require((await engine.DecideAsync(receipt, default)).Message is null, "completion may be recorded silently");
         model.Output = $$"""{"action":"delegate","goalId":"{{GoalId}}","harness":"codex","instruction":"继续处理"}""";
@@ -97,6 +104,7 @@ internal static class BotDecisionChecks
         Require((await engine.DecideAsync(Discussion, default)).Action == BotAction.Reply && model.Calls == before + 2,
             "one invalid model draft may be corrected before execution");
         await CheckLocalCognition();
+        await BotModelMeteringChecks.Run();
         Console.WriteLine("PASS structured API decisions, typed feedback, validation and bounded memory context");
     }
 

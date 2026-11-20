@@ -86,10 +86,13 @@ sealed partial class ChatStore
     internal static async Task SaveGoal(DbConnection db, DbTransaction tx, BotWork work, ContinuousGoal goal, long seq, string action,
         string? error = null, string? output = null)
     {
+        var input = work.Input with { Text = goal.Prompt };
+        if (input.Loop is { Wake: { } wake } loop && (goal.Status != "waiting-input" || wake.GoalVersion != goal.Version))
+            input = input with { Loop = loop with { Wake = null } };
         await using var cmd = Command(db, tx, """
             UPDATE chat_bot_work SET status=@status,goal=@goal,input=@input,error=@error,output=@output WHERE id=@id;
             INSERT INTO chat_goal_events(work_id,version,room_id,seq,action,snapshot) VALUES(@id,@version,@room,@seq,@action,@goal);
-            """, ("status", goal.Status), ("goal", ToJson(goal)), ("input", ToJson(work.Input with { Text = goal.Prompt })),
+            """, ("status", goal.Status), ("goal", ToJson(goal)), ("input", ToJson(input)),
             ("error", error), ("output", output), ("id", work.Id.ToString()), ("version", goal.Version),
             ("room", work.Room), ("seq", seq), ("action", action));
         await cmd.ExecuteNonQueryAsync();

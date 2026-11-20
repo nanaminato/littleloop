@@ -136,6 +136,7 @@ static class ChatBotEndpoints
             var events = job.Input.Loop is not null && seeEvidence ? await store.GoalObservations(job.Id) : null;
             return Results.Ok(new { job.Id, job.Status, job.Error, canApprove = false, execution, events,
                 goal = job.Goal,
+                wakeAtUnixMilliseconds = job.Input.Loop?.Wake?.AtUnixMilliseconds,
                 provider = job.Input.Provider ?? ChatStore.BotName,
                 output = seeEvidence && job.Output is not null ? AgentConversationSupport.ReportText(job.Output) : null });
         });

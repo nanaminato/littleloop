@@ -8,6 +8,12 @@ if (args is ["--bot-decision-live", var modelConfig])
     return;
 }
 
+if (args is ["--bot-cognition-evaluate", var evaluationOutput, ..] && args.Length is 2 or 3)
+{
+    await LocalCognitionEvaluation.Run(evaluationOutput, args.ElementAtOrDefault(2));
+    return;
+}
+
 if (args is ["--agent-command-fixture"])
 {
     Environment.ExitCode = File.ReadAllText("code.cs") == "new" ? 0 : 1;
@@ -58,6 +64,7 @@ await LanguageChecks.Run();
 await ModelLanguageChecks.Run();
 await PlanningModelChecks.Run();
 await BotDecisionChecks.Run();
+await LocalCognitionEvaluation.Run(null);
 await DevelopmentChecks.Run();
 await ProjectDiscoveryChecks.Run();
 await AgentChecks.Run();

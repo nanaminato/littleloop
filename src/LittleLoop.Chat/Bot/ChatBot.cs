@@ -245,12 +245,18 @@ sealed class ChatBot : BackgroundService
                 (!CanOperate(input.Owner) ? "此账号的私聊工作区" :
                     ProjectFiles.Same(h.ProjectRoot ?? "", files.Root) ? "主项目工作区" : "独立部署工作区"),
                 StringComparer.Ordinal);
-            snapshot = snapshot with { Context = snapshot.Context with { Capabilities = capabilities } };
+            var modelCalls = new List<BotModelCall>();
+            snapshot = snapshot with { Context = snapshot.Context with
+            {
+                Capabilities = capabilities,
+                ObserveModelCall = modelCalls.Add
+            } };
             try
             {
                 var result = await engine.DecideWithSourceAsync(snapshot.Context, token);
                 await store.ApplyDecision(snapshot, result.Decision.Validate(snapshot.Context), Robot(null).Id,
-                    CanOperate(input.Owner), maxTurns, projectGrant, cognitionSource: result.Source);
+                    CanOperate(input.Owner), maxTurns, projectGrant,
+                    cognitionSource: result.Source with { ModelCalls = modelCalls.ToArray() });
             }
             catch (Exception error) when (!token.IsCancellationRequested && error is not System.Data.Common.DbException)
             {
@@ -262,7 +268,7 @@ sealed class ChatBot : BackgroundService
                 var fallback = input.Trigger.GoalId is Guid id
                     ? new BotDecision(BotAction.Wait, id, reason) : new BotDecision(BotAction.Reply, Message: reason);
                 await store.ApplyDecision(snapshot, fallback, Robot(null).Id, CanOperate(input.Owner), maxTurns, projectGrant,
-                    reason, new("host/decision-error"));
+                    reason, new("host/decision-error") { ModelCalls = modelCalls.ToArray() });
             }
         }
 

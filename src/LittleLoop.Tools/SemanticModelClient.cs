@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using LittleLoop.Core;
 
 namespace LittleLoop.Tools;
 
@@ -9,7 +10,10 @@ public sealed record SemanticModelConfig(string Protocol, string Endpoint, strin
     int MaxResponseBytes = 131072, int MaxInputCharacters = 32768, int MaxGoalBudget = 12,
     string TokenLimitParameter = "max_tokens", string? ReasoningEffort = null,
     bool EnablePlanning = false, int MaxPlanningCalls = 8, int MaxObservationCharacters = 2048);
-public sealed record SemanticModelReply(string Content, string Model);
+public sealed record SemanticModelReply(string Content, string Model)
+{
+    public BotTokenUsage? Usage { get; init; }
+}
 public interface ISemanticModelClient
 {
     string Provider { get; }
@@ -67,6 +71,7 @@ public sealed class HttpSemanticModelClient : ISemanticModelClient, IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Post, config.Endpoint)
         { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") };
         if (key is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        BotTokenUsage? usage = null;
         try
         {
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
@@ -83,6 +88,7 @@ public sealed class HttpSemanticModelClient : ISemanticModelClient, IDisposable
             }
             using var json = JsonDocument.Parse(bytes.ToArray());
             var root = json.RootElement;
+            usage = ReadUsage(root, config.Protocol);
             string model = root.GetProperty("model").GetString() ?? throw new SemanticModelException("missing-model");
             JsonElement message;
             if (config.Protocol == "ollama")
@@ -105,14 +111,43 @@ public sealed class HttpSemanticModelClient : ISemanticModelClient, IDisposable
             if (model.Length > 200 || string.IsNullOrWhiteSpace(model)) throw new SemanticModelException("invalid-model-name");
             if (key is not null && (content.Contains(key, StringComparison.Ordinal) || model.Contains(key, StringComparison.Ordinal)))
                 throw new SemanticModelException("credential-in-response");
-            return new(content, model);
+            return new(content, model) { Usage = usage };
         }
+        catch (SemanticModelException error) { error.Usage = usage; throw; }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new SemanticModelException("timeout"); }
         catch (HttpRequestException) { throw new SemanticModelException("transport-unavailable"); }
         catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException)
-        { throw new SemanticModelException("invalid-envelope"); }
+        { throw new SemanticModelException("invalid-envelope") { Usage = usage }; }
     }
+
+    private static BotTokenUsage? ReadUsage(JsonElement root, string protocol)
+    {
+        if (protocol == "ollama")
+        {
+            long? input = Count(root, "prompt_eval_count"), output = Count(root, "eval_count");
+            long? cached = Count(root, "prompt_eval_cached_count");
+            return input is null && output is null && cached is null ? null :
+                new(input, output, CachedInputTokens: cached);
+        }
+
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("usage", out var usage)) return null;
+        long? hit = Count(usage, "prompt_cache_hit_tokens");
+        if (hit is null && usage.ValueKind == JsonValueKind.Object && usage.TryGetProperty("prompt_tokens_details", out var promptDetails))
+            hit = Count(promptDetails, "cached_tokens");
+        long? prompt = Count(usage, "prompt_tokens"), completion = Count(usage, "completion_tokens");
+        long? total = Count(usage, "total_tokens"), miss = Count(usage, "prompt_cache_miss_tokens");
+        return prompt is null && completion is null && total is null && hit is null && miss is null ? null :
+            new(prompt, completion, total, hit, miss);
+    }
+
+    private static long? Count(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) &&
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long count) && count >= 0 ? count : null;
+
     public void Dispose() => client.Dispose();
 }
 public sealed class SemanticModelException(string code) : Exception(code)
-{ public string Code { get; } = code; }
+{
+    public string Code { get; } = code;
+    public BotTokenUsage? Usage { get; internal set; }
+}

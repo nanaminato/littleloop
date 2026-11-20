@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace LittleLoop.Core;
 
 [JsonConverter(typeof(JsonStringEnumConverter<BotEventKind>))]
-public enum BotEventKind { UserMessage, BotDecision, HarnessReceipt, ToolResult }
+public enum BotEventKind { UserMessage, BotDecision, HarnessReceipt, ToolResult, Timer }
 [JsonConverter(typeof(JsonStringEnumConverter<BotAction>))]
 public enum BotAction { Reply, Delegate, Revise, Pause, Resume, Cancel, Wait, Complete, Remember, SetFinalReport, ManageMemory, Forget }
 
@@ -12,7 +12,9 @@ public sealed record BotObservation(BotEventKind Kind, string Text, Guid? GoalId
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? DispatchId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolKind = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BotToolEvidence? ToolEvidence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BotToolEvidence? ToolEvidence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? DispatchSubmitted = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WakeAtUnixMilliseconds = null);
 
 /// <summary>Counts describe the last reported state of each recorded call. Null truncation means unknown coverage.</summary>
 public sealed record BotToolEvidence(int Recorded, int ReportedCompleted, int ReportedFailed, bool? Truncated,
@@ -20,11 +22,16 @@ public sealed record BotToolEvidence(int Recorded, int ReportedCompleted, int Re
 
 public sealed record BotToolFailure(string ToolId, string ToolKind, string Status, string Detail);
 
-public sealed record BotGoalSnapshot(Guid Id, ContinuousGoal Goal, int RemainingTurns);
+public sealed record BotGoalSnapshot(Guid Id, ContinuousGoal Goal, int RemainingTurns,
+    int RemainingWakeups = BotDecision.MaxWakeups, long? WakeAtUnixMilliseconds = null);
 
 public sealed record BotDecisionContext(BotObservation Trigger, BotGoalSnapshot[] Goals, BotObservation[] History,
     string[] Memory, string[] Harnesses, bool AutoFinalReport = true, Guid? ReplyGoalId = null, string? QuotedText = null,
-    IReadOnlyDictionary<string, string>? Capabilities = null);
+    IReadOnlyDictionary<string, string>? Capabilities = null)
+{
+    [JsonIgnore]
+    public Action<BotModelCall>? ObserveModelCall { get; init; }
+}
 
 /// <summary>The caller supplies a scoped snapshot. Deciding does not send messages, mutate goals or invoke tools.</summary>
 public interface IBotDecisionEngine
@@ -37,8 +44,13 @@ public interface IBotDecisionEngine
 
 /// <summary>A delegate action with no goal creates one. Revisions and resumptions request a fresh decision.</summary>
 public sealed record BotDecision(BotAction Action, Guid? GoalId = null, string? Message = null,
-    string? Objective = null, string? Instruction = null, string? Harness = null, bool? Enabled = null, long? MemorySource = null)
+    string? Objective = null, string? Instruction = null, string? Harness = null, bool? Enabled = null, long? MemorySource = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? WakeAfterSeconds = null)
 {
+    public const int MinWakeSeconds = 5;
+    public const int MaxWakeSeconds = 7 * 24 * 60 * 60;
+    public const int MaxWakeups = 32;
+
     public BotDecision Validate(BotDecisionContext context)
     {
         var target = GoalId is null ? null : context.Goals.FirstOrDefault(g => g.Id == GoalId);
@@ -49,8 +61,19 @@ public sealed record BotDecision(BotAction Action, Guid? GoalId = null, string? 
         if (context.Trigger.Kind != BotEventKind.UserMessage && !readingLocalResult &&
             (GoalId is null || GoalId != context.Trigger.GoalId || Action is not (BotAction.Delegate or BotAction.Wait or BotAction.Complete)))
             throw new InvalidDataException("A goal observation requires a next action for the same goal.");
-        if (target is not null && !AllowsAction(target.Goal.Status, Action))
+        bool dueTimer = context.Trigger.Kind == BotEventKind.Timer && target is not null &&
+            context.Trigger.GoalVersion == target.Goal.Version &&
+            context.Trigger.WakeAtUnixMilliseconds is > 0 &&
+            context.Trigger.WakeAtUnixMilliseconds == target.WakeAtUnixMilliseconds &&
+            target.Goal.Status == "waiting-input";
+        if (context.Trigger.Kind == BotEventKind.Timer && !dueTimer)
+            throw new InvalidDataException("A timer observation must match the current goal's scheduled check.");
+        if (target is not null && !(dueTimer && Action == BotAction.Delegate) && !AllowsAction(target.Goal.Status, Action))
             throw new InvalidDataException($"Cannot apply {Action} to a goal in state '{target.Goal.Status}'.");
+        if (WakeAfterSeconds is int delay && (Action != BotAction.Wait ||
+            target?.Goal.Status is not ("deciding" or "waiting-input") || target.RemainingWakeups <= 0 ||
+            delay is < MinWakeSeconds or > MaxWakeSeconds))
+            throw new InvalidDataException($"Scheduling a check requires Wait on an eligible goal with remaining checks and a delay of {MinWakeSeconds}–{MaxWakeSeconds} seconds.");
         if (Message is not null && !HasText(Message, 16000))
             throw new InvalidDataException("Decision has an empty or oversized message.");
         if ((Harness is not null && Action != BotAction.Delegate) ||

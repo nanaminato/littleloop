@@ -19,6 +19,7 @@
 
 ## 文档
 
+- [持续自主工作验收](docs/59-autonomy-endurance.md) — 目标定时唤醒、认知对照评测、真实双 Harness 长任务与计量边界
 - [自主认知 Bot 架构差距与验收](docs/58-autonomous-bot.md) — 六个参考项目的工程取舍、本地认知可以承担的判断、跨轮工具证据，以及更换执行器后的恢复边界
 - [持续认知主体目标与阶段提案](docs/47-continuous-agent-goals.md) — 长期能力方向、中间层与近期聊天持续工作闭环；区分已确认意图和候选方案
 - [S1 聊天目标与持续工作](docs/48-chat-continuous-work.md) — 消息接任务、补充要求、暂停恢复、持久调度和验证边界

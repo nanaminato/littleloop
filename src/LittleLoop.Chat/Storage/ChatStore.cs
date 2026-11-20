@@ -16,8 +16,9 @@ sealed record MessageChange(string[] Recipients, DiscussionRoomChange? Discussio
 sealed record DiscussionRoomChange(string Room, string[] Recipients);
 sealed record SendResult(ChatMessage Message, string[] Recipients, bool IsNew, DiscussionRoomChange? Discussion = null);
 
-sealed partial class ChatStore(string connection, bool fcmEnabled, string provider = "MySql")
+sealed partial class ChatStore(string connection, bool fcmEnabled, string provider = "MySql", TimeProvider? timeProvider = null)
 {
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private readonly bool sqlite = ParseProvider(provider);
     private readonly string connectionString = ParseProvider(provider)
         ? SqliteSettings(connection)

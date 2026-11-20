@@ -3,7 +3,9 @@ using LittleLoop.Core;
 
 // Stored in the existing job row, atomically with the goal, budget and next action.
 sealed record BotDispatch(Guid Id, string Harness, string Instruction, string? RecoveryKey = null);
-sealed record BotGoalLoop(int Used, int Limit, BotDispatch? Dispatch = null, BotObservation? Next = null);
+sealed record BotScheduledWake(long AtUnixMilliseconds, int GoalVersion);
+sealed record BotGoalLoop(int Used, int Limit, BotDispatch? Dispatch = null, BotObservation? Next = null,
+    BotScheduledWake? Wake = null, int ScheduledWakeups = 0);
 sealed record DecisionInput(long? Inbox, string Room, string Owner, long Sequence, long? ReplyTo,
     BotObservation Trigger, string? Citation = null);
 sealed record DecisionSnapshot(DecisionInput Input, BotDecisionContext Context, long Revision);
@@ -59,19 +61,23 @@ sealed partial class ChatStore
             await using (var localReader = await local.ExecuteReaderAsync())
                 if (await localReader.ReadAsync()) return new(null, localReader.GetString(0), localReader.GetString(1), localReader.GetInt64(2),
                     null, FromJson<BotObservation>(localReader.GetString(3)));
+            long now = clock.GetUtcNow().ToUnixTimeMilliseconds();
             await using var next = Command(db, null, """
                 SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work
                 WHERE (status='deciding' OR (status='needs-reconciliation'
-                    AND JSON_UNQUOTE(JSON_EXTRACT(input,'$.loop.next.status'))='uncertain'))
+                    AND JSON_UNQUOTE(JSON_EXTRACT(input,'$.loop.next.status'))='uncertain') OR
+                    (status='waiting-input' AND CAST(JSON_UNQUOTE(JSON_EXTRACT(input,'$.loop.wake.atUnixMilliseconds')) AS SIGNED) BETWEEN 1 AND @now
+                     AND JSON_EXTRACT(input,'$.loop.wake.goalVersion')=JSON_EXTRACT(goal,'$.version')))
                 AND NOT EXISTS(SELECT 1 FROM chat_bot_inflight f WHERE f.work_id=chat_bot_work.id)
                 AND NOT EXISTS(SELECT 1 FROM chat_goal_inbox i WHERE i.room_id=chat_bot_work.room_id
                     AND i.owner_id=chat_bot_work.owner_id AND NOT i.processed)
                 ORDER BY created,id LIMIT 1
-                """);
+                """, ("now", now));
             await using var r = await next.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return null;
             var work = ReadWork(r);
-            return new(null, work.Room, work.Owner, work.Sequence, null, work.Input.Loop!.Next!,
+            var observation = work.Status == "waiting-input" ? DueTimer(work, now) : work.Input.Loop?.Next;
+            return observation is null ? null : new(null, work.Room, work.Owner, work.Sequence, null, observation,
                 work.Input.Source?.Text ?? work.Input.Anchor);
         }
         await using var cmd = Command(db, null, """
@@ -87,6 +93,13 @@ sealed partial class ChatStore
                 Status: card?.Kind, Sequence: reader.GetInt64(3)), Citation: card?.Source is { } citation
                     ? $"{citation.Path}:{citation.Start}–{citation.End}\n{citation.Text}" : null);
     }
+
+    private static BotObservation? DueTimer(BotWork? work, long now) =>
+        work is { Status: "waiting-input", Goal: { } goal, Input.Loop.Wake: { } wake } &&
+        wake.GoalVersion == goal.Version && wake.AtUnixMilliseconds > 0 && wake.AtUnixMilliseconds <= now
+            ? new(BotEventKind.Timer, "目标的下一次检查时间已到。", work.Id, Status: "due",
+                Sequence: work.Sequence, GoalVersion: goal.Version, WakeAtUnixMilliseconds: wake.AtUnixMilliseconds)
+            : null;
 
     private static async Task<bool> Permitted(DbConnection db, DbTransaction tx, string room, string owner,
         string robot, bool operatorAccess, string? type)
@@ -142,10 +155,18 @@ sealed partial class ChatStore
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
         var type = await LockGoalRoom(db, tx, input.Room);
+        BotWork? timerWork = null;
+        if (input.Trigger.Kind == BotEventKind.Timer)
+        {
+            timerWork = await LockedWork(db, tx, input.Trigger.GoalId!.Value, input.Room, input.Owner);
+            if (DueTimer(timerWork, clock.GetUtcNow().ToUnixTimeMilliseconds()) != input.Trigger) return null;
+        }
         if (!await Permitted(db, tx, input.Room, input.Owner, robot, operatorAccess, type))
         {
             if (input.Inbox is long inbox) await ConsumeInbox(db, tx, inbox);
             else if (input.Trigger.Kind == BotEventKind.ToolResult) await ConsumeLocalResult(db, tx, input);
+            else if (timerWork is not null)
+                await SaveGoal(db, tx, timerWork, timerWork.Goal! with { Status = "disabled" }, input.Sequence, "disabled");
             else if (input.Trigger.GoalId is Guid id && await LockedWork(db, tx, id, input.Room, input.Owner) is { Status: "deciding" or "needs-reconciliation" } old)
                 await SaveGoal(db, tx, old, old.Goal! with { Status = "disabled" }, input.Sequence, "disabled");
             await tx.CommitAsync();
@@ -191,7 +212,9 @@ sealed partial class ChatStore
             while (await r.ReadAsync())
             {
                 var w = ReadWork(r);
-                goals.Add(new(w.Id, w.Goal!, w.Input.Loop is { } loop ? loop.Limit - loop.Used : limit));
+                var loop = w.Input.Loop;
+                goals.Add(new(w.Id, w.Goal!, loop is null ? limit : loop.Limit - loop.Used,
+                    BotDecision.MaxWakeups - (loop?.ScheduledWakeups ?? 0), loop?.Wake?.AtUnixMilliseconds));
             }
 
         var history = new List<BotObservation>();

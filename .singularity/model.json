@@ -3415,13 +3415,14 @@
       "type": "capability",
       "title": "统一聊天认知、持续 Harness 委派与可恢复目标",
       "actor": "AI",
-      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。",
+      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。到期检查进入相同的决策接口，派发结果可为本地策略提供提交边界，已提交决策附有模型请求与服务回报用量。",
       "authorization": "not_applicable",
       "delivery": "implemented",
       "verification": "passed",
       "verification_basis": [
         "EVIDENCE-BOT-DECISION-LOOP",
-        "EVIDENCE-BOT-AUTONOMY-INCREMENTS"
+        "EVIDENCE-BOT-AUTONOMY-INCREMENTS",
+        "EVIDENCE-BOT-AUTONOMY-ENDURANCE"
       ],
       "attributes": {},
       "references": [
@@ -3429,7 +3430,8 @@
         "REF-BOT-DECISION-CONTRACT",
         "REF-BOT-DECISION-STORE",
         "REF-BOT-AUTONOMY-RESEARCH",
-        "REF-BOT-LOCAL-COGNITION"
+        "REF-BOT-LOCAL-COGNITION",
+        "REF-BOT-AUTONOMY-ENDURANCE"
       ]
     },
     {
@@ -3449,6 +3451,43 @@
         "REF-BOT-HARNESS-RECOVERY-CHECKS",
         "REF-BOT-DECISION-CHECKS",
         "REF-BOT-DECISION-HTTP"
+      ]
+    },
+    {
+      "id": "CAP-CHAT-GOAL-TIMERS",
+      "type": "capability",
+      "title": "持久化目标到期检查与原决策入口",
+      "body": "定时等待随当前目标版本持久化。确认到期后以 Timer 进入 IBotDecisionEngine，事务消费旧时间和提交下一动作。暂停、取消、完成或修订使过去的时间标记失效。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-BOT-AUTONOMY-ENDURANCE"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-BOT-AUTONOMY-ENDURANCE",
+        "REF-BOT-TIMER-CHECKS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-BOT-AUTONOMY-ENDURANCE",
+      "type": "evidence",
+      "title": "持续自主工作、定时恢复和本地判断的对照验收",
+      "body": "证据区分受控故障、真实原生任务完成、复评分及未达成试次。核心回归和 SQLite 检查通过，真实任务仍会因无效认知草稿和重复派发失去持续性。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "2026-11-20，真实 HTTP bde04e03 达成 21 项目标决策、18 次原生派发，B04 后定时重启，两原生会话继续，16/16 阶段证据和最终报告吻合。后续 57546343、ba632f53、25d0287c 和 cb14588f 未完成。最终 cb14588f 独立证明 B02 的补充先于原生结束，但 B04 后的定时动作校验失败，目标进入人工等待。保留重复复核、动作契约、执行器 ID 与定时动作的反例。最终受控专项 87 项、SQLite 296 项及原生协议 14 项通过。合成配对的两种策略均为 0/10 错误，模型请求 6 对 10。"
+      },
+      "references": [
+        "REF-BOT-AUTONOMY-ENDURANCE",
+        "REF-BOT-TIMER-CHECKS",
+        "REF-BOT-ENDURANCE-DRIVER",
+        "REF-BOT-COGNITION-EVALUATION"
       ]
     }
   ],
@@ -4737,6 +4776,18 @@
       "source": "EVIDENCE-BOT-AUTONOMY-INCREMENTS",
       "type": "supports",
       "target": "CAP-BOT-DECISION-LOOP"
+    },
+    {
+      "id": "REL-BOT-ENDURANCE-SUPPORTS-TIMERS",
+      "type": "supports",
+      "source": "EVIDENCE-BOT-AUTONOMY-ENDURANCE",
+      "target": "CAP-CHAT-GOAL-TIMERS"
+    },
+    {
+      "id": "REL-BOT-ENDURANCE-SUPPORTS-LOOP",
+      "type": "supports",
+      "source": "EVIDENCE-BOT-AUTONOMY-ENDURANCE",
+      "target": "CAP-BOT-DECISION-LOOP"
     }
   ],
   "references": [
@@ -5571,6 +5622,34 @@
       "kind": "project_file",
       "target": "tests/LittleLoop.ChatChecks/HarnessRecoveryChecks.cs",
       "purpose": "经实际后台验证原派发恢复、来源替换与结果未知",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-AUTONOMY-ENDURANCE",
+      "kind": "project_file",
+      "target": "docs/59-autonomy-endurance.md",
+      "purpose": "持续目标时间事件、真实长任务与失败实测边界",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-TIMER-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.ChatChecks/BotTimerChecks.cs",
+      "purpose": "持久唤醒、用户生命周期及竞争的 SQLite 受控验收",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-ENDURANCE-DRIVER",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/autonomy_endurance.py",
+      "purpose": "真实 Harness 长任务的独立验证器及指标计算",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-COGNITION-EVALUATION",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.Checks/LocalCognitionEvaluation.cs",
+      "purpose": "同案本地优先与真实模型的动作、来源、请求量对照",
       "tracking": "live"
     }
   ],

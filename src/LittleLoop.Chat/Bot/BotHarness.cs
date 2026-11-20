@@ -39,7 +39,7 @@ sealed record HarnessToolResult(string Id, string Kind, string Status, string De
 }
 
 sealed record HarnessReceipt(string Status, string? SessionId, string Report, HarnessToolResult[] Tools,
-    bool? ToolsTruncated = null, BotToolFailure? FirstOmittedFailure = null)
+    bool? ToolsTruncated = null, BotToolFailure? FirstOmittedFailure = null, bool? DispatchSubmitted = null)
 {
     public BotToolEvidence SummarizeTools() => new(Tools.Length,
         Tools.Count(t => t.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)),
@@ -198,11 +198,11 @@ sealed class HarnessTurn(string directory, Guid dispatchId, Func<CancellationTok
         return current = saved;
     }
 
-    public void Opening() => Write(current with { Status = "opening", ToolsTruncated = false });
+    public void Opening() => Write(current with { Status = "opening", ToolsTruncated = false, DispatchSubmitted = false });
     public void Opened(string id) => Write(current with { SessionId = id });
     public void Sending()
     {
-        Write(current with { Status = "running" });
+        Write(current with { Status = "running", DispatchSubmitted = true });
         Submitted = true;
     }
 
