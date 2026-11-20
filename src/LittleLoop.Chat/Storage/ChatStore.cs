@@ -190,7 +190,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
 
     public async Task<SendResult?> Send(string user, string name, string room, PostMessage input, ForwardMessage? forward = null,
         MessageCard? card = null, BotWork? job = null, string? goalRobot = null, bool legacyBotOperator = true,
-        BotWork? answeredWork = null, string answerStatus = "completed", long? answerRevision = null)
+        BotWork? answeredWork = null, string answerStatus = "completed", long? answerRevision = null, bool decisionRequest = false, Func<string, bool>? noticeOperator = null)
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -206,6 +206,14 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
             latest = reader.GetInt64(0);
         }
         if (!await IsMember(db, tx, room, user)) return null;
+        if (noticeOperator is not null && input.ReplyTo is long sourceSeq)
+        {
+            // Order a delayed outbox delivery with source edits, uninstall and access revocation.
+            await using var source = Command(db, tx, "SELECT sender_id FROM chat_messages WHERE room_id=@room AND seq=@seq AND NOT deleted AND NOT edited",
+                ("room", room), ("seq", sourceSeq));
+            if (await source.ExecuteScalarAsync() is not string recipient ||
+                !await Permitted(db, tx, room, recipient, user, noticeOperator(recipient), roomType)) return null;
+        }
         if (answeredWork is not null)
         {
             if (answeredWork.Kind != "chat" || answerStatus is not ("completed" or "failed" or "needs-reconciliation"))
@@ -252,7 +260,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
             routeToBot = access == BotFriendAccessState.Active || access == BotFriendAccessState.Unmanaged && legacyBotOperator;
             if (!routeToBot) throw new BotFriendshipRequiredException();
         }
-        if (job?.Status == "queued")
+        if (job?.Status == "queued" || decisionRequest)
         {
             await using var installed = Command(db, tx, "SELECT enabled FROM chat_bot_rooms WHERE room_id=@room FOR SHARE", ("room", room));
             if (await installed.ExecuteScalarAsync() is not { } value || !Convert.ToBoolean(value))
@@ -295,8 +303,8 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
             await comment.ExecuteNonQueryAsync();
         }
         if (job is not null) await InsertJob(db, tx, job with { Sequence = seq });
-        if (goalRobot is not null && routeToBot && forward is null && card is null && !string.IsNullOrWhiteSpace(input.Text))
-            await EnqueueGoalMessage(db, tx, room, roomType, user, seq, input, goalRobot);
+        if (goalRobot is not null && routeToBot && forward is null && (card is null || decisionRequest) && !string.IsNullOrWhiteSpace(input.Text))
+            await EnqueueGoalMessage(db, tx, room, roomType, user, seq, input, goalRobot, decisionRequest);
         if (roomType != "legacy")
         {
             await EnqueuePush(db, tx, room, seq, user);
@@ -322,7 +330,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
         return await cmd.ExecuteNonQueryAsync() != 0;
     }
 
-    private static async Task<bool> IsMember(DbConnection db, DbTransaction? tx, string room, string user)
+    internal static async Task<bool> IsMember(DbConnection db, DbTransaction? tx, string room, string user)
     {
         await using var cmd = Command(db, tx, "SELECT 1 FROM chat_members WHERE room_id=@room AND user_id=@user",
             ("room", room), ("user", user));
@@ -350,7 +358,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
     private static DateTime? ReadTimestamp(DbDataReader reader, int index) => reader.IsDBNull(index)
         ? null : DateTime.SpecifyKind(reader.GetDateTime(index), DateTimeKind.Utc);
 
-    private async Task<DbConnection> Open()
+    internal async Task<DbConnection> Open()
     {
         DbConnection db = sqlite ? new Microsoft.Data.Sqlite.SqliteConnection(connectionString) : new MySqlConnection(connectionString);
         try

@@ -1,3 +1,5 @@
+using LittleLoop.Core;
+using LittleLoop.Tools;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -61,6 +63,15 @@ builder.Services.AddHostedService(sp => new ChatPush(store, pushIdentity,
     config["ChatPush:Subject"] ?? "mailto:chat-admin@example.invalid", sp.GetRequiredService<ILogger<ChatPush>>()));
 if (config["ChatBot:Policy"] is not null)
 {
+    builder.Services.AddSingleton(sp =>
+    {
+        string path = config["ChatBot:DecisionModel"] ?? config["ChatBot:ConversationModel"] ??
+            throw new InvalidOperationException("Set ChatBot__DecisionModel to a semantic model configuration.");
+        return ChatStore.FromJson<SemanticModelConfig>(File.ReadAllText(path));
+    });
+    builder.Services.AddSingleton<ISemanticModelClient>(sp => new HttpSemanticModelClient(sp.GetRequiredService<SemanticModelConfig>()));
+    builder.Services.AddSingleton<IBotDecisionEngine>(sp => new ModelBotDecisionEngine(
+        sp.GetRequiredService<ISemanticModelClient>(), sp.GetRequiredService<SemanticModelConfig>().MaxInputCharacters));
     builder.Services.AddSingleton<ChatBot>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatBot>());
 }
@@ -70,7 +81,7 @@ if (config.GetValue<bool>("ChatCommitments:Enabled"))
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatCommitments>());
 }
 if (fcmProject is not null)
-    builder.Services.AddHostedService(sp => new ChatFcm(store, sp.GetService<ChatBot>(), fcmProject,
+    builder.Services.AddHostedService(sp => new ChatFcm(store, fcmProject,
         sp.GetRequiredService<ILogger<ChatFcm>>()));
 
 var app = builder.Build();
@@ -220,7 +231,7 @@ ChatChannelDiscussionEndpoints.Map(secured, store);
 ChatSettingsEndpoints.Map(secured, store);
 IdentityEndpoints.Map(secured, store);
 ChatPush.Map(secured, store, pushIdentity);
-ChatFcm.Map(secured, store, app.Services.GetService<ChatBot>(), fcmProject);
+ChatFcm.Map(secured, store, fcmProject);
 ChatSocialEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
 ChatBotEndpoints.Map(secured, store, app.Services.GetService<ChatBot>());
 ChatCommitments.Map(secured, app.Services.GetService<ChatCommitments>());

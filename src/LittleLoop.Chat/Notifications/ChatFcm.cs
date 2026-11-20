@@ -10,14 +10,14 @@ using MySqlConnector;
 
 sealed record FcmSubscription(string Token, string Project, bool InstallationId = false);
 
-sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<ChatFcm> log) : BackgroundService
+sealed class ChatFcm(ChatStore store, string project, ILogger<ChatFcm> log) : BackgroundService
 {
     private const string CloudMessagingScope = "https://www.googleapis.com/auth/firebase.messaging";
 
-    public static async Task<FcmDelivery?> Resolve(ChatStore store, ChatBot? bot, long id, string? device = null)
+    public static async Task<FcmDelivery?> Resolve(ChatStore store, long id, string? device = null)
     {
         var notice = await store.ReadFcm(id, device);
-        if (notice?.Work is not null && (bot is null || !await bot.IsPendingFcmApproval(notice))) return null;
+        if (notice?.Work is not null) return null; // Retired project approval notifications.
         return notice;
     }
 
@@ -34,7 +34,7 @@ sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<Chat
             {
                 id = await store.ClaimFcm();
                 if (!id.HasValue) continue;
-                var notice = await Resolve(store, bot, id.Value);
+                var notice = await Resolve(store, id.Value);
                 if (notice is null) { await store.CompleteFcm(id.Value, false); continue; }
 
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -89,7 +89,7 @@ sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<Chat
         return null;
     }
 
-    public static void Map(RouteGroupBuilder api, ChatStore store, ChatBot? bot, string? project)
+    public static void Map(RouteGroupBuilder api, ChatStore store, string? project)
     {
         api.MapGet("/settings/fcm", () => Results.Ok(new { project }));
         api.MapPost("/settings/fcm", async (FcmSubscription input, ClaimsPrincipal user) =>
@@ -110,7 +110,7 @@ sealed class ChatFcm(ChatStore store, ChatBot? bot, string project, ILogger<Chat
         api.MapGet("/settings/fcm/notices/{id:long}", async (long id, ClaimsPrincipal user) =>
         {
             if (project is null || id <= 0) return Results.NotFound();
-            var notice = await Resolve(store, bot, id, ChatSettingsEndpoints.Device(user));
+            var notice = await Resolve(store, id, ChatSettingsEndpoints.Device(user));
             return notice is null ? Results.NotFound() : Results.Ok(new {
                 notice.Room, notice.Sequence, notice.Title, notice.Body, notice.Sound, notice.Work, notice.CommentChannel, notice.CommentPost
             });

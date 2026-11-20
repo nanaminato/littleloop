@@ -128,7 +128,7 @@
     @case ('integrations') {
       <div class="fields">
         @for (adapter of adapters(); track adapter) { <strong>{{ adapter === 'source_review' ? label('源码审阅','Source review') : adapter }}</strong> }
-        <p>{{ label('请从群或话题菜单管理机器人。审批权限由部署管理员配置。','Manage bots from the group or topic menu. Deployment administrators configure approvals.') }}</p>
+        <p>{{ label('请从群或话题菜单管理机器人。','Manage bots from the group or topic menu.') }}</p>
       </div>
     }
     @case ('about') {

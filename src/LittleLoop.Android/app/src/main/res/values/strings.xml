@@ -190,7 +190,7 @@
 
     <string name="bot_title_question">Source Q&amp;A</string>
     <string name="bot_title_citation">Source citation</string>
-    <string name="bot_title_task">Development task</string>
+    <string name="bot_title_task">Work goal</string>
     <string name="bot_provider_review">Source review</string>
     <string name="bot_source_ref">Source citation · %1$s:%2$d–%3$d</string>
     <string name="bot_result">Execution result</string>
@@ -207,9 +207,9 @@
     <string name="bot_question">Question</string>
     <string name="bot_goal">Task goal and acceptance criteria</string>
     <string name="bot_submit_question">Submit source question</string>
-    <string name="bot_submit_task">Submit development task</string>
+    <string name="bot_submit_task">Submit task</string>
     <string name="bot_ask">Ask about source code</string>
-    <string name="bot_schedule">Schedule development task</string>
+    <string name="bot_schedule">Schedule task</string>
     <string name="bot_check_input">Check your input.</string>
     <string name="bot_denied">This account cannot perform this action.</string>
     <string name="bot_unavailable">The chat or task is unavailable.</string>
@@ -220,6 +220,7 @@
     <string name="bot_status_paused">Paused</string>
     <string name="bot_status_cancelled">Cancelled</string>
     <string name="bot_status_waiting_input">Waiting for requirements</string>
+    <string name="bot_status_deciding">Deciding the next step</string>
     <string name="bot_status_running">Running</string>
     <string name="bot_status_completed">Completed</string>
     <string name="bot_status_failed">Failed</string>

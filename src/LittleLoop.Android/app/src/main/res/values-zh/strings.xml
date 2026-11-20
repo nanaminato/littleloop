@@ -190,7 +190,7 @@
 
     <string name="bot_title_question">源码问答</string>
     <string name="bot_title_citation">源码引用</string>
-    <string name="bot_title_task">开发任务</string>
+    <string name="bot_title_task">工作目标</string>
     <string name="bot_provider_review">源码审阅</string>
     <string name="bot_source_ref">源码引用 · %1$s:%2$d–%3$d</string>
     <string name="bot_result">执行结果</string>
@@ -207,9 +207,9 @@
     <string name="bot_question">问题</string>
     <string name="bot_goal">任务目标和验收</string>
     <string name="bot_submit_question">提交源码提问</string>
-    <string name="bot_submit_task">提交开发任务</string>
+    <string name="bot_submit_task">提交任务</string>
     <string name="bot_ask">引用源码提问</string>
-    <string name="bot_schedule">安排开发任务</string>
+    <string name="bot_schedule">安排任务</string>
     <string name="bot_check_input">请检查输入</string>
     <string name="bot_denied">当前账号无权执行此操作</string>
     <string name="bot_unavailable">会话或任务不可访问</string>
@@ -220,6 +220,7 @@
     <string name="bot_status_paused">已暂停</string>
     <string name="bot_status_cancelled">已取消</string>
     <string name="bot_status_waiting_input">等待补充要求</string>
+    <string name="bot_status_deciding">正在决定下一步</string>
     <string name="bot_status_running">执行中</string>
     <string name="bot_status_completed">已完成</string>
     <string name="bot_status_failed">失败</string>

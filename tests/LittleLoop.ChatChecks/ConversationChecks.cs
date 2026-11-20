@@ -68,6 +68,7 @@ internal static class ConversationChecks
             ChatConversation.FailureReply(ConversationFailure.Unavailable).Contains("无法连接"),
             "conversation failures distinguish upstream rate limits, timeouts, permission and disconnection");
         await CodexPrivateConversationChecks.Run(check);
+        await NativeHarnessChecks.Run(check);
         DeepSeekPrivateConversationChecks.Run(check);
     }
 }

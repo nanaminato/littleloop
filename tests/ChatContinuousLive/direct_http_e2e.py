@@ -4,6 +4,7 @@ Build Chat first. Set LITTLELOOP_CODEX_EXECUTABLE and optionally LITTLELOOP_CODE
 CODEX_CA_CERTIFICATE and LITTLELOOP_CHAT_DLL. Pass --memory for the sourced conditional-memory experiment
 or --memory-generalization for held-out tasks and both retrieval and outcome metrics. Pass --friend-access
 for robot onboarding and --friend-tools as well to exercise a real Codex patch and test with a separate approver.
+Pass --decision-loop for the unified bot, a real cognition API, and a native Codex turn.
 """
 import argparse
 import hashlib
@@ -14,6 +15,7 @@ from pathlib import Path
 import re
 import secrets
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -26,6 +28,8 @@ from friend_access import ACCOUNTS as FRIEND_ACCOUNTS, run as run_friend_access
 
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
+mode.add_argument('--decision-loop', nargs='?', choices=['copy', 'review', 'search', 'handoff', 'private-copy'], const='copy',
+    help='exercise real cognition, native Codex, DeepSeek ACP, or a two-Harness handoff')
 mode.add_argument('--conversation', action='store_true', help='check natural replies and preauthorized private project work')
 mode.add_argument('--memory', action='store_true', help='run the private memory and override experiment')
 mode.add_argument('--memory-generalization', action='store_true', help='measure held-out private task recall and outcomes')
@@ -55,7 +59,7 @@ for name, value in [('code.txt', 'broken'), ('notes.txt', 'pending')]:
 policy = dict(executable=str(EXECUTABLE), project=str(PROJECT), maxTurns=8, timeoutSeconds=300, maxRepairs=1,
     development=dict(root=str(PROJECT), writableFiles=['code.txt', 'notes.txt'], readExtensions=['.txt', '.py'], budget=40,
         commands=[dict(id='verify', executable=sys.executable, arguments=['verify.py'], isTest=True, protectedFiles=['verify.py'])]))
-if not options.conversation:
+if not options.conversation and not options.decision_loop:
     policy['approvalMode'] = 'user'
 if options.memory or options.memory_generalization:
     # The independently checked convention is deliberately absent from both the workspace and test command.
@@ -132,6 +136,20 @@ def start(label, bot=False):
     if bot:
         child.update(ChatBot__Policy=str(ROOT / 'policy.json'), ChatBot__Data=str(ROOT / 'bot'),
             ChatBot__Operators='direct_owner', ChatBot__Approvers='direct_owner')
+        if options.decision_loop:
+            child.pop('ChatBot__Approvers')
+            if options.decision_loop == 'private-copy':
+                child['ChatBot__AccessAdmins'] = 'direct_owner'
+            child['ChatBot__DecisionModel'] = str(Path(os.environ.get('LITTLELOOP_DECISION_MODEL',
+                REPO / 'examples/models/deepseek.json')).resolve(strict=True))
+            child['ChatBot__MaxHarnessTurns'] = '3'
+            if options.decision_loop in ('search', 'handoff', 'private-copy'):
+                # Use the caller's deployed ACP command against this run's synthetic project.
+                options_prefix = 'chatbot__deepseek__'
+                child.update((k, v) for k, v in os.environ.items() if k.lower().startswith(options_prefix))
+                child['ChatBot__DeepSeek__Project'] = str(PROJECT)
+                assert any(k.lower() in (options_prefix + 'readonlylauncher', options_prefix + 'launcher')
+                    for k in child), 'Set the deployed DeepSeek launcher and its arguments'
         if options.friend_access:
             child.update(ChatBot__AccessAdmins='access_admin', ChatBot__Approvers='tool_approver')
     log = open(ROOT / (label + '.log'), 'wb')
@@ -200,6 +218,78 @@ def settled(task, status):
 
 def reply_for(message, seconds=20):
     return wait(lambda: next((m for m in history() if m['sender'] == 'littleloop' and m.get('replyTo') == message['sequence']), None), seconds)
+
+
+def check_decision_loop():
+    marker = 'CHECK-' + secrets.token_hex(10)
+    (PROJECT / 'notes.txt').write_text(marker + '\n', encoding='utf-8')
+    question = send('如果一个列表有 17 个元素，移走 3 个还剩几个？用数字回答即可。')
+    reply = reply_for(question, 120)
+    assert '14' in reply['text'] and not reply.get('card'), reply['text']
+    record('a real cognition API answers ordinary discussion through chat without a goal')
+
+    case = options.decision_loop
+    expected_answer = marker
+    if case == 'copy':
+        objective = '工作区 notes.txt 里是本次验收编号。请把文件中的实际编号原样写入同目录 code.txt 并核对一致，完成后告诉我编号。'
+    elif case == 'review':
+        value = secrets.randbelow(8000) + 1000
+        expected_answer = str(value)
+        objective = (f'请委托 Codex 做一次独立代码审阅，再根据它的回执告诉我唯一错误分类的输入整数。'
+            f'完整规范：大于等于 {value} 返回 A，其余返回 B。完整实现：if (x > {value}) return A; else return B;。'
+            '代码已全部附在此处，只需静态审阅。')
+    elif case == 'search':
+        objective = '请让 DeepSeek 在当前项目中检索以 CHECK- 开头的验收编号，告诉我文件名和实际编号。'
+    elif case == 'handoff':
+        objective = ('分两步完成这次复核。先由 DeepSeek 在当前项目里检索以 CHECK- 开头的实际验收编号。'
+            '取得编号后，请把找到的字符串作为输入交给 Codex。Codex 的工作是字符串解析：'
+            '直接在输入的字符串上定位末尾四个字符，回报原字符串和这四个字符。此步骤完全基于字符串，无需读取文件。'
+            '两个协作者的回执都收到后，再告诉我完整编号和后四位。')
+    else:
+        objective = (f'请交给 DeepSeek 把本次随机验收编号 {marker} 写到当前私聊工作区的 smoke.txt，'
+            '文件只放编号。写入后再读取文件核对，并把读到的编号告诉我。')
+    message = send(objective)
+    plan = reply_for(message, 120)
+    task = (plan.get('card') or {}).get('taskId') or task_for(message)
+
+    def completed():
+        value = state(task)
+        if value['status'] in ('waiting-input', 'needs-reconciliation', 'disabled', 'failed', 'cancelled', 'paused'):
+            raise AssertionError((value['status'], value.get('output'), [m['text'] for m in history() if m['sender'] == 'littleloop']))
+        return value if value['status'] == 'completed' else None
+
+    wait(completed, 420)
+    if case == 'copy':
+        assert (PROJECT / 'code.txt').read_text(encoding='utf-8-sig').strip() == marker
+    if case == 'private-copy':
+        with sqlite3.connect(ROOT / 'chat.db') as db:
+            uid, = db.execute("SELECT id FROM chat_accounts WHERE name='direct_other'").fetchone()
+        path = ROOT / 'bot/private-conversations' / room.replace('-', '') / uid.replace('-', '') / 'workspace/smoke.txt'
+        assert path.read_text(encoding='utf-8-sig').strip() == marker
+    with sqlite3.connect(ROOT / 'chat.db') as db:
+        rows = list(db.execute('SELECT kind,observation FROM chat_bot_events WHERE room_id=? ORDER BY id', (room,)))
+    events = [dict(kind=kind, observation=json.loads(value)) for kind, value in rows]
+    kinds = [event['kind'] for event in events]
+    assert set(kinds) >= {'UserMessage', 'BotDecision', 'HarnessReceipt'}, kinds
+    if case != 'review':
+        assert 'ToolResult' in kinds, kinds
+    receipt = max(i for i, kind in enumerate(kinds) if kind == 'HarnessReceipt')
+    final_decision = next(e['observation'] for e in events[receipt + 1:] if e['kind'] == 'BotDecision' and
+        e['observation']['status'] == 'Complete' and e['observation']['goalId'] == task)
+    summary = wait(lambda: next((m['text'] for m in history() if m['sender'] == 'littleloop' and
+        m['sequence'] > plan['sequence'] and m['text'] == final_decision['text']), None), 40)
+    assert expected_answer in summary
+    assert events[receipt]['observation']['harness'] == ('deepseek' if case in ('search', 'private-copy') else 'codex')
+    if case == 'handoff':
+        receipts = [item['observation'] for item in events if item['kind'] == 'HarnessReceipt']
+        assert receipts[0]['harness'] == 'deepseek' and marker in receipts[0]['text']
+        assert all(r['goalId'] == task for r in receipts)
+        # The parsed suffix must be reported separately from its occurrence inside the full ID.
+        for text in (receipts[-1]['text'], summary):
+            assert re.search(r'(?<![0-9a-f])' + re.escape(marker[-4:]) + r'(?![0-9a-f])', text, re.I)
+    assert expected_answer in events[receipt]['observation']['text']
+    record(f'real {case} receipt and a subsequent Bot decision produce the verified chat summary')
+    return dict(case=case, task=task, plan=plan['text'], answer=reply['text'], summary=summary, events=events)
 
 
 def progress(task, status):
@@ -360,8 +450,15 @@ try:
     assert request(owner, '/bot/direct', {})['id'] == room
     assert request(owner, f'/bot/rooms/{room}')['type'] == 'direct'
     request(outsider, f'/rooms/{room}/messages', expected=404)
-    record('authenticated private Codex room, idempotent enrollment and operator isolation')
-    if options.friend_access:
+    record('authenticated private LittleLoop room, idempotent enrollment and operator isolation')
+    if options.decision_loop == 'private-copy':
+        request(owner, '/bot/access/allowlist', dict(username='direct_other', allowed=True), 204)
+        room = request(outsider, '/friends', dict(username='littleloop'))['roomId']
+        assert not request(outsider, '/bot/capabilities')['canOperate']
+        owner = outsider
+    if options.decision_loop:
+        details = check_decision_loop()
+    elif options.friend_access:
         details = run_friend_access(sessions, request, wait, record, PROJECT, tools=options.friend_tools)
     elif options.conversation:
         answers = []

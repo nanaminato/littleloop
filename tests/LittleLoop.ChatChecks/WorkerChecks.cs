@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
+using LittleLoop.Core;
 using LittleLoop.Tools;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
@@ -6,15 +8,31 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 internal static class WorkerChecks
 {
-    public static async Task Run(ChatStore store, Account owner, Account approver, Account robot, string room, Action<bool, string> check)
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
+
+    public static async Task Run(Action<bool, string> check)
     {
-        await ConversationChecks.Run(check);
-        string root = Path.GetFullPath(Path.Combine("data", "continuous-worker-checks", Guid.NewGuid().ToString("N")));
-        string project = Path.Combine(root, "project"); Directory.CreateDirectory(project);
+        await BotRecoveryChecks.Run(check);
+        using var fixture = new TemporaryChatDatabase();
+        ChatStore Open() => new(fixture.Connection, false, "Sqlite");
+        var store = Open();
+        await store.Initialize();
+        await store.InitializeChannelAdministration();
+        await store.InitializeGroupModeration();
+        await store.InitializeChannelDiscussions();
+        var owner = new Account(Guid.NewGuid().ToString(), "decision_owner", "!fixture");
+        await store.Register(owner);
+        var robot = await store.GetRobot(ChatStore.BotName);
+        var room = await store.CreateRoom(owner, new("direct", null, [robot.Name]));
+        await store.InstallRobot(room.Id, owner.Id, [robot.Id], true);
+
+        string root = Directory.CreateTempSubdirectory("littleloop-decisions-").FullName;
+        string project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        var grant = new DevelopmentPolicy(project, ["code.txt"],
+            [new("verify", Environment.ProcessPath!, ["--verify-fixture"], true, ["verify.txt"])], [".txt"]);
         File.WriteAllText(Path.Combine(project, "code.txt"), "fixture");
-        File.WriteAllText(Path.Combine(project, "verify.txt"), "protected verifier fixture");
+        File.WriteAllText(Path.Combine(project, "verify.txt"), "fixture");
         string policy = Path.Combine(root, "policy.json");
-        var grant = new DevelopmentPolicy(project, ["code.txt"], [new("verify", Environment.ProcessPath!, ["--verify-fixture"], true, ["verify.txt"])], [".txt"]);
         var originalPolicy = new AgentHostPolicy("unused", project, Development: grant);
         File.WriteAllText(policy, ChatStore.ToJson(originalPolicy));
         string savedFolder = Path.Combine(root, "previous-task");
@@ -29,252 +47,284 @@ internal static class WorkerChecks
         {
             var primary = new LittleLoopChatAdapter(originalPolicy with { Project = replacement.Root, Development = replacement },
                 root, _ => Task.FromResult(true));
-            var outcome = await primary.Run(new(Guid.NewGuid(), room, owner.Id, 1, "task", "running", new("继续")),
+            var outcome = await primary.Run(new(Guid.NewGuid(), room.Id, owner.Id, 1, "task", "running", new("继续")),
                 savedFolder, (_, _) => throw new Exception("Stale grant requested approval"), CancellationToken.None);
             check(outcome.Status == "needs-reconciliation" && outcome.Report!.Contains("开发授权已变更") &&
                 File.ReadAllText(stateFile) == suspended && File.ReadAllText(Path.Combine(project, "code.txt")) == "fixture",
                 "old task cannot start its agent or execute when the current development grant changes");
         }
+
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ChatBot:Policy"] = policy, ["ChatBot:Data"] = Path.Combine(root, "worker"),
-            ["ChatBot:Operators"] = owner.Name, ["ChatBot:Approvers"] = approver.Name
+            ["ChatBot:Operators"] = owner.Name, ["ChatBot:MaxHarnessTurns"] = "3"
         }).Build();
-        var executor = new ControlledAdapter();
-        var independent = new ControlledAdapter(ChatStore.DeepSeekTestBotName, Path.Combine(root, "independent"));
-        var independentRobot = await store.GetRobot(independent.Name);
-        var otherRoom = await store.CreateRoom(owner, new("direct", "", [independentRobot.Name]));
-        await store.InstallRobot(otherRoom.Id, owner.Id, [independentRobot.Id], true);
-        ChatBot Create(ControlledAdapter? primary = null) =>
-            new(store, new QuietHub(), config, NullLogger<ChatBot>.Instance, [primary ?? executor, independent]);
-        async Task<SendResult> Send(string text, long? reply = null) =>
-            await store.Send(owner.Id, owner.Name, room, new(Guid.NewGuid().ToString(), text, reply), goalRobot: robot.Id)
-                ?? throw new Exception("Worker fixture message not sent");
-        async Task Wait(Guid id, string status)
+
+        var deepseek = new ControlledHarness("deepseek", project);
+        var codex = new ControlledHarness("codex", project);
+        var engine = new ControlledEngine();
+        ChatBot Create() => new(store, new QuietHub(), config, NullLogger<ChatBot>.Instance,
+            decisionEngine: engine, configuredHarnesses: [codex, deepseek]);
+        var worker = Create();
+        async Task Restart()
         {
-            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            while ((await store.ReadBotWork(id, owner.Id))?.Status != status) await Task.Delay(50, limit.Token);
-        }
-        var worker = Create(); await worker.StartAsync(CancellationToken.None);
-        try
-        {
-            const string background = "当前在使用测试环境。回答尽量简短。";
-            var remember = await Send("记住上下文：" + background);
-            await ReplyTo(remember.Message.Sequence);
-            var inspect = await Send("查看上下文？");
-            check((await ReplyTo(inspect.Message.Sequence)).Text.Contains(background) && executor.LastChat is null,
-                "private chat stores and reads a runtime context note without invoking an agent");
-            const string quoteRequest = "帮我查询一下最近黄金的价格走势，整理为一个 Excel 发给我。";
-            var general = await Send(quoteRequest);
-            var firstReply = await ReplyTo(general.Message.Sequence);
-            check(general.Message.Card is null && firstReply.Card is null && firstReply.Text == "代理夹具回复。" &&
-                executor.Calls == 0 && executor.LastChat?.ConversationNote == background,
-                "ordinary market and Excel request receives the agent reply without a local business-specific fallback");
-            var followup = await Send("那能帮我解释一下这几列吗？", firstReply.Sequence);
-            await ReplyTo(followup.Message.Sequence);
-            check(executor.LastChat?.History.LastOrDefault() is { Quoted: true } previous &&
-                previous.User == quoteRequest && previous.Assistant == firstReply.Text,
-                "ordinary text answers include the referenced exchange from the same conversation");
-
-            var message = await Send("/task 验证持续调度");
-            var first = await executor.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
-            var group = await store.CreateRoom(owner, new("group", "Private grant boundary", [approver.Name]));
-            await store.InstallRobot(group.Id, owner.Id, [robot.Id], true);
-            check(await worker.IsPrivateOperator(first) && !await worker.IsPrivateOperator(first with { Room = group.Id }) &&
-                !await worker.IsPrivateOperator(first with { Input = first.Input with { Provider = independent.Name } }),
-                "direct operator grant is specific to the primary bot and private room");
-            const string computerRequest = "把这台电脑的应用主题改成深色";
-            var computerMessage = await Send(computerRequest);
-            var computerReply = await ReplyTo(computerMessage.Message.Sequence);
-            check(executor.LastChat?.Text == computerRequest && computerReply.Card is null && executor.Calls == 1,
-                "computer requests go to the conversation adapter even during a development task");
-            check(first.Goal is { Version: 1, Status: "running" }, "background worker consumes ordinary chat message without manual queue action");
-
-            Guid sameProjectId = Guid.NewGuid();
-            var sameProject = await worker.Queue(room, owner.Id, owner.Name, sameProjectId, null, "task", new("Same workspace"));
-            Guid independentId = Guid.NewGuid();
-            await worker.Queue(otherRoom.Id, owner.Id, owner.Name, independentId, null, "task",
-                new("Independent workspace", Provider: independent.Name));
-            var parallel = await independent.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
-            check(parallel.Id == independentId && (await store.ReadBotWork(first.Id, owner.Id))?.Status == "running" &&
-                (await store.ReadBotWork(sameProjectId, owner.Id))?.Status == "queued",
-                "occupied workspace blocks its own queue but allows a later independent goal to run");
-            Guid questionId = Guid.NewGuid();
-            await worker.Queue(room, owner.Id, owner.Name, questionId, null, "question",
-                new("Question during execution", Source: worker.Cite("code.txt", 1, 1)));
-            await Wait(questionId, "completed");
-            check((await store.ReadBotWork(independentId, owner.Id))?.Status == "running",
-                "source question finishes while all development slots are occupied");
-            await Send("进度");
-            using (var overviewLimit = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
-                while (!(await store.History(owner.Id, room, null, null))!.Any(m =>
-                    m.Sender == robot.Name && m.Text.Contains("当前有 2 项未结束任务") &&
-                    m.Text.Contains("Same workspace") && m.Text.Contains("验证持续调度")))
-                    await Task.Delay(50, overviewLimit.Token);
-            check(true, "plain progress lists the user's in-room goals while execution continues");
-            independent.Release.TrySetResult();
-            await Wait(independentId, "completed");
-            await Send("取消", sameProject!.Sequence);
-            await Wait(sameProjectId, "cancelled");
-
-            await Send("暂停", message.Message.Sequence); await Wait(first.Id, "paused");
-            await executor.Yielded.Task.WaitAsync(TimeSpan.FromSeconds(15));
-            await worker.StopAsync(CancellationToken.None); worker.Dispose();
-            worker = Create(); await worker.StartAsync(CancellationToken.None);
-            await Task.Delay(900);
-            check(executor.Calls == 1 && (await store.ReadBotWork(first.Id, owner.Id))!.Status == "paused", "paused goal survives worker restart without automatic execution");
-            check(independent.Calls == 1 && (await store.ReadBotWork(independentId, owner.Id))?.Status == "completed",
-                "restart preserves independent goal completion without a second dispatch");
-            await Send("补充：保留已有数据", message.Message.Sequence);
-            await Send("恢复", message.Message.Sequence);
-            var resumed = await executor.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
-            check(resumed.Id == first.Id && resumed.Goal!.Version == 4 && resumed.Input.Text.Contains("保留已有数据"),
-                "worker resumes same goal with conversation requirements after restart");
-            executor.Release.TrySetResult(); await Wait(first.Id, "completed");
-            using var noticeLimit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            while (!(await store.History(owner.Id, room, null, null))!.Any(m => m.Sender == robot.Name && m.Text.Contains("实际修改与必需测试通过")))
-                await Task.Delay(100, noticeLimit.Token);
-            check(true, "background completion is delivered to durable chat timeline");
-            Guid scheduledId = Guid.NewGuid();
-            await worker.Queue(room, owner.Id, owner.Name, scheduledId, message.Message.Sequence, "task", new("Existing schedule action"));
-            await Wait(scheduledId, "completed");
-            check((await store.ReadBotWork(scheduledId, owner.Id))!.Goal is { Version: 1 },
-                "existing schedule action uses the same persistent goal lifecycle");
-
-            // More than one inbox batch, with all work retained in the same database and room.
-            var backlog = new List<(Guid Id, long Sequence)>();
-            for (int i = 0; i < 40; i++)
-            {
-                var sent = await Send("任务");
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                ChatMessage? linked;
-                while ((linked = await store.FindMessage(room, sent.Message.Sequence, owner.Id))?.Card?.TaskId is null)
-                    await Task.Delay(20, timeout.Token);
-                backlog.Add((linked.Card.TaskId.Value, sent.Message.Sequence));
-            }
-            foreach (var item in backlog) await Send("暂停", item.Sequence);
-            foreach (var item in backlog) await Wait(item.Id, "paused");
-            await worker.StopAsync(CancellationToken.None); worker.Dispose();
-            // Accumulate input while the worker is down, then replay the durable inbox.
-            foreach (var item in backlog)
-            {
-                await Send("补充：保留已有数据并完成测试", item.Sequence);
-                await Send("恢复", item.Sequence);
-            }
-            worker = Create(); await worker.StartAsync(CancellationToken.None);
-            foreach (var item in backlog) await Wait(item.Id, "completed");
-            check(executor.Calls == 43, "40 queued goals after restart execute exactly once without starvation");
-            await worker.StopAsync(CancellationToken.None); worker.Dispose();
-            worker = Create(); await worker.StartAsync(CancellationToken.None);
-            foreach (var item in backlog)
-            {
-                var restored = await store.ReadBotWork(item.Id, owner.Id);
-                check(restored?.Goal is { Version: 4, Status: "completed", Objective: "保留已有数据并完成测试" },
-                    "batch goal retains supplemented objective, version and terminal state after restart");
-            }
-            await worker.StopAsync(CancellationToken.None); worker.Dispose();
-            var inFlight = new ControlledAdapter();
-            worker = Create(inFlight);
-            var friend = new Account(Guid.NewGuid().ToString(), "worker_friend_" + Guid.NewGuid().ToString("N")[..8], "!fixture");
-            await store.Register(friend);
-            await store.SetBotFriendAllowlist(robot.Id, friend.Name, true);
-            var friendGrant = await store.RequestBotFriend(friend.Id, robot.Id);
-            var friendRoom = friendGrant?.RoomId ?? throw new InvalidOperationException("Could not establish a room for the worker test.");
+            await worker.StopAsync(CancellationToken.None);
+            worker.Dispose();
+            store = Open();
+            engine = new ControlledEngine();
+            worker = Create();
             await worker.StartAsync(CancellationToken.None);
-            check(!worker.CanOperate(friend.Id) && await worker.CanOperateRoom(friend.Id, friendRoom),
-                "friend access is scoped to its room, independently of static operators");
-            await store.Send(friend.Id, friend.Name, friendRoom,
-                new(Guid.NewGuid().ToString(), "/task 验证执行中撤销机器人访问", null), goalRobot: robot.Id, legacyBotOperator: false);
-            var friendWork = await inFlight.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
-            check(!await worker.IsPrivateOperator(friendWork), "friendship alone cannot use private operator grants");
-            await store.SetBotFriendAllowlist(robot.Id, friend.Name, false);
-            await inFlight.Yielded.Task.WaitAsync(TimeSpan.FromSeconds(15));
-            using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
-                while ((await store.ReadBotWork(friendWork.Id, friend.Id))?.Status != "cancelled")
-                    await Task.Delay(50, deadline.Token);
-            await store.SetBotFriendAllowlist(robot.Id, friend.Name, true);
-            await store.RequestBotFriend(friend.Id, robot.Id);
-            await Task.Delay(900);
-            check(inFlight.Calls == 1 && (await store.ReadBotWork(friendWork.Id, friend.Id))?.Status == "cancelled",
-                "revoked in-flight work yields and granting future access does not replay the old task");
         }
-        finally { await worker.StopAsync(CancellationToken.None); worker.Dispose(); }
-
-        var deepseek = new ControlledAdapter(ChatStore.DeepSeekBotName, Path.Combine(root, "read-only-acp"));
-        var defaultAdapter = new ControlledAdapter();
-        config["ChatBot:ConversationHarness"] = "deepseek";
-        using var deepseekWorker = new ChatBot(store, new QuietHub(), config, NullLogger<ChatBot>.Instance,
-            [defaultAdapter, deepseek]);
-        await deepseekWorker.StartAsync(CancellationToken.None);
-        try
+        async Task<ChatMessage> Say(string body, string? client = null)
         {
-            config["ChatBot:ConversationStyle"] = "用简短的段落回答。";
-            const string text = "这台电脑的时区是什么？";
-            var request = await Send(text);
-            var reply = await ReplyTo(request.Message.Sequence);
-            const string followup = "在哪里能看到这个值？";
-            var next = await Send(followup, reply.Sequence);
-            await ReplyTo(next.Message.Sequence);
-            check(deepseek.LastChat is { Text: followup } input &&
-                input.History.LastOrDefault() is { User: text, Quoted: true } &&
-                input.ConversationNote?.Contains("测试环境") == true && input.ConversationStyle == config["ChatBot:ConversationStyle"] &&
-                defaultAdapter.LastChat is null && deepseek.Calls == 0,
-                "configured DeepSeek harness uses restored runtime context and updated default style without native work");
-            var foreign = new BotWork(Guid.NewGuid(), room, approver.Id, next.Message.Sequence + 1, "chat", "queued", new("test"));
-            check(await store.ReadConversationNote(foreign) is null &&
-                await store.ReadConversationNote(foreign with { Owner = owner.Id, Room = otherRoom.Id }) is null,
-                "runtime conversation notes are private to the originating user and room");
-            var clear = await Send("清除上下文");
-            await ReplyTo(clear.Message.Sequence);
-            var afterClear = await Send("现在这个问题怎么回答？");
-            await ReplyTo(afterClear.Message.Sequence);
-            check(deepseek.LastChat is { ConversationNote: null } current && current.History.Length > 0,
-                "cleared runtime note is omitted from the next answer while recent dialogue remains available");
+            var sent = await store.Send(owner.Id, owner.Name, room.Id,
+                new(client ?? Guid.NewGuid().ToString(), body, null), goalRobot: robot.Id);
+            return sent?.Message ?? throw new Exception("Could not enqueue user message.");
         }
-        finally { await deepseekWorker.StopAsync(CancellationToken.None); }
-
-        async Task<ChatMessage> ReplyTo(long sequence)
+        async Task<ChatMessage> Notice(string expected)
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var deadline = new CancellationTokenSource(Timeout);
             while (true)
             {
-                var messages = await store.History(owner.Id, room, sequence, null);
-                if (messages?.FirstOrDefault(m => m.Sender == robot.Name && m.ReplyTo == sequence) is { } reply)
-                    return reply;
-                await Task.Delay(50, timeout.Token);
+                var history = await store.History(owner.Id, room.Id, null, null);
+                if (history?.FirstOrDefault(m => m.Sender == robot.Name && m.Text.Contains(expected)) is { } match)
+                    return match;
+                await Task.Delay(25, deadline.Token);
             }
+        }
+        async Task UntilStatus(Guid id, string status)
+        {
+            using var deadline = new CancellationTokenSource(Timeout);
+            while ((await store.ReadBotWork(id, owner.Id))?.Status != status)
+                await Task.Delay(25, deadline.Token);
+        }
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            const string discussion = "你觉得现在这个项目的问题在哪里？";
+            var user = await Say(discussion);
+            var question = await engine.Next();
+            check(question.Context.Trigger.Kind == BotEventKind.UserMessage && question.Context.Trigger.Text == discussion &&
+                question.Context.Goals.Length == 0 && question.Context.Harnesses.Contains("codex"),
+                "A: unprefixed question reaches the decision engine with available capabilities");
+            question.Choose(new(BotAction.Reply, Message: "我建议先讨论记忆检索。"));
+            var answer = await Notice("先讨论记忆检索");
+            check(answer.ReplyTo == user.Sequence && answer.Card is null && codex.Calls.IsEmpty && deepseek.Calls.IsEmpty,
+                "A: Bot's direct answer creates neither a goal nor a Harness turn");
+
+            const string request = "这周想把记忆模块的检索速度提上去。";
+            var start = await Say(request);
+            var plan = await engine.Next();
+            check(plan.Context.Trigger.Text == request && plan.Context.History.Any(item => item.Text.Contains("记忆检索")),
+                "B: an unprefixed new goal sees the preceding discussion");
+            plan.Choose(new(BotAction.Delegate, Message: "我先检查检索耗时，再决定如何修改。", Objective: request,
+                Instruction: "先分析检索耗时，列出慢查询。", Harness: "deepseek"));
+            var analysis = await deepseek.Next();
+            var announcement = await Notice("先检查检索耗时");
+            var linked = await store.FindMessage(room.Id, start.Sequence, owner.Id);
+            Guid id = linked?.Card?.TaskId ?? announcement.Card?.TaskId ?? throw new Exception("Goal card is missing");
+            check(announcement.ReplyTo == start.Sequence && analysis.Instruction.Contains("检索耗时") &&
+                (await store.ReadBotWork(id, owner.Id))?.Goal?.Objective == request,
+                "B: the plan and goal are available before the first turn returns");
+
+            const string finding = "发现缓存键反复编码";
+            analysis.Return(finding, new HarnessToolResult("read", "readFile", "completed", "读取缓存实现"));
+            var review = await engine.Next();
+            check(review.Context.Trigger.Kind == BotEventKind.HarnessReceipt && review.Context.Trigger.GoalId == id &&
+                review.Context.Trigger.Text.Contains(finding) && review.Context.Goals.Single(g => g.Id == id).RemainingTurns == 2,
+                "E: analysis returns to the Bot with its goal and remaining budget");
+            review.Choose(new(BotAction.Delegate, id, Instruction: finding + "，修改并运行测试。", Harness: "codex"));
+            var firstEdit = await codex.Next();
+            check(firstEdit.Instruction.Contains(finding) && firstEdit.Directory != analysis.Directory,
+                "E: the next Harness receives the Bot's instruction informed by the other Harness");
+            firstEdit.Return("我修改了实现。", new HarnessToolResult("verify", "test", "failed", "memory_test: expected one allocation"));
+            var evaluate = await engine.Next();
+            check(evaluate.Context.Trigger.Kind == BotEventKind.HarnessReceipt &&
+                evaluate.Context.History.Any(e => e.Kind == BotEventKind.ToolResult && e.Text.Contains("expected one allocation")) &&
+                evaluate.Context.History.Any(e => e.Kind == BotEventKind.BotDecision) &&
+                (await store.ReadBotWork(id, owner.Id))?.Status != "completed",
+                "C: a returned turn and its failed test are distinct observations before goal completion");
+            evaluate.Choose(new(BotAction.Delegate, id, Instruction: "修复 memory_test，重新验证 allocation。", Harness: "codex"));
+            var repair = await codex.Next();
+            check(repair.Directory == firstEdit.Directory && repair.Dispatch != firstEdit.Dispatch &&
+                repair.Instruction.Contains("memory_test"), "C: the repair is a new dispatch in the original Codex session");
+            repair.Return("TOOL-PRIVATE-RECEIPT", new HarnessToolResult("verify2", "test", "completed", "memory_test passed"));
+            var final = await engine.Next();
+            check(final.Context.Trigger.GoalId == id && final.Context.Goals.Single(g => g.Id == id).RemainingTurns == 0,
+                "C: the last budgeted receipt still receives a Bot decision");
+            final.Choose(new(BotAction.Complete, id, Message: "已修复重复编码，记忆模块测试通过。"));
+            await Notice("记忆模块测试通过");
+            await UntilStatus(id, "completed");
+            var transcript = await store.History(owner.Id, room.Id, null, null);
+            check(!transcript!.Any(m => m.Sender == robot.Name && m.Text.Contains("TOOL-PRIVATE-RECEIPT")),
+                "C: only the Bot's chosen conclusion appears as the final report");
+            await Say(request, start.ClientId);
+
+            const string nextRequest = "接着整理缓存接口。";
+            await Say(nextRequest);
+            var other = await engine.Next();
+            check(other.Context.Trigger.Text == nextRequest, "a repeated client message is consumed once");
+            other.Choose(new(BotAction.Delegate, Message: "我先查看缓存入口。", Objective: nextRequest,
+                Instruction: "检查缓存入口。", Harness: "codex"));
+            var pending = await codex.Next();
+            var notice = await Notice("先查看缓存入口");
+            Guid otherId = notice.Card?.TaskId ?? throw new Exception("Goal plan lacks a card.");
+            const string restriction = "数据库那部分暂时不要改。";
+            await Say(restriction);
+            var correction = await engine.Next();
+            check(correction.Context.Trigger.Text == restriction && correction.Context.Goals.Any(g => g.Id == otherId),
+                "D: a fresh message reaches cognition while the Harness turn is blocked");
+            correction.Choose(new(BotAction.Revise, otherId, Message: "我会保留数据库实现。", Instruction: restriction));
+            var replan = await engine.Next();
+            check(replan.Context.Trigger.GoalId == otherId &&
+                replan.Context.Goals.Single(g => g.Id == otherId).Goal.Requirements.Contains(restriction),
+                "D: revised requirements are durable and reach the Bot before the next instruction");
+            replan.Choose(new(BotAction.Delegate, otherId, Instruction: restriction + "只检查缓存接口。", Harness: "codex"));
+            var constrained = await codex.Next();
+            check(constrained.Directory == pending.Directory && constrained.Instruction.Contains(restriction),
+                "D: the same goal continues in its original session with the updated constraint");
+            constrained.Return("缓存接口已检查。");
+            var wait = await engine.Next();
+            wait.Choose(new(BotAction.Wait, otherId, Message: "请确认需要整理的接口清单。"));
+            await Notice("确认需要整理的接口清单");
+
+            await Restart();
+            const string wake = "接口清单确认，只看读取接口。";
+            await Say(wake);
+            var afterRestart = await engine.Next();
+            check(afterRestart.Context.Trigger.Text == wake && afterRestart.Context.Goals.Any(g => g.Id == otherId &&
+                g.Goal.Requirements.Contains(restriction)) && afterRestart.Context.History.Any(x =>
+                    x.Kind == BotEventKind.HarnessReceipt && x.Text.Contains("缓存接口已检查")),
+                "F: a replacement local engine receives persisted state and receipts after worker and store recreation");
+            afterRestart.Choose(new(BotAction.Complete, otherId, Message: "接口范围已确认。"));
+            await UntilStatus(otherId, "completed");
+
+            await Say("以后工作做完不用单独给我总结。");
+            var preference = await engine.Next();
+            preference.Choose(new(BotAction.SetFinalReport, Enabled: false, Message: "已保存通知偏好。"));
+            await Notice("已保存通知偏好");
+            await Restart();
+            await Say("再核对一次变更。");
+            var quiet = await engine.Next();
+            check(!quiet.Context.AutoFinalReport, "the owner's automatic final-report preference survives restart");
+            quiet.Choose(new(BotAction.Delegate, Message: "我先核对这次变更。", Objective: "核对变更",
+                Instruction: "查看变更摘要。", Harness: "codex"));
+            var verification = await codex.Next();
+            var quietNotice = await Notice("先核对这次变更");
+            verification.Return("变更摘要已读取。");
+            var quietEnd = await engine.Next();
+            quietEnd.Choose(new(BotAction.Complete, quietEnd.Context.Trigger.GoalId, Message: "SILENT-REPORT"));
+            await UntilStatus(quietNotice.Card!.TaskId!.Value, "completed");
+            await Say("这次进展如何？");
+            var later = await engine.Next();
+            later.Choose(new(BotAction.Reply, Message: "这次已经核对。"));
+            await Notice("这次已经核对");
+            check(!(await store.History(owner.Id, room.Id, null, null))!.Any(m => m.Text.Contains("SILENT-REPORT")),
+                "completion remains durable when the user disables automatic final reports");
+
+            const string originalPreference = "摘要用英文";
+            const string correctedPreference = "摘要用中文";
+            var save = await Say("以后给我的摘要先写英文。");
+            (await engine.Next()).Choose(new(BotAction.Remember, Instruction: originalPreference, Message: "已保存摘要语言。"));
+            await Notice("已保存摘要语言");
+            await Restart();
+            var change = await Say("上次的摘要语言改成中文吧。");
+            var recalled = await engine.Next();
+            check(recalled.Context.Memory.Any(m => m.EndsWith($"#{save.Sequence} {originalPreference}", StringComparison.Ordinal)),
+                "a sourced private memory reaches the next decision after restart");
+            recalled.Choose(new(BotAction.Remember, Instruction: correctedPreference, MemorySource: save.Sequence,
+                Message: "已更新摘要语言。"));
+            await Notice("已更新摘要语言");
+            await Say("忘了刚才那条摘要语言偏好吧。");
+            var forget = await engine.Next();
+            check(forget.Context.Memory.Any(m => m.EndsWith($"#{change.Sequence} {correctedPreference}", StringComparison.Ordinal)) &&
+                !forget.Context.Memory.Any(m => m.Contains(originalPreference)),
+                "a correction replaces the original memory and carries the correcting message as its source");
+            forget.Choose(new(BotAction.Forget, MemorySource: change.Sequence, Message: "已删除摘要语言偏好。"));
+            await Notice("已删除摘要语言偏好");
+
+            var lookup = await Say("查看上下文");
+            var manage = await engine.Next();
+            check(!manage.Context.Memory.Any(m => m.Contains(originalPreference) || m.Contains(correctedPreference)),
+                "forget removes the corrected preference from the next decision context");
+            manage.Choose(new(BotAction.ManageMemory));
+            var memoryResult = await engine.Next();
+            check(memoryResult.Context.Trigger is { Kind: BotEventKind.ToolResult, GoalId: null } &&
+                memoryResult.Context.Trigger.Text.Contains("还没有保存上下文"),
+                "local memory lookup returns a tool observation to cognition");
+            memoryResult.Choose(new(BotAction.Reply, Message: "这段对话没有单独保存的背景。"));
+            await Notice("没有单独保存的背景");
+            var replies = (await store.History(owner.Id, room.Id, null, null))!
+                .Where(m => m.ReplyTo == lookup.Sequence && m.Sender == robot.Name).ToArray();
+            check(replies is [{ Text: "这段对话没有单独保存的背景。" }],
+                "the timeline contains exactly the Bot's answer for the local memory lookup");
+        }
+        finally
+        {
+            await worker.StopAsync(CancellationToken.None);
+            worker.Dispose();
+            Directory.Delete(root, recursive: true);
         }
     }
 
-    private sealed class ControlledAdapter(string name = ChatStore.BotName, string? projectRoot = null) : IChatRobotAdapter
+    private sealed record Request(BotDecisionContext Context, TaskCompletionSource<BotDecision> Result)
     {
-        public string Name => name;
-        public string? ProjectRoot => projectRoot;
-        public bool SupportsApproval => false;
-        public Channel<BotWork> Started { get; } = Channel.CreateUnbounded<BotWork>();
-        public TaskCompletionSource Yielded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public int Calls { get; private set; }
-        public BotInput? LastChat { get; private set; }
-        public Task<string> Answer(BotInput input, CancellationToken token)
+        public void Choose(BotDecision decision) => Result.SetResult(decision);
+    }
+
+    private sealed class ControlledEngine : IBotDecisionEngine
+    {
+        private readonly Channel<Request> requests = Channel.CreateUnbounded<Request>();
+        public Task<Request> Next() => requests.Reader.ReadAsync().AsTask().WaitAsync(Timeout);
+        public async Task<BotDecision> DecideAsync(BotDecisionContext context, CancellationToken token)
         {
-            if (input.Source is not null) return Task.FromResult("fixture");
-            LastChat = input;
-            return Task.FromResult("代理夹具回复。");
-        }
-        public async Task<RobotOutcome> Run(BotWork work, string folder, Func<AgentApprovalRequest, CancellationToken, Task> approval,
-            CancellationToken token, Func<CancellationToken, Task<bool>>? shouldYield = null)
-        {
-            Calls++; await Started.Writer.WriteAsync(work, token);
-            while (!Release.Task.IsCompleted)
-            {
-                if (shouldYield is not null && await shouldYield(token))
-                { Yielded.TrySetResult(); return new("suspended"); }
-                await Task.Delay(20, token);
-            }
-            return new("completed", "Controlled executor receipt (not a real agent test).");
+            var result = new TaskCompletionSource<BotDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await requests.Writer.WriteAsync(new(context, result), token);
+            return await result.Task.WaitAsync(token);
         }
     }
+
+    private sealed record Turn(string Directory, Guid Dispatch, string Instruction, TaskCompletionSource<HarnessReceipt> Result)
+    {
+        public void Return(string report, params HarnessToolResult[] tools) =>
+            Result.TrySetResult(new("returned", Directory, report, tools));
+        public void Interrupt() => Result.TrySetResult(new("interrupted", Directory, "取消旧版指令。", []));
+    }
+
+    private sealed class ControlledHarness(string name, string project) : IBotHarness
+    {
+        private readonly Channel<Turn> turns = Channel.CreateUnbounded<Turn>();
+        public ConcurrentDictionary<Guid, Turn> Calls { get; } = new();
+        public string Name => name;
+        public string? ProjectRoot => project;
+        public Task<Turn> Next() => turns.Reader.ReadAsync().AsTask().WaitAsync(Timeout);
+        public HarnessRunState GetStatus(string sessionDirectory, Guid dispatchId) =>
+            Calls.TryGetValue(dispatchId, out var turn)
+                ? new(turn.Result.Task.IsCompletedSuccessfully ? turn.Result.Task.Result.Status : "running", sessionDirectory)
+                : new("idle");
+        public void Interrupt(string sessionDirectory, Guid dispatchId)
+        {
+            if (Calls.TryGetValue(dispatchId, out var turn)) turn.Interrupt();
+        }
+        public async Task<HarnessReceipt> SendAsync(string sessionDirectory, Guid dispatchId, string instruction,
+            Func<CancellationToken, Task<bool>>? shouldInterrupt, CancellationToken token, string? workspace = null)
+        {
+            var turn = new Turn(sessionDirectory, dispatchId, instruction,
+                new(TaskCreationOptions.RunContinuationsAsynchronously));
+            if (!Calls.TryAdd(dispatchId, turn)) throw new Exception("Repeated dispatch");
+            await turns.Writer.WriteAsync(turn, token);
+            while (!turn.Result.Task.IsCompleted)
+            {
+                if (shouldInterrupt is not null && await shouldInterrupt(token)) turn.Interrupt();
+                await Task.WhenAny(turn.Result.Task, Task.Delay(25, token));
+                token.ThrowIfCancellationRequested();
+            }
+            return await turn.Result.Task;
+        }
+    }
+
+
     private sealed class QuietHub : IHubContext<ChatHub>
     {
         public IHubClients Clients { get; } = new QuietClients();

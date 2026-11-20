@@ -81,7 +81,7 @@
     }
 
     @if (store.taskAnchor(); as anchor) {
-      <form class="inline-panel bot-form" (ngSubmit)="store.queueTask()" [attr.aria-label]="store.t('安排开发任务')">
+      <form class="inline-panel bot-form" (ngSubmit)="store.queueTask()" [attr.aria-label]="store.t('安排任务')">
         <div class="form-head"><strong>{{ store.t('来源消息') }} #{{ anchor.sequence }}</strong><button type="button" class="quiet" (click)="store.taskAnchor.set(null)">{{ store.t('取消安排') }}</button></div>
         <label for="task-provider">{{ store.t('任务机器人') }}</label>
         <select id="task-provider" name="provider" [(ngModel)]="store.provider" required>
@@ -89,7 +89,7 @@
         </select>
         <label for="bot-goal">{{ store.t('任务目标和验收') }}</label>
         <textarea id="bot-goal" name="goal" [(ngModel)]="store.goal" maxlength="6000" required></textarea>
-        <button class="primary" [disabled]="store.busy() || !store.provider || !store.goal.trim()">{{ store.t('提交开发任务') }}</button>
+        <button class="primary" [disabled]="store.busy() || !store.provider || !store.goal.trim()">{{ store.t('提交任务') }}</button>
       </form>
     }
 

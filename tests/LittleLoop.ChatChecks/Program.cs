@@ -12,6 +12,17 @@ if (args is ["--verify-fixture"])
 
 int checks = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); checks++; Console.WriteLine("PASS " + name); }
+if (args is ["--harness"])
+{
+    await NativeHarnessChecks.Run(Check);
+    return;
+}
+if (args is ["--decision-loop"])
+{
+    await WorkerChecks.Run(Check);
+    Console.WriteLine($"All {checks} focused chat checks passed.");
+    return;
+}
 var goal = ContinuousGoal.Create("Fix bug") with { Status = "running" };
 var changed = goal.Change("revise", "Keep database unchanged", 1);
 Check(changed.Finish(1, "completed") == changed, "late completion cannot overwrite revised objective");
@@ -377,7 +388,8 @@ if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_EXECUTABLE") is { Lengt
 }
 await lease.DisposeAsync();
 await NaturalMemoryChecks.Run(connection, provider, memoryFiles, experience, Check);
-await WorkerChecks.Run(store, owner, stranger, robot, room.Id, Check);
+await ConversationChecks.Run(Check);
+await WorkerChecks.Run(Check);
 await BotFriendAccessChecks.Run(store, robot, Check);
 Console.WriteLine($"All {checks} chat goal checks passed on {provider}.");
 

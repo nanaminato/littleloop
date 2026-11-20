@@ -69,7 +69,7 @@ sealed partial class ChatStore
         return await ReadBotFriendAccess(db, null, user, robot, room);
     }
 
-    private static async Task<BotFriendAccessState> ReadBotFriendAccess(DbConnection db, DbTransaction? tx,
+    internal static async Task<BotFriendAccessState> ReadBotFriendAccess(DbConnection db, DbTransaction? tx,
         string user, string robot, string? room = null)
     {
         var (low, high) = FriendPair(user, robot);
@@ -212,7 +212,7 @@ sealed partial class ChatStore
         var pending = new List<BotWork>();
         await using (var work = Command(db, tx, """
             SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work
-            WHERE room_id=@room AND owner_id=@user AND status IN ('queued','waiting-input','paused','running')
+            WHERE room_id=@room AND owner_id=@user AND status IN ('queued','deciding','waiting-input','paused','running')
             FOR UPDATE
             """, ("room", room), ("user", user)))
         await using (var reader = await work.ExecuteReaderAsync())

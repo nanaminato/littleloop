@@ -78,14 +78,15 @@ sealed class DeepSeekPrivateConversation : IDisposable
         guardedSession = p.GetProperty("sessionId").GetString();
     }
 
-    public string Prompt(string sessionId, bool resumed)
+    public string Prompt(string sessionId, bool resumed, string? delegatedInstruction = null)
     {
         if (guardedSession != sessionId) throw new ConversationProviderException(ConversationFailure.PermissionDenied);
         var turn = resumed ? input with { History = [.. input.History.Where(x => x.Quoted)] } : input;
         string capabilities = WorkspaceFiles
             ? "你可用本会话原生 read、write、edit 工具读写工作区根目录中的普通 .txt、.md、.csv 文件。使用文件名即可。以工具回执为准。"
             : "当前私聊未启用工具，可以直接回答、解释、写作或计算。";
-        return ChatConversation.Instructions + "\n" + capabilities + "\n" + ChatConversation.MessageContext(turn);
+        return delegatedInstruction is null ? ChatConversation.Instructions + "\n" + capabilities + "\n" + ChatConversation.MessageContext(turn) :
+            HarnessTurn.Instructions + "\n" + capabilities + "\n" + delegatedInstruction;
     }
 
     public void MarkSending()

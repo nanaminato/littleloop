@@ -57,7 +57,7 @@
                 </button>
               }
               @if (store.roomCanOperateBot() && message().card?.kind !== 'task') {
-                <button type="button" class="quiet" (click)="store.beginTask(message())">{{ store.t('安排开发任务') }}</button>
+                <button type="button" class="quiet" (click)="store.beginTask(message())">{{ store.t('安排任务') }}</button>
               }
               @if (canChange(2)) {
                 <button type="button" class="quiet" (click)="store.beginEdit(message())">{{ store.t('编辑') }}</button>

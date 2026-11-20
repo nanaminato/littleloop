@@ -3,7 +3,7 @@ using LittleLoop.Core;
 
 sealed partial class ChatStore
 {
-    private static async Task<string?> HandleGoalMemory(DbConnection db, DbTransaction tx, string room, string? roomType,
+    internal static async Task<string?> HandleGoalMemory(DbConnection db, DbTransaction tx, string room, string? roomType,
         string owner, long sequence, long? replyTo, string text, List<BotWork> goals, string? grantHash)
     {
         string command = text.Trim();
@@ -93,8 +93,8 @@ sealed partial class ChatStore
         return lessonReply;
     }
 
-    private static bool ActiveForMemory(BotWork work) =>
-        work.Status is "queued" or "running" or "waiting-input" or "paused";
+    internal static bool ActiveForMemory(BotWork work) =>
+        work.Status is "deciding" or "queued" or "running" or "waiting-input" or "paused";
 
     private static async Task<string> SavePreference(DbConnection db, DbTransaction tx, string room, string owner,
         long sequence, bool include)
@@ -145,10 +145,10 @@ sealed partial class ChatStore
             var objective = FromJson<ContinuousGoal>(reader.GetString(1)).Objective;
             entries.Add($"任务消息 #{reader.GetInt64(0)} · {GoalMemoryExcerpt(objective)}");
         }
-        return entries.Count == 0 ? "本私聊暂无线索可回顾。完成并通过验收的任务会出现在这里。" :
-            "本私聊最近通过验收的任务\n" + string.Join("\n", entries);
+        return entries.Count == 0 ? "本私聊暂无已完成的目标。" :
+            "本私聊最近完成的目标\n" + string.Join("\n", entries);
     }
 
-    private static string GoalMemoryExcerpt(string objective) =>
+    internal static string GoalMemoryExcerpt(string objective) =>
         objective.Length <= 300 ? objective : objective[..(char.IsHighSurrogate(objective[299]) ? 299 : 300)] + "…";
 }

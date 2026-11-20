@@ -9,6 +9,8 @@ sealed record MessageCard(string Kind, SourceCitation? Source = null, Guid? Task
 sealed record BotInput(string Text, string? Anchor = null, SourceCitation? Source = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public BotGoalLoop? Loop { get; init; }
     [JsonIgnore] public ChatExchange[] History { get; init; } = [];
     [JsonIgnore] public string? ConversationStyle { get; init; }
     [JsonIgnore] public string? ConversationNote { get; init; }
@@ -30,7 +32,6 @@ sealed record BotWork(Guid Id, string Room, string Owner, long Sequence, string 
 sealed record BotInstall(bool Enabled);
 sealed record BotAsk(Guid ClientId, string Text, string Path, int Start, int End, long? ReplyTo, string? Provider);
 sealed record BotSchedule(Guid ClientId, long Sequence, string Goal, string? Provider);
-sealed record BotDecision(string Nonce, string Value);
 
 sealed partial class ChatStore
 {
@@ -167,7 +168,7 @@ sealed partial class ChatStore
         return await reader.ReadAsync() ? Message(reader, room) : null;
     }
 
-    private static async Task InsertJob(DbConnection db, DbTransaction tx, BotWork task)
+    internal static async Task InsertJob(DbConnection db, DbTransaction tx, BotWork task)
     {
         await using var cmd = Command(db, tx, """
             INSERT INTO chat_bot_work(id,room_id,owner_id,seq,kind,status,input,error,goal)
@@ -260,6 +261,10 @@ sealed partial class ChatStore
             FROM chat_bot_work w WHERE status='queued' AND (kind<>'chat' OR NOT EXISTS(
                 SELECT 1 FROM chat_bot_work older WHERE older.room_id=w.room_id AND older.owner_id=w.owner_id
                 AND older.kind='chat' AND older.seq<w.seq AND older.status IN ('queued','running')))
+            AND NOT EXISTS(SELECT 1 FROM chat_bot_inflight f WHERE f.work_id=w.id)
+            AND (JSON_EXTRACT(w.input,'$.loop') IS NULL OR (
+                NOT EXISTS(SELECT 1 FROM chat_goal_outbox o WHERE o.work_id=w.id AND NOT o.delivered)
+                AND NOT EXISTS(SELECT 1 FROM chat_goal_inbox i WHERE i.room_id=w.room_id AND i.owner_id=w.owner_id AND NOT i.processed)))
             ORDER BY created,id
             """ + limit))
         {
@@ -275,9 +280,20 @@ sealed partial class ChatStore
         if (work is null) return null;
         var goal = work.Goal is null ? null : work.Goal with { Status = "running" };
         string sameGoal = sqlite ? "goal IS @oldgoal" : "goal <=> CAST(@oldgoal AS JSON)";
-        await using var update = Command(lease, null, $"UPDATE chat_bot_work SET status='running',goal=@goal WHERE id=@id AND status='queued' AND ({sameGoal})",
+        var running = work with { Status = "running", Goal = goal };
+        await using var tx = await lease.BeginTransactionAsync();
+        await LockGoalRoom(lease, tx, work.Room);
+        await using var update = Command(lease, tx, $"UPDATE chat_bot_work SET status='running',goal=@goal WHERE id=@id AND status='queued' AND ({sameGoal})",
             ("id", work.Id.ToString()), ("goal", goal is null ? null : ToJson(goal)), ("oldgoal", work.Goal is null ? null : ToJson(work.Goal)));
-        return await update.ExecuteNonQueryAsync() == 1 ? work with { Status = "running", Goal = goal } : null;
+        if (await update.ExecuteNonQueryAsync() != 1) return null;
+        if (work.Input.Loop?.Dispatch is { } dispatch)
+        {
+            await using var claimed = Command(lease, tx, "INSERT INTO chat_bot_inflight(dispatch_id,work_id,claimed_work) VALUES(@dispatch,@id,@work)",
+                ("dispatch", dispatch.Id.ToString()), ("id", work.Id.ToString()), ("work", ToJson(running)));
+            await claimed.ExecuteNonQueryAsync();
+        }
+        await tx.CommitAsync();
+        return running;
     }
 
     public async Task SetBotStatus(BotWork work, string state, string? error = null, string? output = null,
@@ -316,7 +332,7 @@ sealed partial class ChatStore
         return works.ToArray();
     }
 
-    private static BotWork ReadWork(DbDataReader r) => new(Guid.Parse(r.GetString(0)), r.GetString(1), r.GetString(2),
+    internal static BotWork ReadWork(DbDataReader r) => new(Guid.Parse(r.GetString(0)), r.GetString(1), r.GetString(2),
         r.GetInt64(3), r.GetString(4), r.GetString(5), FromJson<BotInput>(r.GetString(6)), r.IsDBNull(7) ? null : r.GetString(7),
         r.IsDBNull(8) ? null : r.GetString(8), r.IsDBNull(9) ? null : FromJson<ContinuousGoal>(r.GetString(9)));
 

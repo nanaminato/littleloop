@@ -309,6 +309,7 @@ private fun providerName(name: String) = when (name) {
 @Composable
 private fun workLabel(status: String) = when (status) {
     "queued" -> stringResource(R.string.bot_status_queued)
+    "deciding" -> stringResource(R.string.bot_status_deciding)
     "running" -> stringResource(R.string.bot_status_running)
     "paused", "suspended" -> stringResource(R.string.bot_status_paused)
     "cancelled" -> stringResource(R.string.bot_status_cancelled)

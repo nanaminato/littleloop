@@ -46,7 +46,7 @@ sealed partial class ChatStore
         return await source.ExecuteScalarAsync() is string body ? ParseConversationNote(body).Value : null;
     }
 
-    private static async Task<string?> HandleConversationNote(DbConnection db, DbTransaction tx, string room,
+    internal static async Task<string?> HandleConversationNote(DbConnection db, DbTransaction tx, string room,
         string owner, long seq, string sentText)
     {
         var requested = ParseConversationNote(sentText).Command;

@@ -2,6 +2,12 @@ using System.Text.Json;
 using LittleLoop.Core;
 using LittleLoop.Plugins.Example;
 
+if (args is ["--bot-decision-live", var modelConfig])
+{
+    await BotDecisionChecks.RunLive(modelConfig);
+    return;
+}
+
 if (args is ["--agent-command-fixture"])
 {
     Environment.ExitCode = File.ReadAllText("code.cs") == "new" ? 0 : 1;
@@ -51,6 +57,7 @@ await GoalChecks.Run();
 await LanguageChecks.Run();
 await ModelLanguageChecks.Run();
 await PlanningModelChecks.Run();
+await BotDecisionChecks.Run();
 await DevelopmentChecks.Run();
 await ProjectDiscoveryChecks.Run();
 await AgentChecks.Run();

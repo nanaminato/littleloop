@@ -24,7 +24,7 @@ internal data class BotApproval(val nonce: String, val method: String, val param
 internal data class BotReceipt(val id: String, val exitCode: Int, val stdout: String, val stderr: String)
 internal data class BotWork(val status: String, val error: String?, val output: String?, val provider: String,
     val approval: BotApproval?, val patches: Map<String, String>, val receipts: List<BotReceipt>) {
-    val terminal get() = status !in setOf("queued", "running", "paused", "waiting-input", "suspended")
+    val terminal get() = status !in setOf("queued", "running", "deciding", "paused", "waiting-input", "suspended")
 }
 
 internal class BotChat(private val api: ChatApi) {

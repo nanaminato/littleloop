@@ -3376,6 +3376,58 @@
       "id": "EVIDENCE-CHAT-PRIVATE-NATIVE-SESSIONS",
       "actor": "AI",
       "body": "记录原生会话创建、续接、消息分流、权限限制和故障反馈的验证范围。实际代理试验与受控协议检查分别记录。"
+    },
+    {
+      "id": "INTENT-BOT-DECISION-OWNERSHIP",
+      "type": "intent",
+      "title": "由 LittleLoop 独立决策并持续指导 Harness",
+      "body": "用户消息与执行回执进入统一认知入口。Bot 持有可持续目标，能根据上下文选择行动、指派和续接 Harness、判断进展并通知用户。认知实现可以替换，执行沿用部署者配置的实际权限。",
+      "actor": "Human",
+      "authorization": "confirmed",
+      "authorization_basis": "2026-11-20 human request for LittleLoop Bot ownership, swappable cognition and durable collaboration.",
+      "delivery": "planned",
+      "verification": "unverified",
+      "attributes": {},
+      "references": [
+        "REF-BOT-DECISION-LOOP"
+      ]
+    },
+    {
+      "id": "EVIDENCE-BOT-DECISION-LOOP",
+      "type": "evidence",
+      "title": "独立决策循环的 SQLite 与原生 HTTP 验收",
+      "actor": "AI",
+      "body": "本地受控循环覆盖失败后的续接、修改执行中目标、替换决策器与崩溃恢复。真实 HTTP 记录单独区分 Codex 静态审阅、DeepSeek 工具读写、跨 Harness 协作和 Windows 命令运行失败。",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "2026-11-20，SQLite 聊天决策、记忆及崩溃恢复专项通过。隔离真实 HTTP 记录包括 data/direct-http/072d43f8（Codex 审阅）、c769cdfc（ACP 检索）、e166fa6a（同目标 DeepSeek 检索与 Codex 字符串复核）、3b85f1a1（隔离私聊实际写入并独立读盘）。核对最终聊天消息与 Complete 动作一致。864b195e 因 Windows 命令服务不可用而等待。3b995734 因无效 Harness ID 等待。ba6e1ada 接力成功但 Codex 的额外磁盘复核遇阻。本轮未复测 MySQL 与长期运行可靠性。"
+      },
+      "references": [
+        "REF-BOT-DECISION-LOOP",
+        "REF-BOT-DECISION-HTTP",
+        "REF-BOT-DECISION-CHECKS"
+      ]
+    },
+    {
+      "id": "CAP-BOT-DECISION-LOOP",
+      "type": "capability",
+      "title": "统一聊天认知、持续 Harness 委派与可恢复目标",
+      "actor": "AI",
+      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-BOT-DECISION-LOOP"
+      ],
+      "attributes": {},
+      "references": [
+        "REF-BOT-DECISION-LOOP",
+        "REF-BOT-DECISION-CONTRACT",
+        "REF-BOT-DECISION-STORE"
+      ]
     }
   ],
   "relations": [
@@ -4627,6 +4679,36 @@
       "source": "EVIDENCE-CHAT-PRIVATE-NATIVE-SESSIONS",
       "type": "supports",
       "target": "CAP-CHAT-CONVERSATION-HARNESS"
+    },
+    {
+      "id": "REL-BOT-DECISION-OWNERSHIP",
+      "source": "CAP-BOT-DECISION-LOOP",
+      "type": "implements",
+      "target": "INTENT-BOT-DECISION-OWNERSHIP"
+    },
+    {
+      "id": "REL-BOT-DECISION-EVIDENCE",
+      "source": "EVIDENCE-BOT-DECISION-LOOP",
+      "type": "supports",
+      "target": "CAP-BOT-DECISION-LOOP"
+    },
+    {
+      "id": "REL-BOT-DECISION-USES-GOALS",
+      "source": "CAP-BOT-DECISION-LOOP",
+      "type": "depends_on",
+      "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "id": "REL-BOT-DECISION-SUPERSEDES-CHAT-ROUTING",
+      "source": "CAP-BOT-DECISION-LOOP",
+      "type": "supersedes",
+      "target": "CAP-CHAT-CONVERSATION-HARNESS"
+    },
+    {
+      "id": "REL-BOT-DECISION-EXTERNAL-OPERATIONS",
+      "source": "CAP-BOT-DECISION-LOOP",
+      "type": "implements",
+      "target": "DECISION-CHAT-EXTERNAL-COMPUTER-AGENTS"
     }
   ],
   "references": [
@@ -5405,6 +5487,41 @@
       "kind": "project_file",
       "target": "tests/ChatContinuousLive/friend_access.py",
       "purpose": "真实私聊好友接入、工具审批隔离和文件复核",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-DECISION-LOOP",
+      "kind": "project_file",
+      "target": "docs/57-bot-decision-loop.md",
+      "purpose": "Bot decision ownership, migration, usage and evidence scopes",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-DECISION-CONTRACT",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/BotDecision.cs",
+      "purpose": "Swappable cognition contract, observations and validated Bot actions",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-DECISION-STORE",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Chat/Bot/BotActionStore.cs",
+      "purpose": "Transactional goal, dispatch and receipt lifecycle",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-DECISION-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.ChatChecks/WorkerChecks.cs",
+      "purpose": "SQLite worker scenarios A-F and durable reporting checks",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-DECISION-HTTP",
+      "kind": "project_file",
+      "target": "tests/ChatContinuousLive/direct_http_e2e.py",
+      "purpose": "Real HTTP, cognition API, native Codex and DeepSeek ACP scenarios",
       "tracking": "live"
     }
   ],

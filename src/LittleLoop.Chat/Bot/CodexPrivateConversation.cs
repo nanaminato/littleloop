@@ -37,7 +37,7 @@ static class CodexPrivateConversation
     }
 
     internal static async Task<string> Run(IAgentSessionClient client, BotInput input, string session, string workspace,
-        CancellationToken token, bool textOnly = false)
+        CancellationToken token, bool textOnly = false, HarnessTurn? delegation = null)
     {
         string file = Path.Combine(session, "thread.json");
         NativeThread? previous = File.Exists(file)
@@ -67,7 +67,7 @@ static class CodexPrivateConversation
         var parameters = new Dictionary<string, object>
         {
             ["cwd"] = workspace, ["runtimeWorkspaceRoots"] = new[] { workspace }, ["approvalPolicy"] = "never",
-            ["config"] = config, ["developerInstructions"] = ChatConversation.Instructions
+            ["config"] = config, ["developerInstructions"] = delegation is null ? ChatConversation.Instructions : HarnessTurn.Instructions
         };
         if (textOnly)
         {
@@ -112,13 +112,14 @@ static class CodexPrivateConversation
             await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(new NativeThread(thread, textOnly)), token);
             File.Move(temp, file, true);
         }
-        string prompt = ChatConversation.MessageContext(resuming
-            ? input with { History = input.History.Where(exchange => exchange.Quoted).ToArray() } : input);
-        return await Turn(client, thread, textOnly ? null : profile, input.ConversationWorkId, prompt, token);
+        delegation?.Opened(thread);
+        string prompt = delegation is null ? ChatConversation.MessageContext(resuming
+            ? input with { History = input.History.Where(exchange => exchange.Quoted).ToArray() } : input) : input.Text;
+        return await Turn(client, thread, textOnly ? null : profile, input.ConversationWorkId, prompt, token, delegation);
     }
 
-    private static async Task<string> Turn(IAgentSessionClient client, string thread, string? profile, Guid? workId,
-        string prompt, CancellationToken token)
+    internal static async Task<string> Turn(IAgentSessionClient client, string thread, string? profile, Guid? workId,
+        string prompt, CancellationToken token, HarnessTurn? delegation = null, bool deployedWorkspace = false)
     {
         string? turnId = null;
         bool toolStarted = false;
@@ -126,43 +127,89 @@ static class CodexPrivateConversation
         {
             var parameters = new Dictionary<string, object?>
             {
-                ["threadId"] = thread, ["clientUserMessageId"] = workId?.ToString(), ["approvalPolicy"] = "never",
+                ["threadId"] = thread, ["clientUserMessageId"] = workId?.ToString(),
                 ["input"] = new[] { new { type = "text", text = prompt } }
             };
-            if (profile is null) parameters["environments"] = Array.Empty<object>();
-            else parameters["permissions"] = profile;
+            if (!deployedWorkspace)
+            {
+                parameters["approvalPolicy"] = "never";
+                if (profile is null) parameters["environments"] = Array.Empty<object>();
+                else parameters["permissions"] = profile;
+            }
+            if (delegation is not null && await delegation.ShouldInterrupt(token))
+                return delegation.Finish("interrupted", "指令在发送前取消。").Report;
+            delegation?.Sending();
             var started = await client.CallAsync("turn/start", parameters, token);
             turnId = started.GetProperty("turn").GetProperty("id").GetString() ?? throw new InvalidDataException("Missing turn ID.");
             string? final = null;
             var patches = new HashSet<string>();
             var commands = new HashSet<string>();
+            bool stopping = false;
+            long nextCheck = Environment.TickCount64;
             while (true)
             {
-                var item = await client.NextAsync(token);
+                var pending = client.NextAsync(token);
+                if (delegation is not null && !stopping)
+                {
+                    do
+                    {
+                        if (Environment.TickCount64 >= nextCheck)
+                        {
+                            if (await delegation.ShouldInterrupt(token))
+                            {
+                                await client.CallAsync("turn/interrupt", new { threadId = thread, turnId }, token);
+                                stopping = true;
+                                break;
+                            }
+                            nextCheck = Environment.TickCount64 + 300;
+                        }
+                        if (!pending.IsCompleted)
+                            await Task.WhenAny(pending, Task.Delay(300, token));
+                        token.ThrowIfCancellationRequested();
+                    } while (!pending.IsCompleted);
+                }
+                var item = await pending;
                 var method = item.GetProperty("method").GetString()!;
                 var p = item.GetProperty("params");
                 if (item.TryGetProperty("id", out var requestId))
                 {
-                    if (!AgentApproval.Supported(method)) throw new ConversationProviderException(ConversationFailure.Unsupported);
+                    if (!AgentApproval.Supported(method))
+                    {
+                        if (delegation is not null)
+                            throw new IOException($"Codex 请求了当前部署无法响应的交互 {method}。");
+                        throw new ConversationProviderException(ConversationFailure.Unsupported);
+                    }
                     await client.ReplyAsync(requestId, AgentApproval.Response(method, p, false), token);
+                    delegation?.Tool("request-" + requestId, method, "declined", "该操作需要原生 Harness 交互授权，当前配置未授予此权限。");
                     continue;
                 }
                 if (!p.TryGetProperty("threadId", out var id) || id.GetString() != thread) continue;
+                if (delegation is not null && method == "item/started" && p.GetProperty("turnId").GetString() == turnId)
+                    CodexBotHarness.ObserveTool(delegation, p.GetProperty("item"), started: true);
                 if (method is "item/started" or "item/completed" && p.GetProperty("turnId").GetString() == turnId &&
                     p.GetProperty("item").GetProperty("type").GetString() is "fileChange" or "commandExecution")
                 {
                     toolStarted = true;
-                    if (profile is null) throw new ConversationProviderException(ConversationFailure.Interrupted);
+                    if (profile is null && !deployedWorkspace) throw new ConversationProviderException(ConversationFailure.Interrupted);
                 }
                 if (method == "item/completed" && p.GetProperty("turnId").GetString() == turnId)
                     Observe(p.GetProperty("item"));
                 if (method != "turn/completed") continue;
                 var turn = p.GetProperty("turn");
                 if (turn.GetProperty("id").GetString() != turnId) continue;
-                if (turn.GetProperty("status").GetString() != "completed")
-                    throw new ConversationProviderException(toolStarted ? ConversationFailure.Interrupted : TurnFailure(turn));
-                if (turn.TryGetProperty("items", out var completed))
+                if (turn.TryGetProperty("items", out var completed) && completed.ValueKind == JsonValueKind.Array)
                     foreach (var entry in completed.EnumerateArray()) Observe(entry);
+                string? nativeStatus = turn.GetProperty("status").GetString();
+                if (delegation is not null)
+                {
+                    if (nativeStatus == "completed") return delegation.Finish("returned", final?.Trim() ?? "").Report;
+                    if (nativeStatus == "interrupted") return delegation.Finish("interrupted", "Codex 已确认中断本轮。").Report;
+                    string reason = turn.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object &&
+                        error.TryGetProperty("message", out var message) ? message.GetString() ?? nativeStatus! : nativeStatus!;
+                    return delegation.Finish("failed", reason ?? "Codex 未返回完成状态。").Report;
+                }
+                if (nativeStatus != "completed")
+                    throw new ConversationProviderException(toolStarted ? ConversationFailure.Interrupted : TurnFailure(turn));
                 if (string.IsNullOrWhiteSpace(final)) throw new ConversationProviderException(ConversationFailure.Interrupted);
                 var receipts = new List<string>();
                 if (patches.Count > 0) receipts.Add($"已应用 {patches.Count} 次文件补丁");
@@ -172,6 +219,7 @@ static class CodexPrivateConversation
 
             void Observe(JsonElement entry)
             {
+                if (delegation is not null) CodexBotHarness.ObserveTool(delegation, entry);
                 final = AnswerText(entry) ?? final;
                 if (!entry.TryGetProperty("status", out var status) || status.GetString() != "completed" ||
                     !entry.TryGetProperty("id", out var itemId) || itemId.GetString() is not { Length: > 0 } key) return;
@@ -189,8 +237,9 @@ static class CodexPrivateConversation
             {
                 using var interrupt = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 try { await client.CallAsync("turn/interrupt", new { threadId = thread, turnId }, interrupt.Token); }
-                catch (Exception failure) when (failure is IOException or OperationCanceledException or TimeoutException) { }
+                catch (Exception failure) when (failure is IOException or OperationCanceledException or TimeoutException or InvalidOperationException) { }
             }
+            if (delegation is not null) throw;
             if (toolStarted) throw new ConversationProviderException(ConversationFailure.Interrupted, e);
             if (e is ConversationProviderException or OperationCanceledException or TimeoutException) throw;
             throw new ConversationProviderException(ConversationFailure.Interrupted, e);

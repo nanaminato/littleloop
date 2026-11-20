@@ -91,7 +91,7 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 
 [Chat SQLite 适配](docs/52-chat-sqlite.md)提供不依赖 MySQL 服务的本地单实例选项，MySQL 仍为默认。[普通消息工作承诺](docs/53-chat-commitments.md)以显式启用的私聊模拟执行器验证接受、修订、暂停、取消、替换和迟到回执边界；尚未连接真实开发工具中断。
 
-LittleLoop 普通私聊可接入 Codex 或 DeepSeek Harness 的原生会话，续接当前用户在该私聊中的对话。发送“记住上下文：当前在测试环境，回答尽量简短”，即可让机器人在后续问答中继续参考这条说明。可以直接请代理在私聊工作区中处理文件。用 `/task` 或“开发任务：…”可进入单独的项目开发流程，随后查询、补充、暂停、恢复或取消该任务。[私聊配置与用法](docs/54-private-development-work.md)
+LittleLoop 主机器人通过同一决策入口处理讨论、工作目标和执行中的补充。需要工作时，Bot 先发出计划，再选择 Codex 或 DeepSeek Harness。每轮回执回到 Bot，由它决定继续、等待还是完成。服务可以替换认知 API、保存各目标的 Harness 会话，并按用户偏好发送最终报告。[配置与验收](docs/57-bot-decision-loop.md)
 
 [聊天平台扩展](docs/27-chat-phase-d.md)增加源码审阅机器人、群话题和频道订阅广播。
 

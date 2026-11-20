@@ -1,3 +1,4 @@
+using LittleLoop.Core;
 using LittleLoop.Tools;
 using Microsoft.AspNetCore.SignalR;
 
@@ -7,10 +8,11 @@ sealed class ChatBot : BackgroundService
     private readonly IHubContext<ChatHub> hub;
     private readonly ILogger<ChatBot> log;
     private readonly IConfiguration config;
-    private readonly AgentHostPolicy policy;
     private readonly ProjectFiles files;
     private readonly HttpSemanticModelClient? memorySemantics;
-    private readonly HttpSemanticModelClient? conversationModel;
+    private readonly IBotDecisionEngine engine;
+    private readonly Dictionary<string, IBotHarness> harnesses;
+    private readonly int maxTurns;
     private readonly HashSet<string> operators;
     private readonly HashSet<string> approvers;
     private readonly HashSet<string> accessAdmins;
@@ -19,19 +21,16 @@ sealed class ChatBot : BackgroundService
     private readonly HashSet<string> accessAdminIds = new(StringComparer.Ordinal);
     private readonly string directory;
     private readonly string? legacyDirectory;
-    private readonly Dictionary<string, IChatRobotAdapter> adapters;
-    private readonly IChatRobotAdapter conversation;
-    private readonly bool nativeConversation;
+    private readonly SourceReviewChatAdapter sourceReview = new();
     private readonly Dictionary<string, Account> robots = new(StringComparer.Ordinal);
     private readonly int maxConcurrentTasks;
     private readonly int maxConcurrentQuestions;
-    public string[] Providers => adapters.Keys.ToArray();
+    public string[] Providers => [ChatStore.BotName, ChatStore.ReviewBotName];
     public Account Robot(string? provider) => robots[provider ?? ChatStore.BotName];
-    public bool CanUse(string? provider) => adapters.ContainsKey(provider ?? ChatStore.BotName);
-    public bool SupportsApproval(string? provider) => CanUse(provider) && adapters[provider ?? ChatStore.BotName].SupportsApproval;
+    public bool CanUse(string? provider) => provider is null or ChatStore.BotName or ChatStore.ReviewBotName;
 
     public ChatBot(ChatStore store, IHubContext<ChatHub> hub, IConfiguration config, ILogger<ChatBot> log,
-        IChatRobotAdapter[]? configuredAdapters = null)
+        IBotDecisionEngine decisionEngine, IBotHarness[]? configuredHarnesses = null)
     {
         this.store = store;
         this.hub = hub;
@@ -39,11 +38,8 @@ sealed class ChatBot : BackgroundService
         this.config = config;
         maxConcurrentTasks = ReadConcurrency(config, "MaxConcurrentTasks", 2);
         maxConcurrentQuestions = ReadConcurrency(config, "MaxConcurrentQuestions", 1);
-        var original = ChatStore.FromJson<AgentHostPolicy>(File.ReadAllText(config["ChatBot:Policy"]!));
-        if (original.ApprovalMode is not ("auto" or "user" or "wait" or "decline"))
-            throw new ArgumentException("Unknown approvalMode in ChatBot policy.");
-        policy = original with { OutsideRule = "decline", Commands = [], AttachDocumentation = false, HostToolsOnly = true };
-        files = new ProjectFiles(policy.Development ?? throw new InvalidOperationException("Bot requires a bounded development policy."));
+        var policy = ChatStore.FromJson<AgentHostPolicy>(File.ReadAllText(config["ChatBot:Policy"]!));
+        files = new ProjectFiles(policy.Development ?? new DevelopmentPolicy(policy.Project, [], [], [".cs", ".md", ".txt"]), requireTests: false);
         if (!ProjectFiles.Same(files.Root, Path.TrimEndingDirectorySeparator(Path.GetFullPath(policy.Project)))) throw new InvalidOperationException("Development and chat bot projects must match.");
         directory = Path.GetFullPath(config["ChatBot:Data"] ?? throw new InvalidOperationException("Set ChatBot__Data"));
         legacyDirectory = config["ChatBot:LegacyData"] is { } legacy ? Path.GetFullPath(legacy) : null;
@@ -53,22 +49,16 @@ sealed class ChatBot : BackgroundService
         Directory.CreateDirectory(directory);
         var localModel = ChatProcedureRecall.ReadConfig(config["ChatBot:MemorySemantics"]);
         memorySemantics = ChatProcedureRecall.CreateClient(localModel);
-        string? harness = config["ChatBot:ConversationHarness"]?.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(harness) && configuredAdapters is null &&
-            config["ChatBot:ConversationModel"] is { Length: > 0 } modelPath)
-        {
-            // An explicitly configured text endpoint remains available separately from native harnesses.
-            conversationModel = new(ChatStore.FromJson<SemanticModelConfig>(File.ReadAllText(modelPath)));
-        }
-        IChatRobotAdapter[] configured = configuredAdapters ?? [new LittleLoopChatAdapter(policy, directory, IsPrivateOperator, conversationModel), new SourceReviewChatAdapter()];
-        IChatRobotAdapter? deepSeekConversation = configuredAdapters?.SingleOrDefault(adapter =>
-            adapter.Name == ChatStore.DeepSeekBotName && !adapter.SupportsApproval);
-        if (configuredAdapters is null && config["ChatBot:DeepSeek:ReadOnlyLauncher"] is { Length: > 0 } launcher)
+        maxTurns = config.GetValue("ChatBot:MaxHarnessTurns", 8);
+        if (maxTurns is < 1 or > 128) throw new ArgumentException("ChatBot:MaxHarnessTurns must be between 1 and 128.");
+        engine = decisionEngine;
+        var native = new List<IBotHarness> { new CodexBotHarness(policy.Executable, policy.Project, TimeSpan.FromSeconds(policy.TimeoutSeconds)) };
+        if ((config["ChatBot:DeepSeek:ReadOnlyLauncher"] ?? config["ChatBot:DeepSeek:Launcher"]) is { Length: > 0 } launcher)
         {
             var project = config["ChatBot:DeepSeek:Project"];
             if (!Path.IsPathFullyQualified(launcher) || !File.Exists(launcher) || project is null ||
                 !Path.IsPathFullyQualified(project) || !Directory.Exists(project))
-                throw new InvalidOperationException("DeepSeek requires an absolute read-only ACP launcher and isolated project directory.");
+                throw new InvalidOperationException("DeepSeek requires an absolute ACP launcher and project directory.");
             var options = config.GetSection("ChatBot:DeepSeek");
             var arguments = options.GetSection("Arguments").Get<string[]>() ?? [];
             string? harnessHome = options["Home"];
@@ -76,64 +66,20 @@ sealed class ChatBot : BackgroundService
                 throw new InvalidOperationException("DeepSeek home must be absolute.");
             bool electron = options.GetValue<bool>("ElectronRunAsNode");
             var timeout = TimeSpan.FromSeconds(policy.TimeoutSeconds);
-            var readOnly = new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron, project, timeout);
-            configured = [.. configured, readOnly];
-            if (harness == "deepseek")
-                deepSeekConversation = new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron, project, timeout)
-                {
-                    ConversationWorkspaceFiles = options.GetValue("ConversationWorkspaceFiles", true)
-                };
-            var reviewedPolicy = policy.ApprovalMode == "auto" ? policy with { ApprovalMode = "user" } : policy;
-            if (options.GetValue<bool>("ReviewCodexChanges"))
-                configured = [.. configured, new CollaborationChatAdapter(reviewedPolicy, new LittleLoopChatAdapter(reviewedPolicy, directory), readOnly)];
-            var roots = new List<string>();
-            if (options["TestDevelopmentPolicy"] is { Length: > 0 } grantPath)
-                AddProject(ChatStore.DeepSeekTestBotName, grantPath, legacy: true);
-            foreach (var entry in options.GetSection("DevelopmentProjects").GetChildren())
+            native.Add(new DeepSeekBotHarness(new DeepSeekAcpClient(launcher, arguments, harnessHome, electron, project, timeout)
             {
-                if (entry.Key.Length is < 1 or > 15 || entry.Key.Any(c => c is not (>= 'a' and <= 'z' or >= '0' and <= '9' or '_')) ||
-                    entry["Policy"] is not { Length: > 0 } path)
-                    throw new InvalidOperationException("DeepSeek project IDs require 1–15 lowercase letters, digits or underscores and a policy path.");
-                AddProject(ChatStore.DeepSeekProjectPrefix + entry.Key, path, legacy: false);
-            }
-
-            void AddProject(string provider, string grantPath, bool legacy)
-            {
-                if (!Path.IsPathFullyQualified(grantPath)) throw new InvalidOperationException("DeepSeek policy path must be absolute.");
-                var grant = ChatStore.FromJson<DevelopmentPolicy>(File.ReadAllText(grantPath));
-                var scoped = new ProjectFiles(grant);
-                if (!Path.IsPathFullyQualified(grant.Root) ||
-                    Overlaps(scoped.Root, directory) || Overlaps(scoped.Root, project) ||
-                    harnessHome is not null && Overlaps(scoped.Root, harnessHome) ||
-                    legacyDirectory is not null && Overlaps(scoped.Root, legacyDirectory) ||
-                    roots.Any(root => Overlaps(root, scoped.Root)) ||
-                    Overlaps(scoped.Root, files.Root) && (legacy || !ProjectFiles.Same(scoped.Root, files.Root)) ||
-                    scoped.Policy.Commands.Any(command => !command.IsTest))
-                    throw new InvalidOperationException("DeepSeek grant requires a distinct, bounded project and fixed tests; host state must stay outside it.");
-                roots.Add(scoped.Root);
-                var development = reviewedPolicy with { Project = scoped.Root, Development = scoped.Policy };
-                configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron,
-                    scoped.Root, timeout, development, provider)];
-            }
+                ConversationWorkspaceFiles = options.GetValue("ConversationWorkspaceFiles", true),
+                UseLauncherPermissions = config["ChatBot:DeepSeek:ReadOnlyLauncher"] is null
+            }));
         }
-        adapters = configured.ToDictionary(adapter => adapter.Name, StringComparer.Ordinal);
-        conversation = harness switch
-        {
-            null or "" or "codex" => adapters[ChatStore.BotName],
-            "deepseek" => deepSeekConversation ??
-                throw new InvalidOperationException("DeepSeek conversation requires the configured read-only ACP launcher."),
-            _ => throw new ArgumentException("ChatBot:ConversationHarness must be codex or deepseek.")
-        };
-        nativeConversation = configuredAdapters is null && conversationModel is null;
+        harnesses = (configuredHarnesses ?? native.ToArray()).ToDictionary(h => h.Name, StringComparer.Ordinal);
         operators = Names(config["ChatBot:Operators"]);
         approvers = Names(config["ChatBot:Approvers"]);
         accessAdmins = Names(config["ChatBot:AccessAdmins"] ?? config["ChatBot:Approvers"]);
-        if (operators.Count == 0 || approvers.Count == 0) throw new InvalidOperationException("Configure bot operators and approvers.");
     }
 
     public override void Dispose()
     {
-        conversationModel?.Dispose();
         memorySemantics?.Dispose();
         base.Dispose();
     }
@@ -158,12 +104,8 @@ sealed class ChatBot : BackgroundService
         .Select(x => x.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
 
     public bool CanOperate(string? user) => user is not null && operatorIds.Contains(user);
-    public bool CanApprove(string? user) => user is not null && approverIds.Contains(user);
+    public bool CanReadHistoricalEvidence(string? user) => user is not null && approverIds.Contains(user);
     public bool CanManageAccess(string user) => accessAdminIds.Contains(user);
-
-    internal async Task<bool> IsPrivateOperator(BotWork work) =>
-        work.Input.Provider is (null or ChatStore.BotName) && CanOperate(work.Owner) &&
-        await store.BotRoom(work.Room, work.Owner) is { Member: true, Installed: true, Type: "direct" };
 
     public async Task<bool> CanOperateRoom(string user, string room, string? provider = null)
     {
@@ -181,15 +123,6 @@ sealed class ChatBot : BackgroundService
     public SourceCitation Cite(string path, int start, int end) => AgentConversationSupport.Cite(files, path, start, end);
     public string Folder(BotWork work) => Path.Combine(work.Kind == "legacy" ? legacyDirectory ?? directory : directory, work.Id.ToString("N"));
     public bool HasLegacyEvidence => legacyDirectory is not null;
-    public async Task<bool> IsPendingFcmApproval(FcmDelivery notice)
-    {
-        if (notice.Work is not { } id || notice.Nonce is not { } nonce || !CanApprove(notice.User)) return false;
-        var work = await store.ReadBotWork(id, notice.User);
-        return work is { Kind: "task", Status: "running" } && SupportsApproval(work.Input.Provider) &&
-            await CanOperateRoom(work.Owner, work.Room, work.Input.Provider) &&
-            AgentConversationSupport.IsApprovalPending(Folder(work), nonce);
-    }
-
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         foreach (var name in Providers) robots.Add(name, await store.GetRobot(name));
@@ -208,43 +141,35 @@ sealed class ChatBot : BackgroundService
         await using var lease = await store.AcquireBotLease();
         await using var workspace = new FileStream(Path.Combine(directory, "chat-worker.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         await store.RecoverBotWork(lease);
-        await store.RecoverContinuousGoals(work =>
-        {
-            if (!SupportsApproval(work.Input.Provider)) return null;
-            try { return new AgentDelegationHost(Folder(work)).RecoverApprovalBoundary(); }
-            catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
-            {
-                log.LogWarning(error, "Could not verify approval boundary for task {Task}", work.Id);
-                return false;
-            }
-        }, work =>
-        {
-            if (work.Input.Provider != ChatStore.CollaborationBotName ||
-                !adapters.TryGetValue(ChatStore.CollaborationBotName, out var adapter) || adapter is not CollaborationChatAdapter collaboration)
-                return null;
-            try { return collaboration.CanRecoverReview(work, Folder(work)); }
-            catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException or ArgumentException)
-            {
-                log.LogWarning(error, "Could not verify collaboration review checkpoint for task {Task}", work.Id);
-                return false;
-            }
-        });
+        await store.RecoverContinuousGoals();
+        await store.MigrateBotQueue(maxTurns);
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(600));
         var active = new List<(BotWork Work, string? Root, Task Execution)>();
         string projectGrant = files.PolicyHash;
+        foreach (var work in await store.InterruptedDispatches())
+        {
+            var dispatch = work.Input.Loop!.Dispatch!;
+            var saved = NativeBotHarness.RecoverReceipt(Session(work, dispatch), dispatch.Id);
+            if (saved is not null) await store.SaveHarnessReceipt(work, saved);
+            else active.Add((work, Workspace(work), ExecuteWork(work)));
+        }
+        Task cognition = Task.CompletedTask;
         try
         {
             while (await timer.WaitForNextTickAsync(token))
             {
-                for (int i = 0; i < 32 && await store.ProcessGoalMessage(Robot(null).Id, CanOperate, projectGrant,
-                    nativePrivateChat: nativeConversation); i++) { }
+                if (cognition.IsCompleted)
+                {
+                    await cognition;
+                    cognition = ProcessDecisions();
+                }
                 for (int i = 0; i < 32 && await store.NextGoalNotice() is { } notice; i++)
                 {
                     var robot = Robot(null);
                     try
                     {
                         var sent = await store.Send(robot.Id, robot.Name, notice.Room, new(notice.Id, notice.Text, notice.ReplyTo),
-                            card: notice.TaskId is null ? null : new("task", TaskId: notice.TaskId));
+                            card: notice.TaskId is null ? null : new("task", TaskId: notice.TaskId), noticeOperator: CanOperate);
                         if (sent is not null) await Notify(sent.Recipients, notice.Room);
                     }
                     catch (Exception e) when (e is DirectMessageBlockedException or GroupSilencedException or ChannelWriteDeniedException)
@@ -265,6 +190,7 @@ sealed class ChatBot : BackgroundService
                     if (!canAsk && !canRun) break;
                     var next = await store.ClaimBotWork(lease, candidate =>
                     {
+                        if (active.Any(item => item.Work.Id == candidate.Id)) return false;
                         if (candidate.IsAnswer ? !canAsk : !canRun) return false;
                         string? root = Workspace(candidate);
                         return root is null || !active.Any(item => item.Root is { } occupied && Overlaps(root, occupied));
@@ -274,14 +200,66 @@ sealed class ChatBot : BackgroundService
                 }
             }
         }
-        finally { await Task.WhenAll(active.Select(item => item.Execution)); }
+        finally { await Task.WhenAll(active.Select(item => item.Execution).Append(cognition)); }
+
+        async Task ProcessDecisions()
+        {
+            await DecideNext(goal: false);
+            await DecideNext(goal: true);
+        }
+
+        string Session(BotWork work, BotDispatch dispatch) => Path.Combine(Folder(work), "harnesses", dispatch.Harness);
 
         string? Workspace(BotWork work)
         {
-            if (work.Kind == "chat") return null; // Per-user private workspace; same-room chat jobs are ordered by the store.
-            var adapter = adapters.GetValueOrDefault(work.Input.Provider ?? ChatStore.BotName);
-            // The default question path uses a frozen citation; ACP answers have a working directory.
-            return adapter?.ProjectRoot ?? (work.IsAnswer ? null : files.Root);
+            if (work.Input.Loop?.Dispatch is { } dispatch)
+                return PrivateWorkspace(work) ?? harnesses.GetValueOrDefault(dispatch.Harness)?.ProjectRoot;
+            return null; // Independent source reviews use the frozen citation.
+        }
+
+        string? PrivateWorkspace(BotWork work)
+        {
+            if (CanOperate(work.Owner)) return null;
+            var root = Path.Combine(directory, "private-conversations");
+            var suffix = Path.Combine(Guid.Parse(work.Room).ToString("N"), Guid.Parse(work.Owner).ToString("N"), "workspace");
+            var shared = Path.Combine(root, suffix);
+            if (Directory.Exists(shared)) return shared;
+            // Retain the account's existing files when upgrading a private conversation.
+            bool deepSeekFirst = string.Equals(config["ChatBot:ConversationHarness"], "deepseek", StringComparison.OrdinalIgnoreCase);
+            var previous = Path.Combine(root, deepSeekFirst ? ChatStore.DeepSeekBotName : ChatStore.BotName, suffix);
+            var alternate = Path.Combine(root, deepSeekFirst ? ChatStore.BotName : ChatStore.DeepSeekBotName, suffix);
+            return Directory.Exists(previous) ? previous : Directory.Exists(alternate) ? alternate : shared;
+        }
+
+        async Task DecideNext(bool goal)
+        {
+            var input = await store.NextBotInput(goal);
+            if (input is null) return;
+            var snapshot = await store.DecisionContext(input, Robot(null).Id, CanOperate(input.Owner), projectGrant,
+                harnesses.Keys.ToArray(), maxTurns, config.GetValue("ChatBot:AutoFinalReport", true),
+                ChatConversation.Style(config["ChatBot:ConversationStyle"]));
+            if (snapshot is null) return;
+            var capabilities = harnesses.Values.ToDictionary(h => h.Name, h => h.Description + " · " +
+                (!CanOperate(input.Owner) ? "此账号的私聊工作区" :
+                    ProjectFiles.Same(h.ProjectRoot ?? "", files.Root) ? "主项目工作区" : "独立部署工作区"),
+                StringComparer.Ordinal);
+            snapshot = snapshot with { Context = snapshot.Context with { Capabilities = capabilities } };
+            try
+            {
+                var decision = (await engine.DecideAsync(snapshot.Context, token)).Validate(snapshot.Context);
+                await store.ApplyDecision(snapshot, decision, Robot(null).Id, CanOperate(input.Owner), maxTurns, projectGrant);
+            }
+            catch (Exception error) when (!token.IsCancellationRequested && error is not System.Data.Common.DbException)
+            {
+                log.LogWarning(error, "Decision failed for room {Room}, message {Sequence}", input.Room, input.Sequence);
+                var reason = "本次决策未能执行：" + error.Message;
+                if (snapshot.Context.Goals.Any(g => g.Id == input.Trigger.GoalId && g.RemainingTurns == 0))
+                    reason = $"目标的 Harness 调用预算已用尽。{reason}";
+                if (reason.Length > 600) reason = reason[..600];
+                var fallback = input.Trigger.GoalId is Guid id
+                    ? new BotDecision(BotAction.Wait, id, reason) : new BotDecision(BotAction.Reply, Message: reason);
+                await store.ApplyDecision(snapshot, fallback, Robot(null).Id, CanOperate(input.Owner), maxTurns, projectGrant, reason);
+            }
         }
 
         async Task ExecuteWork(BotWork work)
@@ -290,127 +268,53 @@ sealed class ChatBot : BackgroundService
             {
                 var provider = work.Input.Provider ?? ChatStore.BotName;
                 var robot = Robot(provider);
-                var adapter = adapters[provider];
                 var room = await store.BotRoom(work.Room, work.Owner);
                 if (!room.Installed || !room.Member || !await store.RobotIsMember(work.Room, robot.Id) ||
                     !await CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
                 {
-                    await store.SetBotStatus(work, "disabled");
+                    if (work.Input.Loop?.Dispatch is not null)
+                        await store.SaveHarnessReceipt(work, new("interrupted", null, "会话或账号已停止使用此 Harness。", []));
+                    else await store.SetBotStatus(work, "disabled");
                     return;
                 }
-                if (work.Kind == "chat")
+                if (work.Input.Loop?.Dispatch is { } dispatch)
                 {
-                    long? revision = await store.PrivateConversationRevision(work);
-                    if (revision is null)
-                    {
-                        await store.SetBotStatus(work, "disabled");
-                        return;
-                    }
-                    // Use DB-assigned IDs only. Neither paths nor provider/thread IDs come from messages.
-                    var privateRoom = Path.Combine(directory, "private-conversations", conversation.Name,
-                        Guid.Parse(work.Room).ToString("N"), Guid.Parse(work.Owner).ToString("N"));
-                    var input = work.Input with
-                    {
-                        History = await store.ConversationHistory(work, robot.Id),
-                        ConversationStyle = ChatConversation.Style(config["ChatBot:ConversationStyle"]),
-                        ConversationNote = await store.ReadConversationNote(work),
-                        ConversationWorkId = work.Id,
-                        ConversationWorkspace = Path.Combine(privateRoom, "workspace")
-                    };
-                    if (revision != await store.PrivateConversationRevision(work))
-                    {
-                        await store.SetBotStatus(work, "disabled");
-                        return;
-                    }
-                    string answer;
-                    string status = "completed";
+                    HarnessReceipt receipt;
                     try
                     {
-                        string session = Path.Combine(privateRoom, "sessions", revision.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                        answer = (nativeConversation, conversation) switch
+                        if (!harnesses.TryGetValue(dispatch.Harness, out var harness))
+                            throw new InvalidOperationException($"部署中找不到 Harness {dispatch.Harness}。");
+                        string session = Session(work, dispatch);
+                        var instruction = dispatch.Instruction + "\n\n当前目标及用户约束\n" + work.Goal!.Prompt;
+                        if (CanOperate(work.Owner) && ProjectFiles.Same(harness.ProjectRoot ?? "", files.Root))
                         {
-                            (true, DeepSeekChatAdapter deepSeek) => await deepSeek.AnswerConversation(input, session, token),
-                            (true, _) => await CodexPrivateConversation.Answer(input, policy.Executable, session, token),
-                            _ => await conversation.Answer(input, token)
-                        };
+                            var recalled = await store.PrepareGoalMemory(work, files, memorySemantics, token);
+                            if (recalled.LessonHints.Length > 0 || recalled.ExperienceHint is not null)
+                                instruction += "\n来自用户的历史做法及已验证文件线索（当前要求优先）\n" +
+                                    ChatStore.ToJson(new { recalled.LessonHints, recalled.ExperienceHint });
+                        }
+                        receipt = await harness.SendAsync(session, dispatch.Id, instruction,
+                            async _ => await store.GoalShouldYield(work) || !await CanOperateRoom(work.Owner, work.Room),
+                            token, PrivateWorkspace(work));
                     }
                     catch (Exception e) when (!token.IsCancellationRequested)
                     {
-                        var failure = ChatConversation.ProviderFailure(e);
-                        log.LogWarning("Conversation adapter {Provider}, work {Id}: {Reason} ({ErrorType})",
-                            conversation.Name, work.Id, failure, e.GetType().Name);
-                        answer = ChatConversation.FailureReply(failure);
-                        status = failure == ConversationFailure.Interrupted ? "needs-reconciliation" : "failed";
+                        receipt = new("failed", null, e.Message, []);
                     }
-                    if (!await CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
-                    {
-                        await store.SetBotStatus(work, "disabled");
-                        return;
-                    }
-                    var result = await store.Send(robot.Id, robot.Name, work.Room,
-                        new(work.Id.ToString(), answer[..Math.Min(answer.Length, 12000)], work.Sequence),
-                        answeredWork: work, answerStatus: status, answerRevision: revision);
-                    if (result is null) await store.SetBotStatus(work, nativeConversation ? "needs-reconciliation" : "disabled");
-                    else await Notify(result.Recipients, work.Room);
+                    await store.SaveHarnessReceipt(work, receipt);
                     return;
                 }
-                if (work.Kind == "question")
-                {
-                    var source = work.Input.Source ?? throw new InvalidDataException("Question has no citation.");
-                    var text = await adapter.Answer(work.Input, token);
-                    if (!await CanOperateRoom(work.Owner, work.Room, work.Input.Provider) ||
-                        (await store.ReadBotWork(work.Id, work.Owner))?.Status != "running")
-                    {
-                        await store.SetBotStatus(work, "disabled");
-                        return;
-                    }
-                    var result = await store.Send(robot.Id, robot.Name, work.Room,
-                        new(work.Id.ToString(), text[..Math.Min(text.Length, 12000)], work.Sequence),
-                        card: new("citation", source));
-                    if (result is null) throw new InvalidOperationException("Robot reply was not stored.");
-                    await Notify(result.Recipients, work.Room);
-                    await store.SetBotStatus(work, "completed");
-                    return;
-                }
-
-                if (work.Input.Source is { } cited && !File.Exists(Path.Combine(Folder(work), "agent.json")) &&
-                    Cite(cited.Path, cited.Start, cited.End).Sha256 != cited.Sha256)
-                {
-                    await store.SetBotStatus(work, "stale-source", "文件已变化，请重新引用后安排任务。");
-                    return;
-                }
-                bool learns = adapter is LittleLoopChatAdapter && ChatStore.SupportsGoalExperience(work);
-                if (learns && !File.Exists(Path.Combine(Folder(work), "agent.json")))
-                    work = await store.PrepareGoalMemory(work, files, memorySemantics, token);
-                var outcome = await adapter.Run(work, Folder(work), async (request, _) =>
-                {
-                    try { await store.EnqueueFcmApproval(work, request.Nonce, approverIds); }
-                    catch (System.Data.Common.DbException e) { log.LogWarning(e, "Could not queue approval notification."); }
-                }, token, async _ => !await CanOperateRoom(work.Owner, work.Room, work.Input.Provider) ||
-                    work.Goal is not null && await store.GoalShouldYield(work));
-                VerifiedGoalExperience? experience = null;
-                if (learns && outcome.Status == "completed")
-                {
-                    try
-                    {
-                        var verifiedPolicy = new AgentDelegationHost(Folder(work)).Read().Policy.Development;
-                        if (verifiedPolicy is not null)
-                        {
-                            var receipts = new LittleLoop.Core.LearningSession(Path.Combine(Folder(work), "tools-learning.json")).Read().Episodes;
-                            experience = VerifiedGoalExperience.FromReceipts(new ProjectFiles(verifiedPolicy), receipts);
-                        }
-                    }
-                    catch (Exception error) when (error is IOException or System.Text.Json.JsonException or UnauthorizedAccessException or ArgumentException)
-                    {
-                        log.LogWarning(error, "Could not derive experience for completed task {Task}", work.Id);
-                    }
-                }
-                await store.SetBotStatus(work, outcome.Status == "suspended" ? "disabled" : outcome.Status,
-                    output: outcome.Report, experience: experience);
+                if (provider != ChatStore.ReviewBotName) throw new InvalidOperationException("任务没有可派发的 Bot 决策。");
+                var report = await sourceReview.Answer(work.Input, token);
+                var review = await store.Send(robot.Id, robot.Name, work.Room,
+                    new(work.Id.ToString(), report, work.Sequence), card: new("citation", work.Input.Source));
+                if (review is not null) await Notify(review.Recipients, work.Room);
+                await store.SetBotStatus(work, "completed", output: report);
             }
             catch (Exception e) when (!token.IsCancellationRequested)
             {
                 log.LogError(e, "Chat bot work {Id} interrupted", work.Id);
+                if (work.Input.Loop is not null) throw; // Restart collects the same durable dispatch.
                 if (work.Kind == "question")
                 {
                     await store.SetBotStatus(work, "failed", "源码问答未完成。");
@@ -424,10 +328,17 @@ sealed class ChatBot : BackgroundService
 
     public async Task<ChatMessage?> Queue(string room, string user, string name, Guid id, long? anchor, string kind, BotInput input)
     {
-        var goal = kind == "task" && ((input.Provider is null or ChatStore.BotName or ChatStore.DeepSeekBotName or ChatStore.DeepSeekTestBotName) ||
-            ChatStore.IsProjectTaskOnly(input.Provider))
-            ? LittleLoop.Core.ContinuousGoal.Create(input.Text) : null;
-        var work = new BotWork(id, room, user, 0, kind, goal?.Status ?? "queued", input, Goal: goal);
+        if (input.Provider is null or ChatStore.BotName)
+        {
+            var sent = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),
+                card: new(kind == "task" ? "request" : kind, input.Source), goalRobot: Robot(null).Id,
+                legacyBotOperator: CanOperate(user), decisionRequest: true);
+            if (sent is { IsNew: true }) await Notify(sent.Recipients, room);
+            return sent?.Message;
+        }
+        if (input.Provider != ChatStore.ReviewBotName || input.Source is null)
+            throw new ArgumentException("源码审阅需要一条带源码引用的消息。");
+        var work = new BotWork(id, room, user, 0, kind, "queued", input);
         var result = await store.Send(user, name, room, new(id.ToString(), input.Text, anchor),
             card: new(kind, kind == "question" ? input.Source : null, id), job: work,
             goalRobot: Robot(null).Id, legacyBotOperator: CanOperate(user));

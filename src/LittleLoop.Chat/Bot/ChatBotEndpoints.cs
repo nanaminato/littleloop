@@ -15,7 +15,7 @@ static class ChatBotEndpoints
         api.MapGet("/capabilities", (ClaimsPrincipal user) => new
         {
             enabled = bot is not null, canOperate = bot?.CanOperate(Id(user)) == true,
-            canApprove = bot?.CanApprove(Id(user)) == true, canManageAccess = bot?.CanManageAccess(Id(user)) == true,
+            canApprove = false, canManageAccess = bot?.CanManageAccess(Id(user)) == true,
             providers = bot?.Providers ?? [],
         });
         if (bot is null) return;
@@ -51,53 +51,8 @@ static class ChatBotEndpoints
             return Results.NoContent();
         });
 
-        api.MapGet("/private-approvals", async (ClaimsPrincipal user) =>
-        {
-            if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
-            var pending = new List<object>();
-            foreach (var work in await store.RunningPrivateWork())
-                if (PrivateApproval(work) is { } request && await bot.CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
-                    pending.Add(new { work.Id, request.Nonce, request.Tool, request.Arguments });
-            return Results.Ok(pending);
-        });
-
-        api.MapPost("/private-approvals/{id:guid}/decision", async (Guid id, BotDecision input, ClaimsPrincipal user) =>
-        {
-            if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
-            if (!Guid.TryParseExact(input.Nonce, "N", out _) || input.Value is not ("accept" or "decline")) return Results.BadRequest();
-            var work = (await store.RunningPrivateWork()).FirstOrDefault(w => w.Id == id);
-            if (work is null || PrivateApproval(work)?.Nonce != input.Nonce ||
-                !await bot.CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
-                return Results.Conflict("审批已失效或已处理。");
-            try
-            {
-                new AgentDelegationHost(bot.Folder(work)).Answer(input.Nonce, input.Value, Id(user));
-                return Results.NoContent();
-            }
-            catch (Exception e) when (e is IOException or ArgumentException) { return Results.Conflict("审批已失效或已处理。"); }
-        });
-
-        (string Nonce, string Tool, object Arguments)? PrivateApproval(BotWork work)
-        {
-            if (!bot.SupportsApproval(work.Input.Provider) ||
-                AgentConversationSupport.PendingApproval(bot.Folder(work)) is not { } pending ||
-                !pending.Parameters.TryGetProperty("tool", out var tool) ||
-                !pending.Parameters.TryGetProperty("arguments", out var args)) return null;
-            var name = tool.GetString();
-            object? details = name switch
-            {
-                "project_patch" => new { path = ReadArgument("path"), oldText = ReadArgument("oldText"), newText = ReadArgument("newText") },
-                "project_command" => new { command = ReadArgument("command") },
-                _ => null
-            };
-            return details is null ? null : (pending.Nonce, name!, details);
-
-            string? ReadArgument(string key) => args.TryGetProperty(key, out var value) ? value.GetString() : null;
-        }
-
         api.MapPost("/direct", async (ClaimsPrincipal user, string? provider) =>
         {
-            if (ChatStore.IsProjectTaskOnly(provider)) return Results.BadRequest("请在包含审批人的群聊中安排项目任务。");
             if (!bot.CanUse(provider)) return Results.BadRequest("未知机器人。");
             var robot = bot.Robot(provider);
             var access = provider is null or ChatStore.BotName
@@ -175,32 +130,14 @@ static class ChatBotEndpoints
         {
             var job = await store.ReadBotWork(id, Id(user));
             if (job is null) return Results.NotFound();
-            bool canApprove = job.Kind == "task" && bot.SupportsApproval(job.Input.Provider) && bot.CanApprove(Id(user)) &&
-                await bot.CanOperateRoom(job.Owner, job.Room, job.Input.Provider);
-            bool seeEvidence = bot.CanApprove(Id(user)) || job.Owner == Id(user);
-            object? execution = job.Kind != "question" && seeEvidence && (job.Kind != "legacy" || bot.HasLegacyEvidence)
-                ? AgentConversationSupport.Details(bot.Folder(job), canApprove && job.Status == "running") : null;
-            return Results.Ok(new { job.Id, job.Status, job.Error, canApprove, execution,
+            bool seeEvidence = bot.CanReadHistoricalEvidence(Id(user)) || job.Owner == Id(user);
+            object? execution = job.Input.Loop is null && job.Kind != "question" && seeEvidence && (job.Kind != "legacy" || bot.HasLegacyEvidence)
+                ? AgentConversationSupport.Details(bot.Folder(job), false) : null;
+            var events = job.Input.Loop is not null && seeEvidence ? await store.GoalObservations(job.Id) : null;
+            return Results.Ok(new { job.Id, job.Status, job.Error, canApprove = false, execution, events,
                 goal = job.Goal,
                 provider = job.Input.Provider ?? ChatStore.BotName,
                 output = seeEvidence && job.Output is not null ? AgentConversationSupport.ReportText(job.Output) : null });
-        });
-
-        api.MapPost("/work/{id:guid}/decision", async (Guid id, BotDecision input, ClaimsPrincipal user) =>
-        {
-            var job = await store.ReadBotWork(id, Id(user));
-            if (job is null) return Results.NotFound();
-            if (!bot.CanApprove(Id(user))) return Results.StatusCode(403);
-            if (job.Kind != "task" || !bot.SupportsApproval(job.Input.Provider) || job.Status != "running" ||
-                !await bot.CanOperateRoom(job.Owner, job.Room, job.Input.Provider))
-                return Results.Conflict("任务没有待处理的授权。");
-            if (!Guid.TryParseExact(input.Nonce, "N", out _) || input.Value is not ("accept" or "decline")) return Results.BadRequest();
-            try
-            {
-                new AgentDelegationHost(bot.Folder(job)).Answer(input.Nonce, input.Value, Id(user));
-                return Results.NoContent();
-            }
-            catch (Exception e) when (e is IOException or ArgumentException) { return Results.Conflict("审批已失效或已处理。"); }
         });
 
         async Task<IResult> Queue(Guid room, ClaimsPrincipal user, Guid client, long? anchor, string kind, BotInput input)

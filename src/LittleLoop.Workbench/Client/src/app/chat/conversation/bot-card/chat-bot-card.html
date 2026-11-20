@@ -7,7 +7,7 @@
 @if (work(); as item) {
   <details class="task" [attr.data-work]="item.id" [attr.aria-label]="t('LittleLoop 任务')"
     [open]="item.canApprove && !!item.execution?.approval">
-    <summary>{{ card().kind === 'question' ? t('源码问答') : t('开发任务') }} · {{ label(item.status) }}</summary>
+    <summary>{{ card().kind === 'question' ? t('源码问答') : t('工作目标') }} · {{ label(item.status) }}</summary>
     <small class="provider">{{ item.provider === 'source_review' ? t('源码审阅') : 'LittleLoop' }}</small>
     @if (item.goal; as goal) {
       <p>{{ goal.objective }} · v{{ goal.version }}</p>

@@ -48,7 +48,7 @@ export class ChatBotCard implements OnInit, OnDestroy {
       }
       const work: Work = await response.json();
       this.work.set(work);
-      if (!['queued', 'running', 'paused', 'waiting-input', 'suspended'].includes(work.status)) clearInterval(this.timer);
+      if (!['queued', 'running', 'deciding', 'paused', 'waiting-input', 'suspended'].includes(work.status)) clearInterval(this.timer);
     } catch {
       // The next request after reconnection will fetch the durable job.
     } finally { this.loading = false; }
@@ -72,7 +72,7 @@ export class ChatBotCard implements OnInit, OnDestroy {
   format(value: unknown) { return JSON.stringify(value, null, 2); }
   label(status: string) {
     const names: Record<string, string> = {
-      queued: '排队中', running: '执行中', completed: '已完成', refused: '核心拒绝',
+      queued: '排队中', deciding: '正在决定下一步', running: '执行中', completed: '已完成', refused: '核心拒绝',
       paused: '已暂停', cancelled: '已取消', 'waiting-input': '等待补充要求', suspended: '已暂停',
       failed: '失败', disabled: '机器人已停用', 'needs-reconciliation': '待核对', 'needs-revision': '验收未通过', 'stale-source': '源码已变更',
     };
