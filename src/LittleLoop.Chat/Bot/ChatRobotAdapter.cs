@@ -28,7 +28,8 @@ sealed class LittleLoopChatAdapter(AgentHostPolicy policy, string directory, Fun
     public Task<string> Answer(BotInput input, CancellationToken token) =>
         input.Source is { } source
             ? AgentConversationSupport.Answer(input.Text, source, policy.Executable, directory, null, token)
-            : ChatConversation.Answer(input, conversationModel, policy.Executable, directory, token);
+            : ChatConversation.Answer(input, conversationModel ??
+                throw new InvalidOperationException("Ordinary Codex messages require a private native session."), token);
 
     public async Task<RobotOutcome> Run(BotWork work, string folder, Func<AgentApprovalRequest, CancellationToken, Task> onApproval, CancellationToken token,
         Func<CancellationToken, Task<bool>>? shouldYield = null)

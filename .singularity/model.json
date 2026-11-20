@@ -3147,22 +3147,22 @@
       "id": "INTENT-LITTLELOOP-DEFAULT-MACHINE-PERMISSIONS",
       "type": "intent",
       "title": "默认赋予 LittleLoop 广泛的机器操作权限",
-      "body": "用户希望机器人默认拥有全部操作权限，包括修改计算机的任何配置，也提出可增加管理员提升逻辑。机器人可以在执行前再次询问用户。面向整台计算机的无限制操作仍属待实现目标。",
+      "body": "历史意图。用户希望机器人默认拥有全部操作权限，包括修改计算机的任何配置，也提出可增加管理员提升逻辑。机器人可以在执行前再次询问用户。面向整台计算机的无限制操作仍属待实现目标。 2026-11-20 起，计算机操作的执行者改为用户指定的外部代理。",
       "references": [
         "REF-PRIVATE-DEVELOPMENT-WORK"
       ],
       "actor": "Human",
       "attributes": {},
-      "authorization": "confirmed",
+      "authorization": "retired",
       "delivery": "planned",
       "verification": "unverified",
-      "authorization_basis": "2026-11-19 用户在聊天中明确要求“应该像人对话一样直接处理”以及“默认littleloop 机器人就是要拥有所有的权限（包括修改计算机的任何配置）”，并提出可以添加提升为管理员的逻辑，执行前可能再询问用户。"
+      "authorization_basis": "2026-11-19 用户在聊天中明确要求“应该像人对话一样直接处理”以及“默认littleloop 机器人就是要拥有所有的权限（包括修改计算机的任何配置）”，并提出可以添加提升为管理员的逻辑，执行前可能再询问用户。 已退役的范围为 LittleLoop 自身的直接机器操作。2026-11-20，用户明确要求“先提交和推送代码，然后移除直接使用littleloop 操作计算机的逻辑，完全交给其他agent来做(codex ,deepseek harness)”。"
     },
     {
       "id": "DECISION-CHAT-OPERATOR-HOST-AUTHORITY",
       "type": "decision",
       "title": "区分机器人操作能力、发起人权限和操作系统授权",
-      "body": "私聊根据用户请求选择对话或现有执行能力。配置的操作员在与默认 LittleLoop 的私聊中可使用宿主预授的项目权限。仅凭好友身份发起的任务和群组任务继续独立审批。机器配置操作须有对应的宿主能力，需要管理员权限时由操作系统向本地用户请求授权。具体交付及验收范围单独记录。 主机器人私聊在执行时核验发起人仍有访问权。ChatBot:HostOperators 可单独指定操作已接入 Windows 设置的账号，也可配置一个候选账号，通过当前桌面用户确认后绑定账号 ID。项目操作员与审批人角色独立配置。用户级设置只作用于身份已核实的登录桌面。",
+      "body": "历史设计，适用于旧实现 72f59c0。私聊根据用户请求选择对话或现有执行能力。配置的操作员在与默认 LittleLoop 的私聊中可使用宿主预授的项目权限。仅凭好友身份发起的任务和群组任务继续独立审批。机器配置操作须有对应的宿主能力，需要管理员权限时由操作系统向本地用户请求授权。具体交付及验收范围单独记录。 主机器人私聊在执行时核验发起人仍有访问权。ChatBot:HostOperators 可单独指定操作已接入 Windows 设置的账号，也可配置一个候选账号，通过当前桌面用户确认后绑定账号 ID。项目操作员与审批人角色独立配置。用户级设置只作用于身份已核实的登录桌面。",
       "actor": "AI",
       "authorization": "not_applicable",
       "delivery": "not_applicable",
@@ -3178,12 +3178,12 @@
     {
       "id": "CAP-CHAT-WINDOWS-HOST-SETTINGS",
       "type": "capability",
-      "title": "私聊管理 Windows 时区、电源超时和桌面偏好",
-      "body": "私聊通过明确的中文请求查看或修改时区、当前电源计划的屏幕和睡眠超时，以及登录用户的隐藏文件、文件扩展名和应用主题偏好。宿主核对目标值并区分结果和待核对情况。",
+      "title": "旧版本中由 LittleLoop 直接执行的 Windows 设置",
+      "body": "旧实现保存在提交 72f59c0。私聊通过明确的中文请求查看或修改时区、当前电源计划的屏幕和睡眠超时，以及登录用户的隐藏文件、文件扩展名和应用主题偏好。宿主核对目标值并区分结果和待核对情况。 新版普通私聊将计算机操作请求交给外部代理。",
       "actor": "AI",
       "authorization": "not_applicable",
-      "delivery": "implemented",
-      "verification": "passed",
+      "delivery": "abandoned",
+      "verification": "stale",
       "verification_basis": [
         "EVIDENCE-CHAT-WINDOWS-HOST-SETTINGS"
       ],
@@ -3207,6 +3207,175 @@
       "attributes": {
         "observation": "2026-11-20，时区 27 项、电源 34 项、桌面 25 项、绑定 21 项检查通过。真实桌面账号的隐藏文件、扩展名和应用主题查询与独立读取的 Windows 设置全部一致。真实系统写入、UAC 和真人点击绑定窗口未在该轮执行。专项记录位于 data/desktop-settings-qa/focused-checks.log 和 data/desktop-settings-qa/read-checks.json。 同日完整回归通过 SQLite 聊天目标 250 项和核心 357 项检查，详见 data/host-settings-checks.log 和 data/host-core-checks.log。已部署的 5190 服务在登录后的私聊返回能力清单、时区、电源计划的四项闲置超时、隐藏文件、扩展名与应用主题，六次请求均通过。部署验证只读，服务哈希和结果保存于 data/continuous-deployment/host-chat-deployment-20261120.json。"
       }
+    },
+    {
+      "authorization": "confirmed",
+      "attributes": {},
+      "delivery": "planned",
+      "authorization_basis": "2026-11-20，用户明确要求“先提交和推送代码，然后移除直接使用littleloop 操作计算机的逻辑，完全交给其他agent来做(codex ,deepseek harness)”。",
+      "title": "计算机操作全部委派给 Codex 或 DeepSeek Harness",
+      "body": "LittleLoop 接收用户请求并委派。计算机操作由 Codex 或 DeepSeek Harness 负责，移除 LittleLoop 自己直接操作计算机的实现。",
+      "id": "INTENT-CHAT-DELEGATE-COMPUTER-OPERATIONS",
+      "type": "intent",
+      "verification": "unverified",
+      "actor": "Human",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ]
+    },
+    {
+      "id": "DECISION-CHAT-EXTERNAL-COMPUTER-AGENTS",
+      "body": "LittleLoop 传递用户的私聊请求并返回代理回答。Codex 或 DeepSeek Harness 使用各自环境已配置的能力。移除旧 Windows 设置执行器和桌面配对入口，旧工作记录不会触发代理重新执行。项目开发任务仍遵循其单独授权的范围。",
+      "authorization": "not_applicable",
+      "verification": "not_applicable",
+      "delivery": "not_applicable",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-DEEPSEEK-ACP",
+        "REF-CODEX-AGENT-CLIENT"
+      ],
+      "type": "decision",
+      "actor": "AI",
+      "attributes": {
+        "rationale": "代理可用的工具和执行回执决定当前请求能否完成。旧版遗留工作缺少向新代理重新执行的授权，必须保留其实际状态。"
+      },
+      "title": "计算机操作的工具和执行权限归外部代理"
+    },
+    {
+      "id": "CAP-CHAT-CONVERSATION-HARNESS",
+      "body": "同一用户在一间私聊内复用选定代理的原生会话。新记录从近期问答建立上下文，以后续接代理自己的会话并提供本轮引用、说明和风格。消息编辑、删除或保存的背景说明变化会启用新会话版本。代理在受限的私聊工作区决定是否调用已启用的工具。显式项目任务进入独立开发流程。",
+      "authorization": "not_applicable",
+      "verification": "passed",
+      "delivery": "implemented",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-DEEPSEEK-ACP",
+        "REF-CODEX-AGENT-CLIENT"
+      ],
+      "type": "capability",
+      "actor": "AI",
+      "attributes": {},
+      "title": "私聊续接 Codex 或 DeepSeek Harness 原生会话",
+      "verification_basis": [
+        "EVIDENCE-CHAT-DELEGATED-CONVERSATION",
+        "EVIDENCE-CHAT-RUNTIME-CONTEXT",
+        "EVIDENCE-CHAT-PRIVATE-NATIVE-SESSIONS"
+      ]
+    },
+    {
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "id": "EVIDENCE-CHAT-DELEGATED-CONVERSATION",
+      "delivery": "implemented",
+      "title": "私聊代理选择、旧操作恢复和真实代理验证",
+      "attributes": {
+        "observation": "2026-11-20，SQLite 聊天目标 245 项全部通过，含旧工作恢复、会话上下文和所选代理返回结果。日志 data/delegated-conversation-checks.log。已安装的 DeepSeek Harness 在空工作区收到模拟上文并正确回答追问，结束后目录仍空，控制台退出码 0。复验驱动 data/harness-conversation-checks/InspectExternalHarness.cs，配置 tests/ChatContinuousLive/deepseek-readonly.yml。 同日 5190 部署后的两个真实 Codex 私聊回合分别回答 43 和 45。两次时区询问均经普通聊天路由，因上游限流或不可用而返回失败提示。原生操作历史仍为 6 条，待执行旧操作和活动任务均为零，未执行系统写入。程序集哈希和逐轮状态见 data/continuous-deployment/external-agent-deployment-20261120.json。"
+      },
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-DEEPSEEK-ACP"
+      ],
+      "type": "evidence",
+      "body": "核对了普通消息与后续回复在所选代理和原私聊间传递，以及旧版 Windows 工作升级后的状态。受控检查与真实运行分开记录。",
+      "verification": "not_applicable"
+    },
+    {
+      "verification": "unverified",
+      "type": "intent",
+      "delivery": "planned",
+      "authorization": "confirmed",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "actor": "Human",
+      "id": "INTENT-CHAT-BOT-RUNTIME-CONTEXT",
+      "authorization_basis": "2026-11-20，用户提出“能不能让 bot自己持有上下文（在内存或运行时），而不是源代码”。",
+      "attributes": {},
+      "title": "机器人在运行时持有对话上下文",
+      "body": "机器人持有并使用运行时上下文，让正在进行的对话可以延续。用户明确提出运行时持有上下文，存放位置和具体实现可以推导。"
+    },
+    {
+      "body": "通过当前会话的实际消息路径验证保存、替换、查询、清除，以及主体范围和代理上下文的组装。",
+      "id": "EVIDENCE-CHAT-RUNTIME-CONTEXT",
+      "title": "共享风格、私聊背景说明与运行时上下文验证",
+      "actor": "AI",
+      "delivery": "implemented",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-CONTINUOUS-GOAL-CHECKS",
+        "REF-CONTINUOUS-WORKER-CHECKS"
+      ],
+      "attributes": {
+        "observation": "本地构建零警告。SQLite 和独立 MySQL 的聊天目标套件各通过 249 项检查。保存和查看说明由服务直接响应，重启服务并切换代理后仍传递原用户私聊的说明和历史。更改运行时默认风格会体现在下一条回复，跨用户和会话读取隔离，清除说明后近期问答仍可供引用。此轮验证在本地进行，检查日志为 data/runtime-context-checks.log 和 data/runtime-context-mysql-checks.log。"
+      },
+      "verification": "not_applicable",
+      "type": "evidence",
+      "authorization": "not_applicable"
+    },
+    {
+      "title": "按私聊续接原生代理会话并由代理选择工具",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "verification": "unverified",
+      "delivery": "planned",
+      "authorization_basis": "2026-11-20，用户明确要求“按私聊复用 Agent 会话”“让 Agent 判断何时需要工具”“删掉按业务关键词写的兜底”，并说“别使用已有的项目审批授权，直接重构，bot相当于用户”。用户另行要求所有审批自动通过和移除沙箱。",
+      "id": "INTENT-CHAT-NATIVE-PRIVATE-SESSIONS",
+      "body": "普通私聊复用外部代理的原生会话，代理按用户请求和当时上下文决定是否调用工具。用户要求移除按业务关键词选择兜底回答的方式，并将旧项目审批从普通私聊路径中移出。",
+      "type": "intent",
+      "authorization": "confirmed",
+      "actor": "Human",
+      "attributes": {}
+    },
+    {
+      "title": "对外部代理自动准许所有审批并移除沙箱的请求",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "verification": "unverified",
+      "delivery": "not_applicable",
+      "authorization_basis": "2026-11-20，用户明确要求“按私聊复用 Agent 会话”“让 Agent 判断何时需要工具”“删掉按业务关键词写的兜底”，并说“别使用已有的项目审批授权，直接重构，bot相当于用户”。用户另行要求所有审批自动通过和移除沙箱。",
+      "id": "INTENT-CHAT-UNRESTRICTED-EXTERNAL-APPROVALS",
+      "body": "用户明确提出自动通过所有审批并移除沙箱。这项权限要求与按私聊续接外部代理会话分别记录。",
+      "type": "intent",
+      "authorization": "confirmed",
+      "actor": "Human",
+      "attributes": {}
+    },
+    {
+      "attributes": {
+        "rationale": "普通私聊可以复用原生代理能力。执行证据必须来自真实工具回执。隔离工作区保护其他用户和项目，恢复过程避免重复执行已发出的操作。"
+      },
+      "authorization": "not_applicable",
+      "title": "原生私聊会话在独立工作区内执行",
+      "verification": "not_applicable",
+      "type": "decision",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-CODEX-AGENT-CLIENT",
+        "REF-DEEPSEEK-ACP"
+      ],
+      "delivery": "not_applicable",
+      "id": "DECISION-CHAT-PRIVATE-SESSION-PERMISSIONS",
+      "actor": "AI",
+      "body": "聊天服务按代理、私聊、用户和修订版本选择会话记录。会话协议保存工具返回结果。普通消息不提交项目审批；Codex 只接受经过核对的工作区权限配置，DeepSeek 在核对原生工具范围后允许工作区文件操作。超时或中断的结果按实际状态处理。用户要求的整机权限和无条件审批尚未实现。 Windows 上在提交本轮前检查 Codex 沙箱状态。已就绪时启用受限工作区工具，未配置或需要更新时提供原生文字回合，并在回复中说明工具尚未就绪。"
+    },
+    {
+      "attributes": {
+        "observation": "2026-11-20，本地构建零警告，SQLite 聊天目标套件 257 项通过（data/native-conversation-checks-final.log）。真实 DeepSeek Harness 读、写、编辑工作区 memo.txt 并返回原生回执，同工作 ID 未重做，跨进程续接后记住原值，工作区外标记未泄露或修改。最终文件内容 EDITED，见 data/harness-private-probe/61643ad439c443a3bec6f01e230800a5。限制未核实前只发送 initialize 与 session/new，记录见 data/harness-private-probe/da827559af5d43fd9073cdcd75d9b352/methods.txt。真实 Codex App Server 搭配隔离模拟模型服务跨进程续接同一 thread，保留第一轮随机标记。使用实际托管模型且关闭工具时，原生文字回合给出正确答案。Windows 沙箱运行服务不可用，Codex 工作区内真实写入仍未验证。分别见 data/private-native-codex-build/native-loopback-observations.log 和 native-text-observations.log。"
+      },
+      "authorization": "not_applicable",
+      "title": "原生私聊会话续接与工作区工具检查",
+      "verification": "not_applicable",
+      "type": "evidence",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-CONTINUOUS-WORKER-CHECKS"
+      ],
+      "delivery": "implemented",
+      "id": "EVIDENCE-CHAT-PRIVATE-NATIVE-SESSIONS",
+      "actor": "AI",
+      "body": "记录原生会话创建、续接、消息分流、权限限制和故障反馈的验证范围。实际代理试验与受控协议检查分别记录。"
     }
   ],
   "relations": [
@@ -4392,6 +4561,72 @@
       "source": "EVIDENCE-CHAT-WINDOWS-HOST-SETTINGS",
       "id": "REL-WINDOWS-HOST-SETTINGS-EVIDENCE",
       "target": "CAP-CHAT-WINDOWS-HOST-SETTINGS"
+    },
+    {
+      "id": "REL-COMPUTER-DELEGATION-SUPERSEDES-DIRECT-AUTHORITY",
+      "source": "INTENT-CHAT-DELEGATE-COMPUTER-OPERATIONS",
+      "target": "INTENT-LITTLELOOP-DEFAULT-MACHINE-PERMISSIONS",
+      "type": "supersedes"
+    },
+    {
+      "id": "REL-EXTERNAL-COMPUTER-AGENTS-SUPERSEDE-HOST",
+      "source": "DECISION-CHAT-EXTERNAL-COMPUTER-AGENTS",
+      "type": "supersedes",
+      "target": "DECISION-CHAT-OPERATOR-HOST-AUTHORITY"
+    },
+    {
+      "id": "REL-EXTERNAL-COMPUTER-AGENTS-INTENT",
+      "source": "DECISION-CHAT-EXTERNAL-COMPUTER-AGENTS",
+      "type": "derived_from",
+      "target": "INTENT-CHAT-DELEGATE-COMPUTER-OPERATIONS"
+    },
+    {
+      "id": "REL-CONVERSATION-HARNESS-AGENT-OWNERSHIP",
+      "source": "CAP-CHAT-CONVERSATION-HARNESS",
+      "type": "implements",
+      "target": "DECISION-CHAT-EXTERNAL-COMPUTER-AGENTS"
+    },
+    {
+      "source": "EVIDENCE-CHAT-DELEGATED-CONVERSATION",
+      "id": "REL-CONVERSATION-HARNESS-EVIDENCE",
+      "type": "supports",
+      "target": "CAP-CHAT-CONVERSATION-HARNESS"
+    },
+    {
+      "id": "REL-CONVERSATION-HARNESS-RUNTIME-CONTEXT",
+      "source": "CAP-CHAT-CONVERSATION-HARNESS",
+      "type": "implements",
+      "target": "INTENT-CHAT-BOT-RUNTIME-CONTEXT"
+    },
+    {
+      "id": "REL-CHAT-RUNTIME-CONTEXT-EVIDENCE",
+      "source": "EVIDENCE-CHAT-RUNTIME-CONTEXT",
+      "type": "supports",
+      "target": "CAP-CHAT-CONVERSATION-HARNESS"
+    },
+    {
+      "id": "REL-PRIVATE-NATIVE-DECISION-INTENT",
+      "source": "DECISION-CHAT-PRIVATE-SESSION-PERMISSIONS",
+      "type": "derived_from",
+      "target": "INTENT-CHAT-NATIVE-PRIVATE-SESSIONS"
+    },
+    {
+      "id": "REL-PRIVATE-NATIVE-DECISION-BROAD-GRANT",
+      "source": "DECISION-CHAT-PRIVATE-SESSION-PERMISSIONS",
+      "type": "conflicts_with",
+      "target": "INTENT-CHAT-UNRESTRICTED-EXTERNAL-APPROVALS"
+    },
+    {
+      "id": "REL-PRIVATE-NATIVE-SESSION-WORKSPACE",
+      "source": "CAP-CHAT-CONVERSATION-HARNESS",
+      "type": "implements",
+      "target": "DECISION-CHAT-PRIVATE-SESSION-PERMISSIONS"
+    },
+    {
+      "id": "REL-PRIVATE-NATIVE-SESSION-EVIDENCE",
+      "source": "EVIDENCE-CHAT-PRIVATE-NATIVE-SESSIONS",
+      "type": "supports",
+      "target": "CAP-CHAT-CONVERSATION-HARNESS"
     }
   ],
   "references": [

@@ -10,6 +10,10 @@ sealed record BotInput(string Text, string? Anchor = null, SourceCitation? Sourc
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null)
 {
     [JsonIgnore] public ChatExchange[] History { get; init; } = [];
+    [JsonIgnore] public string? ConversationStyle { get; init; }
+    [JsonIgnore] public string? ConversationNote { get; init; }
+    [JsonIgnore] public Guid? ConversationWorkId { get; init; }
+    [JsonIgnore] public string? ConversationWorkspace { get; init; }
 }
 sealed record ChatExchange(string User, string Assistant, bool Quoted);
 sealed record BotWork(Guid Id, string Room, string Owner, long Sequence, string Kind, string Status, BotInput Input,
@@ -203,27 +207,48 @@ sealed partial class ChatStore
 
     public async Task RecoverBotWork(DbConnection lease)
     {
-        // A settings change may have reached Windows even when its reply never committed.
-        var interrupted = new List<(string Id, string Room, long Sequence)>();
-        await using (var lookup = Command(lease, null, "SELECT id,room_id,seq FROM chat_bot_work WHERE kind IN ('setting','timezone','pair') AND status='running'"))
+        // A running native chat might have already called tools. Preserve uncertainty on restart.
+        var retired = new List<(string Id, string Room, long Sequence, string Kind, string Status)>();
+        await using (var lookup = Command(lease, null, """
+            SELECT id,room_id,seq,kind,status FROM chat_bot_work
+            WHERE kind IN ('setting','timezone','pair') AND status IN ('queued','running','needs-input')
+            OR kind='chat' AND status='running'
+            """))
         await using (var reader = await lookup.ExecuteReaderAsync())
-            while (await reader.ReadAsync()) interrupted.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2)));
-        foreach (var work in interrupted)
+            while (await reader.ReadAsync()) retired.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2),
+                reader.GetString(3), reader.GetString(4)));
+        foreach (var work in retired)
         {
             await using var tx = await lease.BeginTransactionAsync();
             await LockGoalRoom(lease, tx, work.Room);
-            await using var mark = Command(lease, tx,
-                "UPDATE chat_bot_work SET status='needs-reconciliation' WHERE id=@id AND status='running'", ("id", work.Id));
+            bool interrupted = work.Status == "running";
+            string message = work.Kind == "chat" ? ChatConversation.FailureReply(ConversationFailure.Interrupted) : interrupted
+                ? "旧版在处理这项本机操作时中断了，请核对实际结果。此请求已停止。"
+                : "内置的本机操作已退役，此请求已结束。需要继续时，请使用有相应权限的 agent。";
+            await using var mark = Command(lease, tx, """
+                UPDATE chat_bot_work SET status=@next,error=@message WHERE id=@id AND status=@previous
+                """, ("next", interrupted ? "needs-reconciliation" : "disabled"), ("message", message),
+                ("id", work.Id), ("previous", work.Status));
             if (await mark.ExecuteNonQueryAsync() == 1)
-                await AddGoalNotice(lease, tx, work.Room, work.Sequence, "处理这项系统设置时服务重启了。请查询这项设置的当前值，核对结果。", null);
+                await AddGoalNotice(lease, tx, work.Room, work.Sequence, message, null);
             await tx.CommitAsync();
         }
         await using var cmd = Command(lease, null, """
-            UPDATE chat_bot_work SET status='queued' WHERE status='running' AND kind='chat';
             UPDATE chat_bot_work SET status='needs-reconciliation', error='进程曾中断，请核对执行记录。'
             WHERE status='running' AND goal IS NULL
             """);
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<long?> PrivateConversationRevision(BotWork work)
+    {
+        await using var db = await Open();
+        await using var cmd = Command(db, null, """
+            SELECT r.revision FROM chat_rooms r
+            JOIN chat_messages m ON m.room_id=r.id AND m.seq=@seq AND m.sender_id=@owner
+            WHERE r.id=@room AND r.type='direct' AND NOT m.deleted AND NOT m.edited
+            """, ("room", work.Room), ("seq", work.Sequence), ("owner", work.Owner));
+        return await cmd.ExecuteScalarAsync() is { } value ? Convert.ToInt64(value) : null;
     }
 
     public async Task<BotWork?> ClaimBotWork(DbConnection lease, Func<BotWork, bool>? canDispatch = null)
@@ -232,9 +257,9 @@ sealed partial class ChatStore
         string limit = canDispatch is null ? " LIMIT 1" : "";
         await using (var select = Command(lease, null, """
             SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal
-            FROM chat_bot_work w WHERE status='queued' AND (kind NOT IN ('chat','setting','timezone','pair') OR NOT EXISTS(
+            FROM chat_bot_work w WHERE status='queued' AND (kind<>'chat' OR NOT EXISTS(
                 SELECT 1 FROM chat_bot_work older WHERE older.room_id=w.room_id AND older.owner_id=w.owner_id
-                AND older.kind IN ('chat','setting','timezone','pair') AND older.seq<w.seq AND older.status IN ('queued','running')))
+                AND older.kind='chat' AND older.seq<w.seq AND older.status IN ('queued','running')))
             ORDER BY created,id
             """ + limit))
         {

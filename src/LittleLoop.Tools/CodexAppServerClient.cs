@@ -25,12 +25,25 @@ public sealed class CodexAppServerClient : IAgentSessionClient
     private long sequence;
     public CodexAppServerClient(string executable, string cwd, string logDirectory) : this(executable, cwd, logDirectory, false) { }
     public CodexAppServerClient(string executable, string cwd, string logDirectory, bool conversationOnly)
+        : this(executable, cwd, logDirectory, conversationOnly, false, false) { }
+
+    public static CodexAppServerClient ForPrivateWorkspace(string executable, string cwd, string sessionDirectory, bool tools = true)
+    {
+        ProjectFiles.CheckAncestors(cwd);
+        ProjectFiles.CheckAncestors(sessionDirectory);
+        string relative = Path.GetRelativePath(cwd, sessionDirectory);
+        if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new ArgumentException("The conversation workspace cannot contain its private session metadata.");
+        return new(executable, cwd, sessionDirectory, true, true, tools);
+    }
+
+    private CodexAppServerClient(string executable, string cwd, string logDirectory, bool conversationOnly, bool privateWorkspace, bool tools)
     {
         if (!Path.IsPathFullyQualified(executable) || !File.Exists(executable)) throw new ArgumentException("Absolute Codex executable required.");
         ProjectFiles.CheckAncestors(executable);
         Directory.CreateDirectory(logDirectory);
         if (!conversationOnly) requestsFile = Path.Combine(logDirectory, "requests.jsonl");
-        var start = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false, CreateNoWindow = true,
+        var start = new ProcessStartInfo(executable) { WorkingDirectory = privateWorkspace ? logDirectory : cwd, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
         if (Environment.GetEnvironmentVariable("LITTLELOOP_CODEX_HOME") is { Length: > 0 } serviceHome)
@@ -43,11 +56,22 @@ public sealed class CodexAppServerClient : IAgentSessionClient
         start.ArgumentList.Add("app-server"); start.ArgumentList.Add("--stdio");
         if (conversationOnly)
         {
-            foreach (string feature in new[] { "apps", "plugins", "hooks", "shell_tool", "view_image", "computer_use", "browser_use" })
+            string[] disabled = ["apps", "plugins", "hooks", "view_image", "computer_use", "browser_use",
+                "memories", "multi_agent", "multi_agent_v2", "code_mode", "skill_search", "goals"];
+            foreach (string feature in tools ? disabled : disabled.Append("shell_tool"))
             {
                 start.ArgumentList.Add("--disable");
                 start.ArgumentList.Add(feature);
             }
+            start.ArgumentList.Add("--enable");
+            start.ArgumentList.Add("skip_host_skill_discovery");
+        }
+        if (privateWorkspace)
+        {
+            start.ArgumentList.Add("--config");
+            start.ArgumentList.Add("projects." + JsonSerializer.Serialize(cwd) + ".trust_level=\"untrusted\"");
+            start.ArgumentList.Add("--config");
+            start.ArgumentList.Add("shell_environment_policy.include_only=[\"PATH\",\"SystemRoot\",\"WINDIR\",\"COMSPEC\",\"PATHEXT\",\"LANG\",\"LC_ALL\",\"TERM\"]");
         }
         // Keep resumable runtime databases with this host session. The desktop's
         // personal CODEX_HOME may be read-only to a service or restricted process.

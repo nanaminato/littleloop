@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Bot/deepseek-private-guard.mjs" LogicalName="LittleLoop.DeepSeek.PrivateGuard" />
     <PackageReference Include="Google.Apis.Auth" Version="1.78.0" />
     <PackageReference Include="Lib.Net.Http.WebPush" Version="3.3.1" />
     <ProjectReference Include="../LittleLoop.Tools/LittleLoop.Tools.csproj" />

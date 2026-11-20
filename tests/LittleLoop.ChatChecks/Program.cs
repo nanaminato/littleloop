@@ -41,17 +41,6 @@ foreach (string everyday in new[] { "帮我修改这台电脑的时区", "请修
     Check(GoalMessageRouter.Parse(everyday, false, privateChat: true).Action == "chat",
         "development vocabulary alone does not turn everyday requests into project work: " + everyday);
 
-await HostTimeZoneChecks.Run();
-await HostPowerChecks.Run();
-await HostPairingChecks.Run();
-Check(HostSettings.Continue("把本机睡眠时间设为15分钟", "needs-input", "插电时") == "把本机插电时的睡眠时间设为15分钟" &&
-    HostSettings.Continue("把本机睡眠时间设为15分钟", "refused", "插电时") is null,
-    "power source completes only an actual host clarification");
-Check(HostSettings.Continue("当前 Windows 应用主题是什么？", "completed", "改成深色") == "把本机应用主题改成深色" &&
-    HostSettings.Continue("这台电脑的电源设置是什么？", "completed", "改成15分钟") is null &&
-    HostSettings.Continue("这台电脑的时区是什么？", "completed", "改成UTC，然后重启") is null,
-    "short settings follow-ups require an unambiguous earlier setting and a fully validated target");
-await HostDesktopSettingsChecks.Run();
 await SqliteChecks.Run();
 await CommitmentHostChecks.Run();
 

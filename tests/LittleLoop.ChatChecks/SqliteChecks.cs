@@ -85,15 +85,37 @@ static class SqliteChecks
             await Initialize(reopened);
             var legacy = await reopened.ReadBotWork(legacyId, alice.Id);
             Check(legacy is { Status: "completed", Goal: null, Input.Text: "Legacy task" }, "upgrade preserves legacy work without a continuous goal");
-            foreach (string kind in new[] { "timezone", "setting", "pair" })
+            var robot = await reopened.GetRobot(ChatStore.BotName);
+            var robotRoom = await reopened.CreateRoom(alice, new("direct", "", [robot.Name]));
+            Check(await reopened.InstallRobot(robotRoom.Id, alice.Id, [robot.Id], true) is not null, "install robot for upgrade fixture");
+            foreach (var (kind, status, expected) in new[]
+                { ("timezone", "running", "needs-reconciliation"), ("setting", "queued", "disabled"),
+                    ("setting", "needs-input", "disabled"), ("pair", "queued", "disabled"),
+                    ("setting", "completed", "completed") })
             {
-                Guid interrupted = Guid.NewGuid();
-                await reopened.Send(alice.Id, alice.Name, room.Id, new(interrupted.ToString(), "interrupted host request", null),
-                    job: new(interrupted, room.Id, alice.Id, 0, kind, "running", new("interrupted host request")));
+                Guid previous = Guid.NewGuid();
+                await reopened.Send(alice.Id, alice.Name, robotRoom.Id, new(previous.ToString(), "legacy host request", null),
+                    job: new(previous, robotRoom.Id, alice.Id, 0, kind, status, new("legacy host request")));
                 await reopened.RecoverBotWork(nextLease);
-                Check((await reopened.ReadBotWork(interrupted, alice.Id))?.Status == "needs-reconciliation" &&
-                    await reopened.ClaimBotWork(nextLease) is null, "service restart never replays interrupted host work: " + kind);
+                Check((await reopened.ReadBotWork(previous, alice.Id))?.Status == expected &&
+                    await reopened.ClaimBotWork(nextLease) is null, $"upgrade retires legacy {kind} work without replay: {status}");
             }
+            const string privateRequest = "帮我修改 code.txt 并通过现有测试";
+            var original = await reopened.Send(alice.Id, alice.Name, robotRoom.Id,
+                new(Guid.NewGuid().ToString(), privateRequest, null), goalRobot: robot.Id);
+            await reopened.ProcessGoalMessage(robot.Id, id => id == alice.Id, nativePrivateChat: true);
+            var native = await reopened.ClaimBotWork(nextLease);
+            Check(native is { Kind: "chat", Input.Text: privateRequest, Goal: null } &&
+                native.Sequence == original!.Message.Sequence, "native private message goes straight to the agent without a project task");
+            long? beforeEdit = await reopened.PrivateConversationRevision(native!);
+            var nextRequest = await reopened.Send(alice.Id, alice.Name, robotRoom.Id, new(Guid.NewGuid().ToString(), "追问", null));
+            await reopened.ChangeMessage(alice.Id, robotRoom.Id, native!.Sequence, "修改后的请求");
+            Check(beforeEdit is not null && await reopened.PrivateConversationRevision(native) is null &&
+                await reopened.PrivateConversationRevision(native with { Sequence = nextRequest!.Message.Sequence }) > beforeEdit,
+                "editing a sent message prevents stale dispatch and rotates future native sessions");
+            await reopened.RecoverBotWork(nextLease);
+            Check((await reopened.ReadBotWork(native.Id, alice.Id))?.Status == "needs-reconciliation" &&
+                await reopened.ClaimBotWork(nextLease) is null, "restart does not replay a possibly executed native private turn");
             integrity.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('chat_goal_inbox','chat_goal_events','chat_goal_outbox')";
             Check(Convert.ToInt32(await integrity.ExecuteScalarAsync()) == 3, "upgrade adds the continuous goal tables");
             Console.WriteLine("SQLite Chat checks passed: schema replay, accounts, rooms, messages, authorization, idempotency, settings, devices, password CAS, leases, restart, concurrency, notification queues, integrity/indexes.");

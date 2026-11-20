@@ -190,16 +190,17 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
 
     public async Task<SendResult?> Send(string user, string name, string room, PostMessage input, ForwardMessage? forward = null,
         MessageCard? card = null, BotWork? job = null, string? goalRobot = null, bool legacyBotOperator = true,
-        BotWork? answeredWork = null, string answerStatus = "completed")
+        BotWork? answeredWork = null, string answerStatus = "completed", long? answerRevision = null)
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
-        await using var clock = Command(db, tx, "SELECT latest,type,owner_id FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
+        await using var clock = Command(db, tx, "SELECT latest,type,owner_id,revision FROM chat_rooms WHERE id=@room FOR UPDATE", ("room", room));
         long latest;
         string roomType, owner;
         await using (var reader = await clock.ExecuteReaderAsync())
         {
             if (!await reader.ReadAsync()) return null;
+            if (answerRevision is long revision && reader.GetInt64(3) != revision) return null;
             roomType = reader.GetString(1);
             owner = reader.IsDBNull(2) ? "" : reader.GetString(2);
             latest = reader.GetInt64(0);
@@ -207,8 +208,7 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
         if (!await IsMember(db, tx, room, user)) return null;
         if (answeredWork is not null)
         {
-            if ((answeredWork.Kind != "chat" && !HostSettings.IsWork(answeredWork.Kind)) ||
-                answerStatus is not ("completed" or "failed" or "refused" or "needs-reconciliation" or "needs-input"))
+            if (answeredWork.Kind != "chat" || answerStatus is not ("completed" or "failed" or "needs-reconciliation"))
                 throw new ArgumentException("Invalid reply job or result.");
             // Commit the reply and its job's result together. Room locking also orders
             // delivery against a simultaneous revocation, which cancels outstanding jobs.

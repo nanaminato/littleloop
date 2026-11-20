@@ -4,57 +4,52 @@
 
 ## 入口与状态所有权
 
-沿用 [S1 聊天目标](48-chat-continuous-work.md)已有的真实 `ChatBot` 路径：消息发送事务 → `chat_goal_inbox` → `ContinuousGoal` → 持久调度 → `LittleLoopChatAdapter` / Codex → 宿主工具与独立测试 → `chat_goal_outbox`。SQL 中的目标是唯一生命周期状态，执行目录保存 thread、审批和工具证据。
+显式项目开发任务沿用 [S1 聊天目标](48-chat-continuous-work.md)已有的真实 `ChatBot` 路径：消息发送事务 → `chat_goal_inbox` → `ContinuousGoal` → 持久调度 → `LittleLoopChatAdapter` / Codex → 宿主工具与独立测试 → `chat_goal_outbox`。SQL 中的目标是唯一生命周期状态，执行目录保存 thread、审批和工具证据。
 
 源码和历史报告证明这条路径此前已有实现；本轮补齐私聊查询及引用边界并提供独立的真实私聊验收，不新建另一套真实承诺账本。[模拟承诺入口](53-chat-commitments.md)及历史模拟消息保持独立。
 
 配置 `ChatBot__Policy`、`ChatBot__Data`、`ChatBot__Operators`、`ChatBot__Approvers`，登录后调用 `POST /api/chat/bot/direct` 开启真实机器人私聊，之后使用普通消息发送接口或已有聊天输入框：
 
 ```text
-帮我修复配置解析问题，并通过现有测试。
-查询进度？
-暂停
-补充：保留原来的错误提示。
-恢复
-取消
+/task 帮我修复配置解析问题，并通过现有测试。
+/status
 ```
 
-`任务` 可先建立等待补充的目标。私聊中的普通问题和日常工作请求会直接收到聊天回复。以“任务：”或“新任务：”开头时也会检查正文。涉及明确项目修改的目标进入现有开发执行器，也可以用“开发任务：…”或 `/task …` 显式选择它。开发任务的补充要求追加到原目标并递增版本。多个活动目标时回复相应任务消息。没有活动目标时，进度查询返回本人在此会话中最近创建的目标，终态查询不会重新执行。回复非任务消息不会转而操作当前活动任务。
+选择原生对话代理后，普通私聊直接发给代理。例如“把采购清单写到清单.txt，下一条我再追加”可以直接交代，并可在同一私聊追问。要在已授权项目中开展开发任务，可发送“开发任务：…”或 `/task …`。后续可使用任务控制命令或回复相应的任务卡来补充、查询、暂停、恢复或取消。项目任务采用自己的工具范围和审批策略。
 
 操作员身份不自动授予审批权。独立审批人用自己的账号登录网页，在会话栏选择「查看待审批操作」。对正在等待确认的私聊任务，审批列表仅显示操作类型、补丁路径和前后内容，或固定测试命令的标识。审批人可批准或拒绝当前请求。私聊历史、任务目标、执行结果和工具回执仍按会话成员权限读取。
 
-## 直接对话与宿主权限
+## 对话代理与项目审批
 
-2026-11-19，用户要求直接用自然语言交代工作，希望 LittleLoop 默认拥有计算机配置权限，并提出在需要时向用户确认或提升管理员权限。当前可用范围包括文字对话、已授权的项目工具和下列 Windows 设置。
+2026-11-20，用户要求先提交和推送已有版本，再移除 LittleLoop 直接操作计算机的逻辑，全部交给 Codex 或 DeepSeek Harness。此前包含 Windows 操作的版本保存在提交 `72f59c0`。
 
-私聊中的普通问题使用已有 Codex 登录回答，并可参考同一私聊最近六次已完成的文字问答。宿主向独立的空目录提交固定初始化消息，仅在 `thread/sample` 中提交用户内容。也可将 `ChatBot__ConversationModel` 指向现有 Chat Completions 或 Ollama 的模型配置文件。如果配置了本机 `ChatBot__MemorySemantics` 而未单独指定对话模型，聊天会使用该本机端点。普通文字回复目前可以整理用户提供的内容，实时行情查询和 Excel 附件生成尚未接入。
+用户随后要求按私聊复用外部代理会话，由代理判断何时需要工具，并取消普通私聊对既有项目审批的依赖。用户还提出自动通过所有审批和移除沙箱。当前实现仅赋予下述私聊工作区权限，整机访问与无条件提权未实现。
+
+默认使用已登录的原生 Codex。显式设置 `ChatBot__ConversationHarness=codex` 或 `deepseek` 会选用对应原生会话。要沿用旧文字入口，留空 `ChatBot__ConversationHarness` 并通过 `ChatBot__ConversationModel` 显式指定 Chat Completions 或 Ollama 配置。该文字入口沿用既有项目任务分流规则。`ChatBot__MemorySemantics` 配置用于记忆处理。
 
 开发策略中 `approvalMode` 的默认值是 `auto`。配置的操作员在 LittleLoop 私聊发起开发任务时，宿主允许直接调用既定的文件补丁和固定命令。每次操作继续经过项目范围、角色、预算和回执检查。要逐项确认，将策略文件中的 `approvalMode` 设为 `user`。群聊、仅通过好友开通的账号、具备写入能力的其他机器人沿用逐项审批。恢复已有任务时保留更严格的审批设置。
 
 客户端可调用 `GET /api/chat/bot/private-approvals` 获取待审批操作，使用 `POST /api/chat/bot/private-approvals/{id}/decision` 提交 `nonce` 和 `value`（`accept` 或 `decline`）。重复提交及失效请求返回 409。
 
-### Windows 设置与账号
+### 私聊的运行时上下文
 
-在有权使用的 LittleLoop 私聊中单独发送“你能修改哪些系统设置？”，可以查看宿主支持的操作。在聊天服务的环境中设置 `ChatBot__HostOperators`，值为逗号分隔的已有聊天账号名，重启服务后生效。列入其中的账号需要先开通机器人私聊，随后可以直接查看或修改表中的设置。加入这个名单仅授予这些宿主操作。项目工具由 `ChatBot__Operators` 和开发策略授权，项目审批由 `ChatBot__Approvers` 授权。
+同一用户在同一私聊中使用同一个代理时，后续消息会续接代理保存的会话。新建代理会话时，LittleLoop 会带入本私聊最近六轮已完成的问答作为背景。续接时发送当前消息、本轮引用和当前运行时说明。上一轮约定了代号，下一条就可以直接问“刚才那个代号是什么？”。服务重启后可以续接已保存的代理会话。
 
-原有角色也可继续使用宿主设置。项目操作员可以读取设置，同时具备操作员与审批人身份且策略为 `auto` 的账号可以直接修改。未指定或留空 `ChatBot__HostOperators` 时仍适用这条规则。专门列入 `ChatBot__HostOperators` 的账号可在项目逐项审批模式下修改宿主设置。
+要长期保留一条背景或回复偏好，可以在该私聊单独发送一条文字消息“记住上下文：当前在测试环境，回答尽量简短”。说明正文最多 512 个字符，再次设置会替换上一条。单独发送“查看上下文”可查看当前保存的说明，“清除上下文”可清除这条说明。近期问答仍按当前私聊的聊天记录选取。服务将说明关联到原消息，删除或撤回来源消息后，该条说明也会失效。
 
-也可以设置 `ChatBot__HostPairingCandidate` 为一个已有聊天账号名，重启服务后，由该账号在已开通的 LittleLoop 私聊发送“绑定这台电脑”。登录这台 Windows 电脑的用户会看到账号名和授权范围，选择“是”后绑定才生效。每台宿主只保存一个绑定账号的 ID。重启后会核对当前候选账号与该 ID，移除候选配置并重启即可停用这项绑定授权。拒绝、超时或找不到可以确认的交互桌面时，账号仍保持原有权限。
+管理员可设置 `ChatBot:ConversationStyle`（环境变量 `ChatBot__ConversationStyle`）指定普通私聊的默认回复风格，例如“使用简洁中文，并保留技术名称”。有效长度为 1 至 512 个字符。服务在生成回复时读取当前配置。支持热重载的配置提供程序可直接更新，环境变量需要在新服务进程中生效。代理在本轮可参考私聊保存的说明和当前风格，工具授权及执行结果以实际运行环境及回执为准。
 
-| 设置 | 查询举例 | 修改举例 |
-| --- | --- | --- |
-| 时区 | 这台电脑的时区是什么？ | 把本机时区改成北京时间 |
-| 活动电源计划 | 这台电脑的电源设置是什么？ | 把本机插电时的屏幕关闭时间设为15分钟 |
-| 电池供电时的睡眠超时 | 本机使用电池时多久会睡眠？ | 把本机使用电池时的睡眠时间设为半小时 |
-| 隐藏文件 | 文件资源管理器里是否显示隐藏文件？ | 在文件资源管理器中显示隐藏文件 |
-| 文件扩展名 | 这台电脑是否显示文件扩展名？ | 在文件资源管理器中显示文件扩展名 |
-| 应用主题偏好 | 当前 Windows 应用主题是什么？ | 把这台电脑的应用主题改成深色 |
+### 电脑操作请求
 
-例如，发送“把本机睡眠时间设为15分钟”，LittleLoop 会问是插电时还是使用电池时。接着回复“插电时”，它就会调整插电时的睡眠时间。也可以先问“本机使用电池时多久会睡眠？”，再回复“改成15分钟”，它会沿用刚才问到的电池供电设置。
+LittleLoop 按所选代理、私聊、发起人和会话版本定位代理记录。每位用户在每个私聊里使用所选代理的独立工作区。编辑或删除消息、保存或清除长期说明会让下一轮新建代理会话，并沿用该私聊原有的工作区文件。
 
-时区和电源超时修改后会重新读取系统值。调整电源超时时须指明插电或电池供电，也可指定“永不”。Windows 要求管理员权限时，交互桌面会出现本次系统工具的授权窗口。聊天回复区分拒绝、取消、无法显示授权窗口和结果待核对。服务重启后会保留中断的变更记录。[Windows 时区工具](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/tzutil)、[Windows 电源工具](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/powercfg-command-line-options)、[Windows 系统授权](https://learn.microsoft.com/en-us/windows/win32/shell/launch)
+Codex 通过 App Server 创建或恢复 thread，再发送新的 turn。会话运行在专用工作区权限配置下，工具的网络访问关闭，启动时核对实际生效的权限。DeepSeek 通过 ACP 创建或续接 session，并在提供文件操作前验证工作区限制。`ChatBot__DeepSeek__ConversationWorkspaceFiles` 默认为 `true`，允许代理在本私聊工作区根目录读取、写入和编辑小型 `.txt`、`.md` 和 `.csv` 普通文件。设为 `false` 后该会话仅提供对话。普通私聊的文件操作由所选代理的会话权限决定。项目审批列表只处理显式项目开发任务。
 
-文件显示与应用主题作用于运行宿主的 Windows 桌面账号。LittleLoop 检查该账号是否与当前交互会话的登录账号一致，并在结果中标出实际账号。后台服务会话或身份不匹配时会说明原因。资源管理器的两个显示选项分别读回核对，已打开的文件夹可以按 F5 刷新。深浅色是遵循 Windows 设置的应用所使用的偏好，已打开的应用可能需要重新打开。[Windows Shell 设置](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetsetsettings)、[Windows 应用颜色设置](https://learn.microsoft.com/en-us/windows/apps/develop/settings/settings-common)
+在 Windows 上，Codex 提交本轮消息前会调用 `windowsSandbox/readiness`。返回 `ready` 时启用受限工作区工具，返回 `notConfigured` 或 `updateRequired` 时选择原生文字会话，并在回复中提示工作区工具尚未就绪。本机测得的状态为 `notConfigured`。
+
+服务会区分限流、超时、权限不足、会话中断和当前配置不支持的能力。中断时已经发出的操作可能已生效，重启后会提示核对实际结果。
+
+旧版的 `ChatBot__HostOperators`、`ChatBot__HostPairingCandidate` 和本地绑定记录在新版中不再提供宿主操作权限。升级时，仍在排队或等待补充的旧版 Windows 请求会结束，并在原会话说明原因。执行中断的旧操作标记为待核对。历史消息和已完成的结果仍可查阅。
 
 ## 暂停、恢复和取消
 
@@ -71,7 +66,7 @@ dotnet run --project tests/LittleLoop.Checks
 # 设置已安装的 Codex 可执行路径；可选独立登录目录及本机受信任证书，详见 docs/49。
 $env:LITTLELOOP_CODEX_EXECUTABLE = '/absolute/path/to/codex'
 python tests/ChatContinuousLive/direct_http_e2e.py
-# 使用默认策略复验两轮文字问答、表格请求分流、时区查询和预授权的两个夹具补丁
+# 使用默认策略复验私聊问答、请求分流和预授权的两个夹具补丁
 python tests/ChatContinuousLive/direct_http_e2e.py --conversation
 ```
 
@@ -79,15 +74,29 @@ python tests/ChatContinuousLive/direct_http_e2e.py --conversation
 
 覆盖普通消息创建与去重、执行中查询、非成员隔离、错误回复不控制任务、真实审批等待、暂停后的停止确认与旧审批拒绝、暂停时补充、重启后原 thread 恢复、两个文件实际修改、宿主测试与独立复核、完成查询、执行中取消、取消后停止确认与过期审批拒绝、重启保留终态及完成通知去重。
 
-## 本轮实跑结果
+## 代理委派验证
 
-2026-11-20 的 Windows 专项检查通过了 27 项时区、34 项电源、25 项桌面和 21 项账号绑定检查。三项桌面偏好的宿主查询与独立读取的 Windows 设置逐项一致，分别核对了隐藏文件、文件扩展名和应用主题。写入与本地授权窗口使用测试替身。输出见 `data/desktop-settings-qa/focused-checks.log` 和 `data/desktop-settings-qa/read-checks.json`。
+本机已安装的 Codex App Server 连同隔离的模拟模型服务完成了两个真实的协议回合。重启代理进程后复用了同一 thread ID，模型服务在第二回合收到第一轮的随机标记，期间无需重发聊天记录。使用已配置的托管模型和禁用工具的权限配置时，真实原生文字回合也返回了正确的算术结果。当前 Windows 环境的沙箱运行服务不可用，开启文件工具的托管会话在回复前被拒绝。工作区内的 Codex 原生命令和文件写入尚未得到实机验证。此次为本地验证，记录见 `data/private-native-codex-build/native-loopback-observations.log` 和 `data/private-native-codex-build/native-text-observations.log`。
+
+原生私聊在本地通过了 SQLite 聊天目标套件的 257 项检查，记录见 `data/native-conversation-checks-final.log`。真实 DeepSeek Harness 在本次私聊工作区创建了 `memo.txt`，并返回成功的写入回执。随后通过原生读取与编辑工具更新了同一文件，复核内容为 `EDITED`。以相同工作 ID 再次处理时返回既有结果。另一个进程续接同一 ACP 会话后，在没有重发之前问答的情况下答出了上次记住的随机值。针对相邻工作区的测试未读出随机标记，目标文件内容保持完整。原生结果和工作区记录见 `data/harness-private-probe/61643ad439c443a3bec6f01e230800a5`。另一项检查验证了工作区限制无法确认时会在发送私聊提示前停止，协议记录见 `data/harness-private-probe/da827559af5d43fd9073cdcd75d9b352/methods.txt`。
+
+本地 SQLite 和独立 MySQL 各通过 249 项聊天目标检查。保存和查看说明由聊天服务直接响应。后台服务重启并更换对话代理后，同一用户在原私聊的说明和问答历史仍可用。运行中修改默认风格会影响后续回复，清除说明后仍可引用近期问答。测试还核对了用户与会话之间的隔离。本次运行时上下文在本地完成验证，记录见 `data/runtime-context-checks.log` 和 `data/runtime-context-mysql-checks.log`。
+
+2026-11-20，SQLite 聊天目标套件的 245 项检查全部通过。升级夹具覆盖了旧 Windows 工作的终止与待核对状态。后台服务检查确认，配置为 DeepSeek 的私聊可在原会话收到回复，追问时会携带同一用户引用的上一轮内容。完整输出见 `data/delegated-conversation-checks.log`。
+
+另用已安装的真实 DeepSeek Harness 和只读 ACP 配置验证了携带上文的私聊请求。编译后的适配器收到一段包含样例水果名的模拟上文，在追问中正确返回了该名称。运行结束后隔离工作区仍为空。结果在控制台核验，复验驱动位于 `data/harness-conversation-checks/InspectExternalHarness.cs`，只读配置位于 `tests/ChatContinuousLive/deepseek-readonly.yml`。
+
+同日，5190 服务已切换到代理委派版本，普通私聊选用 Codex，部署环境已移除旧的本机操作员和配对配置。已登录账号的算术提问和依赖上一轮的追问分别得到正确答案 43 和 45。两次时区查询都作为普通聊天转交代理，分别遇到上游 HTTP 429 和服务不可用，私聊返回了相应提示。升级前后的旧本机操作记录均为 6 条，待执行的旧操作和活动任务均为零。实机核验未修改系统设置。部署校验记录包含程序集 SHA-256 和每次请求的状态。[本机部署校验记录](../data/continuous-deployment/external-agent-deployment-20261120.json)
+
+## 历史实跑记录
+
+提交 `72f59c0` 中的旧版直接 Windows 执行路径于 2026-11-20 完成专项检查，通过了 27 项时区、34 项电源、25 项桌面和 21 项账号绑定检查。三项桌面偏好的宿主查询与独立读取的 Windows 设置逐项一致，分别核对了隐藏文件、文件扩展名和应用主题。写入与本地授权窗口使用测试替身。输出见 `data/desktop-settings-qa/focused-checks.log` 和 `data/desktop-settings-qa/read-checks.json`。
 
 同日完成了 SQLite 的 250 项聊天目标回归和核心套件的 357 项检查。聊天回归覆盖了私聊账号的系统设置权限、当前设置的短句追问，以及未指明供电方式时发起澄清。完整日志为 `data/host-settings-checks.log` 和 `data/host-core-checks.log`。
 
-同日，现有 5190 服务已部署新版。使用已登录账号在 LittleLoop 私聊中完成六次查询。能力清单列出了已接入的设置，时区返回 `China Standard Time`，与 Windows 一致。插电时的闲置关屏与睡眠超时均为“永不”，使用电池时闲置 3 分钟关屏、10 分钟睡眠。资源管理器显示隐藏文件和文件扩展名，应用主题为浅色。本次线上核验全程只读，实际系统修改、UAC 确认和真人账号绑定仍待验证。部署记录及程序集哈希见 `data/continuous-deployment/host-chat-deployment-20261120.json`。
+同日，5190 服务部署了上述直接执行版本。使用已登录账号在 LittleLoop 私聊中完成六次查询。能力清单列出了已接入的设置，时区返回 `China Standard Time`，与 Windows 一致。插电时的闲置关屏与睡眠超时均为“永不”，使用电池时闲置 3 分钟关屏、10 分钟睡眠。资源管理器显示隐藏文件和文件扩展名，应用主题为浅色。本次线上核验全程只读，实际系统修改、UAC 确认和真人账号绑定仍待验证。部署记录及程序集哈希见 `data/continuous-deployment/host-chat-deployment-20261120.json`。
 
-部署后另行核对了候选账号有一间可用的机器人私聊，服务仍在等待该账号主动绑定。六次查询均已结束，待处理工作数为零。记录见 `data/continuous-deployment/host-chat-postflight-20261120.json`。
+部署后另行核对了候选账号有一间可用的机器人私聊，当时尚未绑定该账号。六次查询均已结束，待处理工作数为零。记录见 `data/continuous-deployment/host-chat-postflight-20261120.json`。
 
 2026-11-19 的隔离 HTTP 验收使用真实 Codex 和 SQLite。同一段算术对话首轮得到 52，接着追问得到 43。金价表格请求收到了文字回复，测试核对了两份项目文件均未改动。时区回复与 Windows 独立读取的值一致。另一个明确的开发请求直接修改了两个夹具文件，通过宿主固定测试及独立复核。显式逐项审批模式也完成了暂停、重启、原会话恢复和取消验收。两次实跑分别记录在 `data/direct-http/c46c2995/result.json` 与 `data/direct-http/7b3b09e9/result.json`。时区写入与系统授权分支通过测试替身覆盖，实机只做了时区读取。
 

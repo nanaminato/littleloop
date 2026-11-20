@@ -35,15 +35,10 @@ internal static class WorkerChecks
                 File.ReadAllText(stateFile) == suspended && File.ReadAllText(Path.Combine(project, "code.txt")) == "fixture",
                 "old task cannot start its agent or execute when the current development grant changes");
         }
-        var deviceOwner = new Account(Guid.NewGuid().ToString(), "host_" + Guid.NewGuid().ToString("N")[..8], "!fixture");
-        await store.Register(deviceOwner);
-        await store.SetBotFriendAllowlist(robot.Id, deviceOwner.Name, true);
-        var deviceRoom = (await store.RequestBotFriend(deviceOwner.Id, robot.Id))?.RoomId ?? throw new Exception("Missing host operator private room");
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ChatBot:Policy"] = policy, ["ChatBot:Data"] = Path.Combine(root, "worker"),
-            ["ChatBot:Operators"] = owner.Name, ["ChatBot:Approvers"] = approver.Name,
-            ["ChatBot:HostOperators"] = deviceOwner.Name, ["ChatBot:HostPairingCandidate"] = owner.Name
+            ["ChatBot:Operators"] = owner.Name, ["ChatBot:Approvers"] = approver.Name
         }).Build();
         var executor = new ControlledAdapter();
         var independent = new ControlledAdapter(ChatStore.DeepSeekTestBotName, Path.Combine(root, "independent"));
@@ -63,52 +58,18 @@ internal static class WorkerChecks
         var worker = Create(); await worker.StartAsync(CancellationToken.None);
         try
         {
-            var capabilities = await Send("你能修改哪些系统设置？");
-            check((await ReplyTo(capabilities.Message.Sequence)).Text.Contains("文件扩展名"), "private chat lists real host settings");
-            var unpairedRequest = await Send("把这台电脑的应用主题改成深色");
-            check((await ReplyTo(unpairedRequest.Message.Sequence)).Text.Contains("绑定这台电脑"), "pairing candidate cannot write before local consent");
-            var foreignRoom = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
-                new(Guid.NewGuid().ToString(), "绑定这台电脑", null), goalRobot: robot.Id);
-            using (var limit = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
-                while (!(await store.History(deviceOwner.Id, deviceRoom, foreignRoom!.Message.Sequence, null))!.Any(m =>
-                    m.ReplyTo == foreignRoom.Message.Sequence && m.Text.Contains("已经可以操作")))
-                    await Task.Delay(50, limit.Token);
-            check(!worker.CanOperate(deviceOwner.Id) && !worker.CanApprove(deviceOwner.Id),
-                "dedicated host operator can use host settings without project or approval rights");
-            if (OperatingSystem.IsWindows())
-            {
-                var sent = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
-                    new(Guid.NewGuid().ToString(), "把本机时区设为 " + TimeZoneInfo.Local.Id, null), goalRobot: robot.Id);
-                using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                while (!(await store.History(deviceOwner.Id, deviceRoom, sent!.Message.Sequence, null))!.Any(m =>
-                    m.ReplyTo == sent.Message.Sequence && m.Text.Contains("已经使用")))
-                    await Task.Delay(50, limit.Token);
-                check(true, "host-only friend can request an already satisfied change under manual project approval");
-                var read = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
-                    new(Guid.NewGuid().ToString(), "这台电脑的时区是什么？", null), goalRobot: robot.Id);
-                ChatMessage? answer;
-                while ((answer = (await store.History(deviceOwner.Id, deviceRoom, read!.Message.Sequence, null))!
-                    .SingleOrDefault(m => m.ReplyTo == read.Message.Sequence && m.Sender == robot.Name)) is null)
-                    await Task.Delay(50, limit.Token);
-                var follow = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
-                    new(Guid.NewGuid().ToString(), "改成" + TimeZoneInfo.Local.Id, answer.Sequence), goalRobot: robot.Id);
-                while (!(await store.History(deviceOwner.Id, deviceRoom, follow!.Message.Sequence, null))!.Any(m =>
-                    m.ReplyTo == follow.Message.Sequence && m.Text.Contains("已经使用")))
-                    await Task.Delay(50, limit.Token);
-                check(true, "short follow-up to a verified host reply uses its original setting and the same account");
-                var ambiguous = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
-                    new(Guid.NewGuid().ToString(), "把本机睡眠时间设为15分钟", null), goalRobot: robot.Id);
-                while (!(await store.History(deviceOwner.Id, deviceRoom, ambiguous!.Message.Sequence, null))!.Any(m =>
-                    m.ReplyTo == ambiguous.Message.Sequence && m.Text.Contains("插电时还是")))
-                    await Task.Delay(50, limit.Token);
-                check(true, "missing power source produces a direct clarification without changing the host");
-            }
+            const string background = "当前在使用测试环境。回答尽量简短。";
+            var remember = await Send("记住上下文：" + background);
+            await ReplyTo(remember.Message.Sequence);
+            var inspect = await Send("查看上下文？");
+            check((await ReplyTo(inspect.Message.Sequence)).Text.Contains(background) && executor.LastChat is null,
+                "private chat stores and reads a runtime context note without invoking an agent");
             const string quoteRequest = "帮我查询一下最近黄金的价格走势，整理为一个 Excel 发给我。";
             var general = await Send(quoteRequest);
             var firstReply = await ReplyTo(general.Message.Sequence);
-            check(general.Message.Card is null && firstReply.Card is null && firstReply.Text.Contains("查询实时行情") &&
-                firstReply.Text.Contains("日期\t品种") && executor.Calls == 0,
-                "ordinary market and Excel request gets a text answer with precise capability limits and no development execution");
+            check(general.Message.Card is null && firstReply.Card is null && firstReply.Text == "代理夹具回复。" &&
+                executor.Calls == 0 && executor.LastChat?.ConversationNote == background,
+                "ordinary market and Excel request receives the agent reply without a local business-specific fallback");
             var followup = await Send("那能帮我解释一下这几列吗？", firstReply.Sequence);
             await ReplyTo(followup.Message.Sequence);
             check(executor.LastChat?.History.LastOrDefault() is { Quoted: true } previous &&
@@ -122,12 +83,11 @@ internal static class WorkerChecks
             check(await worker.IsPrivateOperator(first) && !await worker.IsPrivateOperator(first with { Room = group.Id }) &&
                 !await worker.IsPrivateOperator(first with { Input = first.Input with { Provider = independent.Name } }),
                 "direct operator grant is specific to the primary bot and private room");
-            var clockQuestion = await Send("这台电脑的时区是什么？");
-            using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
-                while (!(await store.History(owner.Id, room, null, null))!.Any(m =>
-                    m.Sender == robot.Name && m.ReplyTo == clockQuestion.Message.Sequence && m.Text.Contains("时区") && m.Card is null))
-                    await Task.Delay(50, deadline.Token);
-            check(true, "host time zone answers directly while a development task is active");
+            const string computerRequest = "把这台电脑的应用主题改成深色";
+            var computerMessage = await Send(computerRequest);
+            var computerReply = await ReplyTo(computerMessage.Message.Sequence);
+            check(executor.LastChat?.Text == computerRequest && computerReply.Card is null && executor.Calls == 1,
+                "computer requests go to the conversation adapter even during a development task");
             check(first.Goal is { Version: 1, Status: "running" }, "background worker consumes ordinary chat message without manual queue action");
 
             Guid sameProjectId = Guid.NewGuid();
@@ -240,6 +200,39 @@ internal static class WorkerChecks
         }
         finally { await worker.StopAsync(CancellationToken.None); worker.Dispose(); }
 
+        var deepseek = new ControlledAdapter(ChatStore.DeepSeekBotName, Path.Combine(root, "read-only-acp"));
+        var defaultAdapter = new ControlledAdapter();
+        config["ChatBot:ConversationHarness"] = "deepseek";
+        using var deepseekWorker = new ChatBot(store, new QuietHub(), config, NullLogger<ChatBot>.Instance,
+            [defaultAdapter, deepseek]);
+        await deepseekWorker.StartAsync(CancellationToken.None);
+        try
+        {
+            config["ChatBot:ConversationStyle"] = "用简短的段落回答。";
+            const string text = "这台电脑的时区是什么？";
+            var request = await Send(text);
+            var reply = await ReplyTo(request.Message.Sequence);
+            const string followup = "在哪里能看到这个值？";
+            var next = await Send(followup, reply.Sequence);
+            await ReplyTo(next.Message.Sequence);
+            check(deepseek.LastChat is { Text: followup } input &&
+                input.History.LastOrDefault() is { User: text, Quoted: true } &&
+                input.ConversationNote?.Contains("测试环境") == true && input.ConversationStyle == config["ChatBot:ConversationStyle"] &&
+                defaultAdapter.LastChat is null && deepseek.Calls == 0,
+                "configured DeepSeek harness uses restored runtime context and updated default style without native work");
+            var foreign = new BotWork(Guid.NewGuid(), room, approver.Id, next.Message.Sequence + 1, "chat", "queued", new("test"));
+            check(await store.ReadConversationNote(foreign) is null &&
+                await store.ReadConversationNote(foreign with { Owner = owner.Id, Room = otherRoom.Id }) is null,
+                "runtime conversation notes are private to the originating user and room");
+            var clear = await Send("清除上下文");
+            await ReplyTo(clear.Message.Sequence);
+            var afterClear = await Send("现在这个问题怎么回答？");
+            await ReplyTo(afterClear.Message.Sequence);
+            check(deepseek.LastChat is { ConversationNote: null } current && current.History.Length > 0,
+                "cleared runtime note is omitted from the next answer while recent dialogue remains available");
+        }
+        finally { await deepseekWorker.StopAsync(CancellationToken.None); }
+
         async Task<ChatMessage> ReplyTo(long sequence)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -267,7 +260,7 @@ internal static class WorkerChecks
         {
             if (input.Source is not null) return Task.FromResult("fixture");
             LastChat = input;
-            return Task.FromResult(ChatConversation.Unavailable(input));
+            return Task.FromResult("代理夹具回复。");
         }
         public async Task<RobotOutcome> Run(BotWork work, string folder, Func<AgentApprovalRequest, CancellationToken, Task> approval,
             CancellationToken token, Func<CancellationToken, Task<bool>>? shouldYield = null)

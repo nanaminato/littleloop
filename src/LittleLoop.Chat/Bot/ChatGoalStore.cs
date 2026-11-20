@@ -32,6 +32,12 @@ sealed partial class ChatStore
                 FOREIGN KEY(room_id) REFERENCES chat_rooms(id),
                 FOREIGN KEY(owner_id) REFERENCES chat_accounts(id)
             );
+            CREATE TABLE IF NOT EXISTS chat_conversation_notes (
+                room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL, source_seq BIGINT NOT NULL,
+                PRIMARY KEY(room_id,owner_id),
+                FOREIGN KEY(room_id,source_seq) REFERENCES chat_messages(room_id,seq),
+                FOREIGN KEY(owner_id) REFERENCES chat_accounts(id)
+            );
             CREATE TABLE IF NOT EXISTS chat_goal_experience_settings (
                 room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL,
                 PRIMARY KEY(room_id,owner_id)
@@ -68,7 +74,8 @@ sealed partial class ChatStore
         await insert.ExecuteNonQueryAsync();
     }
 
-    public async Task<bool> ProcessGoalMessage(string robot, Func<string, bool> canOperate, string? grantHash = null)
+    public async Task<bool> ProcessGoalMessage(string robot, Func<string, bool> canOperate, string? grantHash = null,
+        bool nativePrivateChat = false)
     {
         await using var db = await Open();
         // The single worker processes inbox messages. All goal writers lock room, then work.
@@ -92,11 +99,26 @@ sealed partial class ChatStore
             await installed.ExecuteScalarAsync() is not { } enabled || !Convert.ToBoolean(enabled))
         { await tx.CommitAsync(); return true; }
 
+        if (roomType == "direct" && replyTo is null &&
+            await HandleConversationNote(db, tx, room, user, seq, text) is { } noteReply)
+        {
+            await AddGoalNotice(db, tx, room, seq, noteReply, null);
+            await tx.CommitAsync();
+            return true;
+        }
+
         Guid? target = null;
         if (replyTo is { } reply)
         {
             await using var source = Command(db, tx, "SELECT card FROM chat_messages WHERE room_id=@room AND seq=@seq AND NOT deleted", ("room", room), ("seq", reply));
             if (await source.ExecuteScalarAsync() is string raw) target = FromJson<MessageCard>(raw).TaskId;
+        }
+        if (nativePrivateChat && roomType == "direct" && target is null && !ExplicitProjectCommand(text))
+        {
+            // Natural requests go to the native agent, including requests which mention files or tools.
+            await InsertJob(db, tx, new(Guid.NewGuid(), room, user, seq, "chat", "queued", new(text)));
+            await tx.CommitAsync();
+            return true;
         }
         var candidates = new List<BotWork>();
         await using (var select = Command(db, tx, """
@@ -122,44 +144,9 @@ sealed partial class ChatStore
             (continueWaiting || target is not null && intent.Action == "chat" || intent.Action == "revise" &&
                 GoalMessageRouter.Parse(text, false, privateChat: true).Action == "chat"))
             continuation = await ReadEarlierChatRequest(db, tx, pending, continueWaiting ? text.Trim() : intent.Text);
-        string? hostWork = null;
-        string hostText = text;
-        if (roomType == "direct" && target is null)
+        if (intent.Action == "chat" || continuation is not null)
         {
-            if (HostSettings.IsPairingMessage(text))
-            {
-                await using var pendingPair = Command(db, tx, """
-                    SELECT 1 FROM chat_bot_work WHERE room_id=@room AND owner_id=@user AND kind='pair'
-                        AND status IN ('queued','running') LIMIT 1
-                    """, ("room", room), ("user", user));
-                if (await pendingPair.ExecuteScalarAsync() is not null)
-                {
-                    await AddGoalNotice(db, tx, room, seq, "已有配对请求，请查看这台电脑的桌面提示。", null);
-                    await tx.CommitAsync();
-                    return true;
-                }
-                hostWork = "pair";
-            }
-            else if (HostSettings.Parse(text) is not null) hostWork = "setting";
-            else if (HostSettings.MayContinue(text))
-            {
-                await using var previous = Command(db, tx, """
-                    SELECT w.input,w.status FROM chat_bot_work w
-                    JOIN chat_messages answer ON answer.room_id=w.room_id AND answer.client_id=w.id AND answer.reply_to=w.seq
-                    JOIN chat_messages request ON request.room_id=w.room_id AND request.seq=w.seq AND request.sender_id=w.owner_id
-                    WHERE w.owner_id=@user AND w.room_id=@room AND w.kind IN ('setting','timezone') AND w.status IN ('completed','needs-input')
-                      AND answer.seq=@answer AND answer.sender_id=@robot AND NOT answer.deleted AND NOT request.deleted
-                    """, ("user", user), ("room", room), ("answer", replyTo ?? seq - 1), ("robot", robot));
-                await using var prior = await previous.ExecuteReaderAsync();
-                if (await prior.ReadAsync() && HostSettings.Continue(FromJson<BotInput>(prior.GetString(0)).Text,
-                    prior.GetString(1), text) is { } expanded)
-                { hostText = expanded; hostWork = "setting"; }
-            }
-        }
-        if (hostWork is not null || intent.Action == "chat" || continuation is not null)
-        {
-            await InsertJob(db, tx, new(Guid.NewGuid(), room, user, seq, hostWork ?? "chat", "queued",
-                hostWork is not null ? new(hostText) : continuation ?? new(intent.Text)));
+            await InsertJob(db, tx, new(Guid.NewGuid(), room, user, seq, "chat", "queued", continuation ?? new(intent.Text)));
             await tx.CommitAsync();
             return true;
         }
@@ -231,6 +218,16 @@ sealed partial class ChatStore
         }
         await AddGoalNotice(db, tx, room, seq, response, work?.Id);
         await tx.CommitAsync(); return true;
+    }
+
+    private static bool ExplicitProjectCommand(string text)
+    {
+        string command = text.Trim();
+        return command is "/task" or "/status" or "/pause" or "/resume" or "/cancel" ||
+            command.StartsWith("/task ", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("/revise ", StringComparison.OrdinalIgnoreCase) ||
+            command.StartsWith("开发任务：", StringComparison.Ordinal) ||
+            command.StartsWith("开发任务:", StringComparison.Ordinal);
     }
 
     // Previous versions sent general requests through development when the sender used “任务：”.

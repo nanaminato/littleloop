@@ -381,15 +381,12 @@ try:
         sheet = converse('帮我查一下最近黄金的价格走势，整理为一个 Excel 发给我。')
         assert any(s in sheet['text'].lower() for s in ('excel', '表格', '金价', '行情', '黄金')), sheet['text']
         assert 'appid-tests' not in sheet['text'] and 'ApplicationDescriptor' not in sheet['text']
-        zone = converse('这台电脑的时区是什么？')
+        zone = converse('请直接读取这台电脑的时区。如果没有系统工具，请告诉我如何在 Windows 上查看。')
         assert '时区' in zone['text'], zone['text']
-        if os.name == 'nt':
-            current_zone = subprocess.check_output([str(Path(os.environ['SystemRoot']) / 'System32/tzutil.exe'), '/g'])
-            assert current_zone.decode().strip() in zone['text'], zone['text']
         assert (PROJECT / 'code.txt').read_text() == 'broken' and (PROJECT / 'notes.txt').read_text() == 'pending'
-        record('two contextual text replies, spreadsheet capability reply and host time-zone read with no development job')
+        record('two contextual agent replies, spreadsheet capability reply and host settings guidance with no development job')
 
-        task = task_for(send('帮我修改 code.txt 为 fixed，修改 notes.txt 为 supplemented，并通过现有测试。'))
+        task = task_for(send('/task 帮我修改 code.txt 为 fixed，修改 notes.txt 为 supplemented，并通过现有测试。'))
         def finished():
             value = state(task)
             assert value['status'] in ('queued', 'running', 'completed'), (value['status'], value.get('output'))
