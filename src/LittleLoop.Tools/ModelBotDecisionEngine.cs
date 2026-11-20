@@ -77,7 +77,10 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
         Other actions use only their own fields. The JSON object describes only the action to take now.
         """;
 
-    public async Task<BotDecision> DecideAsync(BotDecisionContext context, CancellationToken token)
+    public async Task<BotDecision> DecideAsync(BotDecisionContext context, CancellationToken token) =>
+        (await DecideWithSourceAsync(context, token)).Decision;
+
+    public async Task<BotDecisionResult> DecideWithSourceAsync(BotDecisionContext context, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         if (maxFormatAttempts is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(maxFormatAttempts));
@@ -97,7 +100,7 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
                     var matches = visible.Harnesses.Where(id => string.Equals(id, name.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
                     if (matches is [var canonical]) decision = decision with { Harness = canonical };
                 }
-                return decision.Validate(visible);
+                return new(decision.Validate(visible), new("semantic-model", reply.Model));
             }
             catch (InvalidDataException e) when (attempt < maxFormatAttempts)
             {

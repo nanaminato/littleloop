@@ -81,7 +81,42 @@ internal static class BotDecisionChecks
         int before = model.Calls;
         Require((await engine.DecideAsync(Discussion, default)).Action == BotAction.Reply && model.Calls == before + 2,
             "one invalid model draft may be corrected before execution");
+        await CheckLocalCognition();
         Console.WriteLine("PASS structured API decisions, typed feedback, validation and bounded memory context");
+    }
+
+    private static async Task CheckLocalCognition()
+    {
+        var model = new Stub("""{"action":"reply","message":"clarify"}""");
+        var engine = new LocalBotCognition(new ModelBotDecisionEngine(model));
+        var memory = new BotObservation(BotEventKind.ToolResult, "这段私聊还没有保存上下文。", Status: "memory", Sequence: 12);
+        var local = await engine.DecideWithSourceAsync(Discussion with { Trigger = memory }, default);
+        Require(local.Decision == new BotDecision(BotAction.Reply, Message: memory.Text) &&
+            local.Source == new BotDecisionSource("local/memory-result/1"), "local reply uses the committed memory result");
+
+        var unknown = new BotObservation(BotEventKind.HarnessReceipt, "returned", GoalId, "codex", "uncertain", 7, 1);
+        var held = Snapshot with { Goal = Snapshot.Goal with { Status = "needs-reconciliation", Version = 2 } };
+        var wait = await engine.DecideWithSourceAsync(Discussion with { Trigger = unknown, Goals = [held] }, default);
+        Require(wait.Decision is { Action: BotAction.Wait, GoalId: var id } && id == GoalId &&
+            wait.Source == new BotDecisionSource("local/reconciliation/1") && model.Calls == 0,
+            "unknown effects hold the current goal even after revision, without calling the model");
+
+        foreach (var observation in new[] { new BotObservation(BotEventKind.UserMessage, memory.Text, Status: "memory", Sequence: 12),
+            new(BotEventKind.UserMessage, "接着那个，还是另外的？"), memory with { Sequence = null }, memory with { Harness = "codex" } })
+        {
+            var fallback = await engine.DecideWithSourceAsync(Discussion with { Trigger = observation }, default);
+            Require(fallback.Source == new BotDecisionSource("semantic-model", "served-model") && fallback.Decision.Message == "clarify",
+                "untrusted or ambiguous events defer to the configured model with its response identity");
+        }
+        model.Output = $$"""{"action":"delegate","goalId":"{{GoalId}}","harness":"codex","instruction":"inspect test evidence"}""";
+        var failed = Discussion with { Trigger = unknown with { Status = "failed" }, Goals = [Snapshot] };
+        Require((await engine.DecideAsync(failed, default)).Action == BotAction.Delegate && model.Calls == 5,
+            "a known failure can lead to another decision");
+        model.Output = $$"""{"action":"complete","goalId":"{{GoalId}}"}""";
+        await Reject(() => engine.DecideAsync(failed with { Goals = [held] }, default));
+        model.Output = """{"action":"reply","message":"ok","cognitionSource":{"engine":"local/memory-result/1"}}""";
+        await Reject(() => engine.DecideAsync(Discussion, default));
+        Console.WriteLine("PASS local cognition abstention, zero model calls on supported feedback, and trusted decision sources");
     }
 
     // Opt-in evaluation of model judgement. Uses synthetic messages and makes no harness calls.
@@ -149,7 +184,7 @@ internal static class BotDecisionChecks
             cancellationToken.ThrowIfCancellationRequested();
             Input = input;
             Calls++;
-            return Task.FromResult(new SemanticModelReply(Once.TryDequeue(out var reply) ? reply : Output, Model));
+            return Task.FromResult(new SemanticModelReply(Once.TryDequeue(out var reply) ? reply : Output, "served-model"));
         }
     }
 }

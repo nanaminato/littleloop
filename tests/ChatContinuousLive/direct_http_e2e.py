@@ -28,7 +28,7 @@ from friend_access import ACCOUNTS as FRIEND_ACCOUNTS, run as run_friend_access
 
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
-mode.add_argument('--decision-loop', nargs='?', choices=['copy', 'review', 'search', 'handoff', 'private-copy'], const='copy',
+mode.add_argument('--decision-loop', nargs='?', choices=['copy', 'review', 'search', 'handoff', 'private-copy', 'memory-result'], const='copy',
     help='exercise real cognition, native Codex, DeepSeek ACP, or a two-Harness handoff')
 mode.add_argument('--conversation', action='store_true', help='check natural replies and preauthorized private project work')
 mode.add_argument('--memory', action='store_true', help='run the private memory and override experiment')
@@ -43,7 +43,7 @@ if options.friend_tools and not options.friend_access:
     parser.error('--friend-tools requires --friend-access')
 REPO = Path(__file__).resolve().parents[2]
 DLL = Path(os.environ.get('LITTLELOOP_CHAT_DLL', REPO / 'src/LittleLoop.Chat/bin/Debug/net10.0/LittleLoop.Chat.dll')).resolve()
-EXECUTABLE = Path(os.environ['LITTLELOOP_CODEX_EXECUTABLE']).resolve()
+EXECUTABLE = Path(sys.executable if options.decision_loop == 'memory-result' else os.environ['LITTLELOOP_CODEX_EXECUTABLE']).resolve()
 assert DLL.is_file() and EXECUTABLE.is_file(), 'Build Chat and configure an installed Codex executable'
 ROOT = REPO / 'data' / 'direct-http' / uuid.uuid4().hex[:8]
 PROJECT = ROOT / 'project'
@@ -221,6 +221,24 @@ def reply_for(message, seconds=20):
 
 
 def check_decision_loop():
+    if options.decision_loop == 'memory-result':
+        message = send('查看偏好')
+        answer = reply_for(message, 120)
+        with sqlite3.connect(ROOT / 'chat.db') as db:
+            events = [(json.loads(obs), json.loads(detail) if detail else None) for obs, detail in db.execute(
+                'SELECT observation,detail FROM chat_bot_events WHERE room_id=? AND seq=? ORDER BY id',
+                (room, message['sequence']))]
+        decisions = [detail for obs, detail in events if obs['kind'] == 'BotDecision']
+        tool, = (obs for obs, _ in events if obs['kind'] == 'ToolResult' and obs['status'] == 'memory')
+        assert [d['action'] for d in decisions] == ['ManageMemory', 'Reply'], decisions
+        sources = [d['cognitionSource'] for d in decisions]
+        assert sources[0]['engine'] == 'semantic-model' and sources[0]['model'], sources
+        assert sources[1]['engine'] == 'local/memory-result/1' and answer['text'] == tool['text'], events
+        assert '尚未保存偏好' in answer['text'], answer
+        assert not answer.get('card') and sum(m.get('replyTo') == message['sequence'] for m in history()) == 1
+        record('a structured memory operation receives exactly one chat reply from local cognition')
+        return dict(case='memory-result', sources=sources, answer=answer['text'])
+
     marker = 'CHECK-' + secrets.token_hex(10)
     (PROJECT / 'notes.txt').write_text(marker + '\n', encoding='utf-8')
     question = send('如果一个列表有 17 个元素，移走 3 个还剩几个？用数字回答即可。')

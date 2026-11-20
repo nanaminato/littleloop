@@ -70,8 +70,8 @@ if (config["ChatBot:Policy"] is not null)
         return ChatStore.FromJson<SemanticModelConfig>(File.ReadAllText(path));
     });
     builder.Services.AddSingleton<ISemanticModelClient>(sp => new HttpSemanticModelClient(sp.GetRequiredService<SemanticModelConfig>()));
-    builder.Services.AddSingleton<IBotDecisionEngine>(sp => new ModelBotDecisionEngine(
-        sp.GetRequiredService<ISemanticModelClient>(), sp.GetRequiredService<SemanticModelConfig>().MaxInputCharacters));
+    builder.Services.AddSingleton<IBotDecisionEngine>(sp => new LocalBotCognition(new ModelBotDecisionEngine(
+        sp.GetRequiredService<ISemanticModelClient>(), sp.GetRequiredService<SemanticModelConfig>().MaxInputCharacters)));
     builder.Services.AddSingleton<ChatBot>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ChatBot>());
 }

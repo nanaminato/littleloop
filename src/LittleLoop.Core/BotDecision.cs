@@ -20,6 +20,9 @@ public sealed record BotDecisionContext(BotObservation Trigger, BotGoalSnapshot[
 public interface IBotDecisionEngine
 {
     Task<BotDecision> DecideAsync(BotDecisionContext context, CancellationToken token);
+
+    async Task<BotDecisionResult> DecideWithSourceAsync(BotDecisionContext context, CancellationToken token) =>
+        new(await DecideAsync(context, token), new(GetType().Name));
 }
 
 /// <summary>A delegate action with no goal creates one. Revisions and resumptions request a fresh decision.</summary>

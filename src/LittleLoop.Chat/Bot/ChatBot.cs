@@ -246,8 +246,9 @@ sealed class ChatBot : BackgroundService
             snapshot = snapshot with { Context = snapshot.Context with { Capabilities = capabilities } };
             try
             {
-                var decision = (await engine.DecideAsync(snapshot.Context, token)).Validate(snapshot.Context);
-                await store.ApplyDecision(snapshot, decision, Robot(null).Id, CanOperate(input.Owner), maxTurns, projectGrant);
+                var result = await engine.DecideWithSourceAsync(snapshot.Context, token);
+                await store.ApplyDecision(snapshot, result.Decision.Validate(snapshot.Context), Robot(null).Id,
+                    CanOperate(input.Owner), maxTurns, projectGrant, cognitionSource: result.Source);
             }
             catch (Exception error) when (!token.IsCancellationRequested && error is not System.Data.Common.DbException)
             {
@@ -258,7 +259,8 @@ sealed class ChatBot : BackgroundService
                 if (reason.Length > 600) reason = reason[..600];
                 var fallback = input.Trigger.GoalId is Guid id
                     ? new BotDecision(BotAction.Wait, id, reason) : new BotDecision(BotAction.Reply, Message: reason);
-                await store.ApplyDecision(snapshot, fallback, Robot(null).Id, CanOperate(input.Owner), maxTurns, projectGrant, reason);
+                await store.ApplyDecision(snapshot, fallback, Robot(null).Id, CanOperate(input.Owner), maxTurns, projectGrant,
+                    reason, new("host/decision-error"));
             }
         }
 

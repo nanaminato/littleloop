@@ -1,11 +1,12 @@
 using System.Data.Common;
+using System.Text.Json;
 using LittleLoop.Core;
 
 sealed partial class ChatStore
 {
     // The network call took place outside this transaction. Commit only against the observed source and version.
     public async Task ApplyDecision(DecisionSnapshot snapshot, BotDecision decision, string robot, bool operatorAccess,
-        int turnLimit, string grant, string? failure = null)
+        int turnLimit, string grant, string? failure = null, BotDecisionSource? cognitionSource = null)
     {
         var input = snapshot.Input;
         var context = snapshot.Context;
@@ -147,8 +148,10 @@ sealed partial class ChatStore
         var decisionText = decision.Instruction is not null && decision.Message is not null
             ? $"{decision.Instruction}\n给用户的说明：{decision.Message}"
             : decision.Instruction ?? decision.Message ?? decision.Action.ToString();
+        var detail = JsonSerializer.SerializeToNode(decision, BotJson)!.AsObject();
+        if (cognitionSource is not null) detail["cognitionSource"] = JsonSerializer.SerializeToNode(cognitionSource, BotJson);
         await Record(db, tx, input.Room, input.Owner, input.Sequence, new(BotEventKind.BotDecision,
-            decisionText, target, decision.Harness, decision.Action.ToString(), input.Sequence, goal?.Version), ToJson(decision));
+            decisionText, target, decision.Harness, decision.Action.ToString(), input.Sequence, goal?.Version), detail.ToJsonString());
         if (decision.Action == BotAction.ManageMemory)
         {
             var observation = new BotObservation(BotEventKind.ToolResult, message!, Status: "memory", Sequence: input.Sequence);

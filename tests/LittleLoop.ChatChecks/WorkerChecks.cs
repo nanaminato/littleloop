@@ -64,7 +64,7 @@ internal static class WorkerChecks
         var codex = new ControlledHarness("codex", project);
         var engine = new ControlledEngine();
         ChatBot Create() => new(store, new QuietHub(), config, NullLogger<ChatBot>.Instance,
-            decisionEngine: engine, configuredHarnesses: [codex, deepseek]);
+            decisionEngine: new LocalBotCognition(engine), configuredHarnesses: [codex, deepseek]);
         var worker = Create();
         async Task Restart()
         {
@@ -249,16 +249,39 @@ internal static class WorkerChecks
             check(!manage.Context.Memory.Any(m => m.Contains(originalPreference) || m.Contains(correctedPreference)),
                 "forget removes the corrected preference from the next decision context");
             manage.Choose(new(BotAction.ManageMemory));
-            var memoryResult = await engine.Next();
-            check(memoryResult.Context.Trigger is { Kind: BotEventKind.ToolResult, GoalId: null } &&
-                memoryResult.Context.Trigger.Text.Contains("还没有保存上下文"),
-                "local memory lookup returns a tool observation to cognition");
-            memoryResult.Choose(new(BotAction.Reply, Message: "这段对话没有单独保存的背景。"));
-            await Notice("没有单独保存的背景");
+            await Notice("还没有保存上下文");
             var replies = (await store.History(owner.Id, room.Id, null, null))!
                 .Where(m => m.ReplyTo == lookup.Sequence && m.Sender == robot.Name).ToArray();
-            check(replies is [{ Text: "这段对话没有单独保存的背景。" }],
-                "the timeline contains exactly the Bot's answer for the local memory lookup");
+            check(replies is [{ Text: "这段私聊还没有保存上下文。" }],
+                "the Bot answers a committed memory lookup once without invoking its fallback again");
+
+            var verify = await Say("请复核这次修改。");
+            (await engine.Next()).Choose(new(BotAction.Delegate, Message: "我会核对本轮修改。", Objective: "核对本轮修改",
+                Instruction: "检查修改。", Harness: "codex"));
+            var turn = await codex.Next();
+            turn.Result.SetResult(new("uncertain", "session", "工具执行后连接断开", []));
+            await Notice("请核对 codex");
+            var card = (await store.FindMessage(room.Id, verify.Sequence, owner.Id))!.Card!;
+            await UntilStatus(card.TaskId!.Value, "needs-reconciliation");
+
+            var auditConnection = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(fixture.Connection) { Pooling = false };
+            await using var db = new Microsoft.Data.Sqlite.SqliteConnection(auditConnection.ConnectionString);
+            await db.OpenAsync();
+            await using var sources = db.CreateCommand();
+            sources.CommandText = """
+                SELECT json_extract(detail,'$.action'),json_extract(detail,'$.cognitionSource.engine')
+                FROM chat_bot_events WHERE room_id=$room AND seq IN ($memory,$uncertain) AND kind='BotDecision'
+                ORDER BY id
+                """;
+            sources.Parameters.AddWithValue("$room", room.Id);
+            sources.Parameters.AddWithValue("$memory", lookup.Sequence);
+            sources.Parameters.AddWithValue("$uncertain", verify.Sequence);
+            var audit = new List<(string Action, string Source)>();
+            await using var reader = await sources.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) audit.Add((reader.GetString(0), reader.GetString(1)));
+            check(audit.SequenceEqual([("ManageMemory", "ControlledEngine"), ("Reply", "local/memory-result/1"),
+                ("Delegate", "ControlledEngine"), ("Wait", "local/reconciliation/1")]),
+                "SQLite preserves each decision action and its actual source across the two feedback loops");
         }
         finally
         {
