@@ -3415,18 +3415,40 @@
       "type": "capability",
       "title": "统一聊天认知、持续 Harness 委派与可恢复目标",
       "actor": "AI",
-      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。",
+      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。",
       "authorization": "not_applicable",
       "delivery": "implemented",
       "verification": "passed",
       "verification_basis": [
-        "EVIDENCE-BOT-DECISION-LOOP"
+        "EVIDENCE-BOT-DECISION-LOOP",
+        "EVIDENCE-BOT-AUTONOMY-INCREMENTS"
       ],
       "attributes": {},
       "references": [
         "REF-BOT-DECISION-LOOP",
         "REF-BOT-DECISION-CONTRACT",
-        "REF-BOT-DECISION-STORE"
+        "REF-BOT-DECISION-STORE",
+        "REF-BOT-AUTONOMY-RESEARCH",
+        "REF-BOT-LOCAL-COGNITION"
+      ]
+    },
+    {
+      "id": "EVIDENCE-BOT-AUTONOMY-INCREMENTS",
+      "type": "evidence",
+      "title": "本地认知、同轮工具证据与可替换 Harness 恢复的独立验收",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "body": "验证两类结构化反馈的本地处理、超过历史窗口的工具失败归属和恢复时的单次结算。真实 HTTP 验收用独立 SQLite 及合成数据。",
+      "attributes": {
+        "observation": "2026-11-20：e4c1dbf 单独通过 54 项 SQLite 专项；d55128c 单独通过 55 项专项及 13 项原生协议夹具；b0c5506 的专项 81 项、完整 SQLite 聊天回归 289 项通过。实际认知 API 发起记忆查询，本地生成唯一回复；Codex 原生静态审阅后 Bot 再次决策。另一次真实 HTTP 试次由只读 DeepSeek ACP 经 7 条工具记录查到随机编号，再由 Codex 原生回执复核后四位 b11b，Bot 在同一目标完成。三个最终构建的试次为 7b9172ed、3c314314、485beb17，复现入口见研究文档。恢复窗口使用受控执行器，本轮未测 MySQL 与长期学习收益。"
+      },
+      "references": [
+        "REF-BOT-AUTONOMY-RESEARCH",
+        "REF-BOT-HARNESS-RECOVERY-CHECKS",
+        "REF-BOT-DECISION-CHECKS",
+        "REF-BOT-DECISION-HTTP"
       ]
     }
   ],
@@ -4709,6 +4731,12 @@
       "source": "CAP-BOT-DECISION-LOOP",
       "type": "implements",
       "target": "DECISION-CHAT-EXTERNAL-COMPUTER-AGENTS"
+    },
+    {
+      "id": "REL-BOT-AUTONOMY-INCREMENTS-EVIDENCE",
+      "source": "EVIDENCE-BOT-AUTONOMY-INCREMENTS",
+      "type": "supports",
+      "target": "CAP-BOT-DECISION-LOOP"
     }
   ],
   "references": [
@@ -5522,6 +5550,27 @@
       "kind": "project_file",
       "target": "tests/ChatContinuousLive/direct_http_e2e.py",
       "purpose": "Real HTTP, cognition API, native Codex and DeepSeek ACP scenarios",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-AUTONOMY-RESEARCH",
+      "kind": "project_file",
+      "target": "docs/58-autonomous-bot.md",
+      "purpose": "六个参考工程的取舍、三个增量及其独立验收边界",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-LOCAL-COGNITION",
+      "kind": "project_file",
+      "target": "src/LittleLoop.Core/LocalBotCognition.cs",
+      "purpose": "可放弃判断的本地认知与决策来源",
+      "tracking": "live"
+    },
+    {
+      "id": "REF-BOT-HARNESS-RECOVERY-CHECKS",
+      "kind": "project_file",
+      "target": "tests/LittleLoop.ChatChecks/HarnessRecoveryChecks.cs",
+      "purpose": "经实际后台验证原派发恢复、来源替换与结果未知",
       "tracking": "live"
     }
   ],
