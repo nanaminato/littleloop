@@ -14,7 +14,9 @@ public sealed record BotObservation(BotEventKind Kind, string Text, Guid? GoalId
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ToolKind = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BotToolEvidence? ToolEvidence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? DispatchSubmitted = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WakeAtUnixMilliseconds = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? WakeAtUnixMilliseconds = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? CheckId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? WakeObligationId = null);
 
 /// <summary>Counts describe the last reported state of each recorded call. Null truncation means unknown coverage.</summary>
 public sealed record BotToolEvidence(int Recorded, int ReportedCompleted, int ReportedFailed, bool? Truncated,
@@ -23,7 +25,10 @@ public sealed record BotToolEvidence(int Recorded, int ReportedCompleted, int Re
 public sealed record BotToolFailure(string ToolId, string ToolKind, string Status, string Detail);
 
 public sealed record BotGoalSnapshot(Guid Id, ContinuousGoal Goal, int RemainingTurns,
-    int RemainingWakeups = BotDecision.MaxWakeups, long? WakeAtUnixMilliseconds = null);
+    int RemainingWakeups = BotDecision.MaxWakeups, long? WakeAtUnixMilliseconds = null)
+{
+    public long? SourceSequence { get; init; }
+}
 
 public sealed record BotDecisionContext(BotObservation Trigger, BotGoalSnapshot[] Goals, BotObservation[] History,
     string[] Memory, string[] Harnesses, bool AutoFinalReport = true, Guid? ReplyGoalId = null, string? QuotedText = null,
@@ -31,6 +36,9 @@ public sealed record BotDecisionContext(BotObservation Trigger, BotGoalSnapshot[
 {
     public BotGoalEvidence[] DispatchEvidence { get; init; } = [];
     public BotHarnessOption[] HarnessOptions { get; init; } = [];
+    public bool RequireObligations { get; init; }
+    public GoalObligationSource[] ObligationSources { get; init; } = [];
+    public Guid[] UnavailableObligationEvidence { get; init; } = [];
 
     [JsonIgnore]
     public Action<BotModelCall>? ObserveModelCall { get; init; }
@@ -53,7 +61,13 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? WakeAfterSeconds = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? VerifyDispatchId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ReviewDispatchId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ReviewReason = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ReviewReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GoalObligationEdit[]? ObligationEdits = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GoalObligationAssessment[]? ObligationAssessments = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? WakeObligationId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? GoalReplyReason = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ResolveSourceSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? GoalWakeDeferralReason = null)
 {
     public const int MinWakeSeconds = 5;
     public const int MaxWakeSeconds = 7 * 24 * 60 * 60;
@@ -64,6 +78,7 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
 
     public BotDecisionError? Check(BotDecisionContext context)
     {
+        if (GoalObligationPolicy.CheckUserSource(this, context) is { } sourceError) return sourceError;
         var target = GoalId is null ? null : context.Goals.FirstOrDefault(g => g.Id == GoalId);
         if (GoalId is not null && target is null)
             return new("unknown-goal", "field", "Decision refers to an unknown or unlisted goal.", "goalId");
@@ -117,7 +132,7 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
                 return new("missing-new-goal-fields", "field", "A new delegation requires both an objective (maximum 4000 characters) and a brief plan in message.");
             if (target?.RemainingTurns <= 0)
                 return new("turn-budget-exhausted", "field", "This goal has no remaining harness turns.", "action");
-            return CheckEvidence(context);
+            return CheckEvidence(context) ?? GoalObligationPolicy.Check(this, context, target);
         }
         bool valid = Action switch
         {
@@ -131,7 +146,8 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
             BotAction.ManageMemory => target is null,
             _ => false
         };
-        return valid ? CheckEvidence(context) : new("missing-action-fields", "field", $"Invalid target or required fields for {Action}.");
+        return valid ? CheckEvidence(context) ?? GoalObligationPolicy.Check(this, context, target)
+            : new("missing-action-fields", "field", $"Invalid target or required fields for {Action}.");
     }
 
     public static BotAction[] LegalActions(BotDecisionContext context, BotGoalSnapshot? target)
@@ -142,6 +158,12 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
             if (target is null || target.Id != context.Trigger.GoalId ||
                 context.Trigger.Kind == BotEventKind.Timer && !DueTimer(context, target)) return [];
             return new[] { BotAction.Delegate, BotAction.Wait, BotAction.Complete }.Where(Allowed).ToArray();
+        }
+        if (GoalObligationPolicy.DirectedUserGoal(context) is Guid directed)
+        {
+            target = context.Goals.First(g => g.Id == directed);
+            return Enum.GetValues<BotAction>().Where(action => GoalObligationPolicy.IsDirectedUserAction(action) &&
+                (Allowed(action) || action == BotAction.ManageMemory)).ToArray();
         }
         if (target is not null) return Enum.GetValues<BotAction>().Where(Allowed).ToArray();
         return context.Harnesses.Length == 0

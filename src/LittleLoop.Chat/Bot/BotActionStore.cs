@@ -13,9 +13,38 @@ sealed partial class ChatStore
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
         string? type = await LockGoalRoom(db, tx, input.Room);
-        Guid? target = decision.GoalId;
+        bool hostFallback = failure is not null || retryCognition;
+        if (hostFallback && (decision.Action is not (BotAction.Reply or BotAction.Wait) ||
+            decision.ObligationEdits is not null || decision.ObligationAssessments is not null ||
+            decision.WakeObligationId.HasValue || decision.ResolveSourceSequence.HasValue))
+            return new("invalid-host-fallback", "field", "A host failure can only report or wait without changing requirements.");
+        Guid? target = decision.GoalId ?? (requireObligations && input.Inbox.HasValue && decision.Action == BotAction.Reply
+            ? context.ReplyGoalId : null);
         var (error, work) = await DecisionCommitGate(db, tx, snapshot, robot, operatorAccess, type, target);
         if (error is not null) return error;
+        if (requireObligations && !hostFallback)
+        {
+            context = context with { RequireObligations = true };
+            if (work?.Goal is { } current && context.Goals.FirstOrDefault(goal => goal.Id == work.Id) is { } observed)
+            {
+                var locked = observed with { Goal = current, SourceSequence = work.Sequence };
+                context = context with
+                {
+                    Goals = context.Goals.Select(goal => goal.Id == locked.Id ? locked : goal).ToArray(),
+                    DispatchEvidence = [await ReadDispatchEvidence(db, tx, input.Room, input.Owner, locked)],
+                    ObligationSources = await ReadObligationSources(db, tx, input, locked),
+                    UnavailableObligationEvidence = await ReadUnavailableObligationEvidence(db, tx, input.Room, input.Owner, locked)
+                };
+            }
+            if (decision.Check(context) is { } invalid) return invalid;
+            if (decision.Action == BotAction.Complete)
+            {
+                await using var inFlight = Command(db, tx, "SELECT 1 FROM chat_bot_inflight WHERE work_id=@work LIMIT 1",
+                    ("work", target!.Value.ToString()));
+                if (await inFlight.ExecuteScalarAsync() is not null)
+                    return new("inflight-dispatch", "evidence-conflict", "Wait for outstanding execution evidence before completing.", "action");
+            }
+        }
         if (input.Inbox is long inbox && !await ConsumeInbox(db, tx, inbox))
             return new("input-consumed", "goal-version-conflict", "The user input was already consumed.");
         if (input.Inbox.HasValue)
@@ -53,6 +82,7 @@ sealed partial class ChatStore
         var loop = work?.Input.Loop ?? new BotGoalLoop(0, turnLimit);
         string? message = decision.Message;
         string? output = null;
+        GoalObligationCheck? scheduledCheck = null;
         switch (decision.Action)
         {
             case BotAction.Delegate:
@@ -90,9 +120,13 @@ sealed partial class ChatStore
                 loop = loop with { Dispatch = null, Next = null };
                 if (decision.WakeAfterSeconds is int delay)
                 {
+                    long at = clock.GetUtcNow().AddSeconds(delay).ToUnixTimeMilliseconds();
+                    if (!hostFallback && decision.WakeObligationId.HasValue)
+                        scheduledCheck = new(Guid.NewGuid(), at, goal.Version);
                     loop = loop with
                     {
-                        Wake = new(clock.GetUtcNow().AddSeconds(delay).ToUnixTimeMilliseconds(), goal.Version, retryCognition),
+                        Wake = new(at, goal.Version, retryCognition, scheduledCheck?.Id,
+                            scheduledCheck is null ? null : decision.WakeObligationId),
                         ScheduledWakeups = loop.ScheduledWakeups + 1
                     };
                 }
@@ -101,7 +135,11 @@ sealed partial class ChatStore
                     output = message;
                     if (!context.AutoFinalReport) message = null;
                     else if (message is not null && type == "direct" && await CompletionIncludesGoal(db, tx, work!))
-                        message += "\n任务目标：" + GoalMemoryExcerpt(goal.Objective);
+                    {
+                        string objective = "任务目标：" + GoalMemoryExcerpt(goal.Objective);
+                        message = decision.ObligationAssessments?.Any(a => a.CompletionNotice) == true
+                            ? objective + "\n" + message : message + "\n" + objective;
+                    }
                 }
                 break;
             case BotAction.SetFinalReport:
@@ -142,11 +180,26 @@ sealed partial class ChatStore
                 message = memoryResult ?? "没有找到这条消息对应的记忆操作。";
                 break;
         }
-        if (work is not null && goal is not null && decision.Action != BotAction.Reply)
+        if (work is not null && goal is not null)
         {
-            work = work with { Input = work.Input with { Loop = loop } };
-            await SaveGoal(db, tx, work, goal, input.Sequence, decision.Action.ToString(),
-                error: failure is not null ? Cut(failure, 250) : goal.Status == "needs-reconciliation" ? work.Error : null, output: output);
+            if (decision.Action != BotAction.Reply || decision.ResolveSourceSequence.HasValue)
+                goal = GoalObligationPolicy.Apply(goal, work.Id, decision.Action == BotAction.Revise ? input.Sequence : work.Sequence,
+                    decision, input.Trigger, scheduledCheck);
+            if (decision.Action == BotAction.Reply)
+            {
+                if (requireObligations && hostFallback && input.Inbox.HasValue && (ActiveForMemory(work) || work.Status == "needs-reconciliation"))
+                    goal = goal with { PendingRequirementSources = [.. (goal.PendingRequirementSources ?? []), input.Sequence] };
+                if (goal != work.Goal)
+                    await SaveGoal(db, tx, work, goal, input.Sequence, "requirement-source", error: work.Error, output: work.Output);
+                if (requireObligations && input.Inbox.HasValue)
+                    message += "\n目标要求未变更。";
+            }
+            else
+            {
+                work = work with { Input = work.Input with { Loop = loop } };
+                await SaveGoal(db, tx, work, goal, input.Sequence, decision.Action.ToString(),
+                    error: failure is not null ? Cut(failure, 250) : goal.Status == "needs-reconciliation" ? work.Error : null, output: output);
+            }
         }
         if (input.Inbox.HasValue)
         {

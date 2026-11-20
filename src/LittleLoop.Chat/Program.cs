@@ -52,7 +52,7 @@ builder.Services.AddSingleton<PasswordHasher<Account>>();
 var fcmProject = config["ChatFcm:ProjectId"]?.Trim();
 if (string.IsNullOrEmpty(fcmProject)) fcmProject = null;
 var store = new ChatStore(builder.Configuration.GetConnectionString("Chat") ?? throw new InvalidOperationException("Set ConnectionStrings__Chat"),
-    fcmProject is not null, config["ChatDatabase:Provider"] ?? "MySql");
+    fcmProject is not null, config["ChatDatabase:Provider"] ?? "MySql", requireObligations: true);
 await store.Initialize();
 await store.InitializeChannelAdministration();
 await store.InitializeGroupModeration();

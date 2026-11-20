@@ -3415,7 +3415,7 @@
       "type": "capability",
       "title": "统一聊天认知、持续 Harness 委派与可恢复目标",
       "actor": "AI",
-      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。到期检查进入相同的决策接口，派发结果可为本地策略提供提交边界，已提交决策附有模型请求与服务回报用量。模型草稿按结构化错误进行有限修复，提交时复查权限及版本。决策读取现有账本的派发、回执和验证投影，复核保留理由。",
+      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。到期检查进入相同的决策接口，派发结果可为本地策略提供提交边界，已提交决策附有模型请求与服务回报用量。模型草稿按结构化错误进行有限修复，提交时复查权限及版本。决策读取现有账本的派发、回执和验证投影，复核保留理由。 用户提出的目标条件、修订、待核对来源与实际到期记录沿用同一目标账本。Bot 选择条件含义和证据，宿主验证来源与版本范围，并阻止仍有开放条件的完成。",
       "authorization": "not_applicable",
       "delivery": "implemented",
       "verification": "passed",
@@ -3423,7 +3423,8 @@
         "EVIDENCE-BOT-DECISION-LOOP",
         "EVIDENCE-BOT-AUTONOMY-INCREMENTS",
         "EVIDENCE-BOT-AUTONOMY-ENDURANCE",
-        "EVIDENCE-BOT-DRAFT-RECOVERY"
+        "EVIDENCE-BOT-DRAFT-RECOVERY",
+        "EVIDENCE-BOT-GOAL-OBLIGATIONS"
       ],
       "attributes": {},
       "references": [
@@ -3433,7 +3434,8 @@
         "REF-BOT-AUTONOMY-RESEARCH",
         "REF-BOT-LOCAL-COGNITION",
         "REF-BOT-AUTONOMY-ENDURANCE",
-        "REF-BOT-DECISION-RELIABILITY"
+        "REF-BOT-DECISION-RELIABILITY",
+        "REF-BOT-GOAL-OBLIGATIONS"
       ]
     },
     {
@@ -3526,6 +3528,23 @@
         "REF-BOT-DECISION-RELIABILITY",
         "REF-BOT-DECISION-REPAIR-CHECKS",
         "REF-BOT-RELIABILITY-BATCH"
+      ]
+    },
+    {
+      "id": "EVIDENCE-BOT-GOAL-OBLIGATIONS",
+      "type": "evidence",
+      "title": "目标条件与证据约束的验收",
+      "actor": "AI",
+      "body": "区分确定性事务与协议回归，以及冻结双 Harness 对照中的自然语言语义和实际产出。",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "确定性 SQLite 与 Worker 检查覆盖条件与修订事务、证据边界、时间恢复、非破坏性修复和多目标隔离。完整语义及真实试次用独立对照验收，不从回归通过推导通用用户意图已覆盖。"
+      },
+      "references": [
+        "REF-BOT-GOAL-OBLIGATION-CHECKS",
+        "REF-BOT-GOAL-OBLIGATIONS"
       ]
     }
   ],
@@ -5722,6 +5741,20 @@
       "target": "tests/ChatContinuousLive/autonomy_reliability_batch.py",
       "purpose": "冻结程序集、驱动、环境指纹和种子的配对真实验收",
       "tracking": "live"
+    },
+    {
+      "kind": "project_file",
+      "purpose": "目标条件架构、语义边界和冻结验收",
+      "target": "docs/61-goal-obligations.md",
+      "tracking": "live",
+      "id": "REF-BOT-GOAL-OBLIGATIONS"
+    },
+    {
+      "kind": "project_file",
+      "purpose": "目标条件的确定性 SQLite 与 Worker 验收",
+      "target": "tests/LittleLoop.ChatChecks/BotGoalObligationChecks.cs",
+      "tracking": "live",
+      "id": "REF-BOT-GOAL-OBLIGATION-CHECKS"
     }
   ],
   "views": [

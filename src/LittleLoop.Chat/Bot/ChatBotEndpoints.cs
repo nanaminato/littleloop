@@ -134,8 +134,9 @@ static class ChatBotEndpoints
             object? execution = job.Input.Loop is null && job.Kind != "question" && seeEvidence && (job.Kind != "legacy" || bot.HasLegacyEvidence)
                 ? AgentConversationSupport.Details(bot.Folder(job), false) : null;
             var events = job.Input.Loop is not null && seeEvidence ? await store.GoalObservations(job.Id) : null;
+            var goal = !seeEvidence && job.Goal is { } shared ? shared with { Obligations = null, PendingRequirementSources = null } : job.Goal;
             return Results.Ok(new { job.Id, job.Status, job.Error, canApprove = false, execution, events,
-                goal = job.Goal,
+                goal,
                 wakeAtUnixMilliseconds = job.Input.Loop?.Wake?.AtUnixMilliseconds,
                 provider = job.Input.Provider ?? ChatStore.BotName,
                 output = seeEvidence && job.Output is not null ? AgentConversationSupport.ReportText(job.Output) : null });

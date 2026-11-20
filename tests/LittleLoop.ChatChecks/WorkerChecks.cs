@@ -10,9 +10,9 @@ internal static partial class WorkerChecks
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
-    public static async Task Run(Action<bool, string> check)
+    public static async Task Run(Action<bool, string> check, bool obligationsOnly = false)
     {
-        await BotRecoveryChecks.Run(check);
+        if (!obligationsOnly) await BotRecoveryChecks.Run(check);
         using var fixture = new TemporaryChatDatabase();
         ChatStore Open() => new(fixture.Connection, false, "Sqlite");
         var store = Open();
@@ -41,7 +41,7 @@ internal static partial class WorkerChecks
         string stateFile = Path.Combine(savedFolder, "agent.json");
         string suspended = ChatStore.ToJson(savedHost.Read() with { Status = "suspended", ThreadId = "old-thread" });
         File.WriteAllText(stateFile, suspended);
-        foreach (var replacement in new[] { grant with { WritableFiles = [] },
+        foreach (var replacement in obligationsOnly ? [] : new[] { grant with { WritableFiles = [] },
             grant with { Commands = [grant.Commands[0] with { Arguments = ["--new-verifier"] }] },
             grant with { Root = Directory.CreateDirectory(Path.Combine(root, "replacement-project")).FullName } })
         {
@@ -59,10 +59,17 @@ internal static partial class WorkerChecks
             ["ChatBot:Policy"] = policy, ["ChatBot:Data"] = Path.Combine(root, "worker"),
             ["ChatBot:Operators"] = owner.Name, ["ChatBot:MaxHarnessTurns"] = "3"
         }).Build();
+        if (obligationsOnly)
+        {
+            try { await CheckBotGoalObligations(config, project, owner, check); }
+            finally { Directory.Delete(root, recursive: true); }
+            return;
+        }
         await CheckHarnessRecovery(config, project, owner, check);
         await CheckBotTimers(config, project, owner, check);
         await CheckBotEvidence(config, project, owner, check);
         await CheckBotDraftRecovery(config, project, owner, check);
+        await CheckBotGoalObligations(config, project, owner, check);
 
         var deepseek = new ControlledHarness("deepseek", project);
         var codex = new ControlledHarness("codex", project);

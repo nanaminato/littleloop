@@ -1,9 +1,16 @@
+using System.Text.Json.Serialization;
+
 namespace LittleLoop.Core;
 
 // The host persists this aggregate atomically when consuming the originating message event.
 // Tool sessions hold execution evidence, not a second copy of the user's goal lifecycle.
 public sealed record ContinuousGoal(int Version, string Objective, string[] Requirements, string Status)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GoalObligation[]? Obligations { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long[]? PendingRequirementSources { get; init; }
+
     public string Prompt => Objective + (Requirements.Length == 0 ? "" :
         "\n用户后续要求（按时间顺序；冲突时先澄清）：\n" + string.Join("\n", Requirements.Select((s, i) => $"{i + 1}. {s}")));
 

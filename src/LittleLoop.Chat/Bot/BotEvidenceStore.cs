@@ -71,7 +71,9 @@ sealed partial class ChatStore
                 request?.Review, request?.ReviewReason, summary?.Recorded,
                 summary is null ? null : summary.Truncated == true || summary.Recorded > shown.Length ? true : summary.Truncated)
             {
-                OriginalInstruction = request?.Instruction
+                OriginalInstruction = request?.Instruction,
+                ReceiptToolsTruncated = summary?.Truncated,
+                ReportedFailedTools = summary?.ReportedFailed
             };
         }).ToArray();
         int omitted = Math.Max(0, grouped.Length - EvidenceDispatchLimit);

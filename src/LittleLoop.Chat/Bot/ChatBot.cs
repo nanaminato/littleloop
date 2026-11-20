@@ -331,7 +331,10 @@ sealed class ChatBot : BackgroundService
                         if (!harnesses.TryGetValue(dispatch.Harness, out var harness))
                             throw new InvalidOperationException($"部署中找不到 Harness {dispatch.Harness}。");
                         string session = Session(work, dispatch);
-                        var instruction = dispatch.Instruction + "\n\n当前目标及用户约束\n" + work.Goal!.Prompt;
+                        var goal = work.Goal!;
+                        string requirements = goal.Obligations is null ? goal.Prompt :
+                            string.Join("\n", goal.Obligations.Where(o => o.Active).Select(o => "- " + o.Description));
+                        var instruction = dispatch.Instruction + "\n\n当前目标及用户约束\n" + requirements;
                         if (CanOperate(work.Owner) && ProjectFiles.Same(harness.ProjectRoot ?? "", files.Root))
                         {
                             var recalled = await store.PrepareGoalMemory(work, files, memorySemantics, token);

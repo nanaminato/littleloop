@@ -22,6 +22,10 @@ public sealed record BotDispatchEvidence(Guid DispatchId, int? GoalVersion, stri
 {
     [JsonIgnore]
     public string? OriginalInstruction { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ReceiptToolsTruncated { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ReportedFailedTools { get; init; }
 }
 
 public sealed record BotGoalEvidence(Guid GoalId, int GoalVersion, bool GoalCompleted,

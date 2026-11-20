@@ -23,6 +23,12 @@ if (args is ["--decision-loop"])
     Console.WriteLine($"All {checks} focused chat checks passed.");
     return;
 }
+if (args is ["--goal-obligations"])
+{
+    await WorkerChecks.Run(Check, obligationsOnly: true);
+    Console.WriteLine($"All {checks} goal obligation checks passed.");
+    return;
+}
 var goal = ContinuousGoal.Create("Fix bug") with { Status = "running" };
 var changed = goal.Change("revise", "Keep database unchanged", 1);
 Check(changed.Finish(1, "completed") == changed, "late completion cannot overwrite revised objective");

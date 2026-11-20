@@ -3,7 +3,8 @@ using LittleLoop.Core;
 
 // Stored in the existing job row, atomically with the goal, budget and next action.
 sealed record BotDispatch(Guid Id, string Harness, string Instruction, string? RecoveryKey = null);
-sealed record BotScheduledWake(long AtUnixMilliseconds, int GoalVersion, bool RetryDecision = false);
+sealed record BotScheduledWake(long AtUnixMilliseconds, int GoalVersion, bool RetryDecision = false,
+    Guid? CheckId = null, Guid? WakeObligationId = null);
 sealed record BotGoalLoop(int Used, int Limit, BotDispatch? Dispatch = null, BotObservation? Next = null,
     BotScheduledWake? Wake = null, int ScheduledWakeups = 0);
 sealed record DecisionInput(long? Inbox, string Room, string Owner, long Sequence, long? ReplyTo,
@@ -99,7 +100,8 @@ sealed partial class ChatStore
         wake.GoalVersion == goal.Version && wake.AtUnixMilliseconds > 0 && wake.AtUnixMilliseconds <= now
             ? new(BotEventKind.Timer, wake.RetryDecision ? "认知服务的暂时故障已到重新评估时间。" : "目标的下一次检查时间已到。",
                 work.Id, Status: wake.RetryDecision ? "decision-retry" : "due",
-                Sequence: work.Sequence, GoalVersion: goal.Version, WakeAtUnixMilliseconds: wake.AtUnixMilliseconds)
+                Sequence: work.Sequence, GoalVersion: goal.Version, WakeAtUnixMilliseconds: wake.AtUnixMilliseconds,
+                CheckId: wake.CheckId, WakeObligationId: wake.WakeObligationId)
             : null;
 
     private static async Task<bool> Permitted(DbConnection db, DbTransaction tx, string room, string owner,
@@ -156,7 +158,8 @@ sealed partial class ChatStore
         await using var tx = await db.BeginTransactionAsync();
         var input = snapshot.Input;
         var type = await LockGoalRoom(db, tx, input.Room);
-        return (await DecisionCommitGate(db, tx, snapshot, robot, operatorAccess, type, input.Trigger.GoalId)).Error;
+        return (await DecisionCommitGate(db, tx, snapshot, robot, operatorAccess, type,
+            input.Trigger.GoalId ?? snapshot.Context.ReplyGoalId)).Error;
     }
 
     private static async Task<(BotDecisionError? Error, BotWork? Work)> DecisionCommitGate(DbConnection db, DbTransaction tx,
@@ -170,7 +173,8 @@ sealed partial class ChatStore
         {
             var observed = snapshot.Context.Goals.FirstOrDefault(g => g.Id == id);
             current = await LockedWork(db, tx, id, input.Room, input.Owner);
-            if (current?.Goal is null || observed is null || current.Goal.Version != observed.Goal.Version || current.Status != observed.Goal.Status)
+            if (current?.Goal is null || observed is null || current.Goal.Version != observed.Goal.Version || current.Status != observed.Goal.Status ||
+                !(current.Goal.PendingRequirementSources ?? []).SequenceEqual(observed.Goal.PendingRequirementSources ?? []))
                 return (new("goal-version-changed", "goal-version-conflict", "The target goal changed while deciding.", "goalId"), null);
         }
         await using var rev = Command(db, tx, "SELECT revision FROM chat_rooms WHERE id=@room", ("room", input.Room));
@@ -185,8 +189,10 @@ sealed partial class ChatStore
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
         await LockGoalRoom(db, tx, input.Room);
-        var observation = new BotObservation(BotEventKind.DecisionAudit, error.Code, input.Trigger.GoalId, Status: error.Category,
-            Sequence: input.Sequence, GoalVersion: input.Trigger.GoalVersion, DispatchId: input.Trigger.DispatchId);
+        Guid? goalId = input.Trigger.GoalId ?? snapshot.Context.ReplyGoalId;
+        int? observedVersion = input.Trigger.GoalVersion ?? snapshot.Context.Goals.FirstOrDefault(goal => goal.Id == goalId)?.Goal.Version;
+        var observation = new BotObservation(BotEventKind.DecisionAudit, error.Code, goalId, Status: error.Category,
+            Sequence: input.Sequence, GoalVersion: observedVersion, DispatchId: input.Trigger.DispatchId);
         await Record(db, tx, input.Room, input.Owner, input.Sequence, observation, ToJson(new
         {
             triggerKind = input.Trigger.Kind.ToString(), snapshot.Revision, error, cognitionSource = source
@@ -259,8 +265,9 @@ sealed partial class ChatStore
                 var w = ReadWork(r);
                 var loop = w.Input.Loop;
                 goals.Add(new(w.Id, w.Goal!, loop is null ? limit : loop.Limit - loop.Used,
-                    BotDecision.MaxWakeups - (loop?.ScheduledWakeups ?? 0), loop?.Wake?.AtUnixMilliseconds));
+                    BotDecision.MaxWakeups - (loop?.ScheduledWakeups ?? 0), loop?.Wake?.AtUnixMilliseconds) { SourceSequence = w.Sequence });
             }
+        if (quotedGoal is Guid quoted && !goals.Any(goal => goal.Id == quoted)) quotedGoal = null;
 
         var history = new List<BotObservation>();
         await using (var cmd = Command(db, tx, """
@@ -312,9 +319,18 @@ sealed partial class ChatStore
             : goals.FirstOrDefault(goal => goal.Goal.Status is "deciding" or "running" or "queued" or "paused" or "waiting-input");
         BotGoalEvidence[] dispatchEvidence = evidenceGoal is null ? [] :
             [await ReadDispatchEvidence(db, tx, input.Room, input.Owner, evidenceGoal)];
+        var obligationSources = requireObligations ? await ReadObligationSources(db, tx, input, evidenceGoal) : [];
+        var unavailableEvidence = requireObligations && evidenceGoal is not null
+            ? await ReadUnavailableObligationEvidence(db, tx, input.Room, input.Owner, evidenceGoal) : [];
         await tx.CommitAsync();
         var context = new BotDecisionContext(input.Trigger, goals.ToArray(), history.ToArray(), memory.ToArray(), harnesses, report,
-            quotedGoal, quote) { DispatchEvidence = dispatchEvidence };
+            quotedGoal, quote)
+        {
+            DispatchEvidence = dispatchEvidence,
+            RequireObligations = requireObligations,
+            ObligationSources = obligationSources,
+            UnavailableObligationEvidence = unavailableEvidence
+        };
         return new(input, context, roomRevision);
     }
 }
