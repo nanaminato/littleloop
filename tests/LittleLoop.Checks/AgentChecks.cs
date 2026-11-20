@@ -91,7 +91,7 @@ internal static class AgentChecks
         var waitingHost = new AgentDelegationHost(Path.Combine(parent, "tool-wait"));
         waitingHost.Create(new("unused", project, ApprovalMode: "wait", MaxRepairs: 0, AttachDocumentation: false, Development: policy));
         var toolAgent = new FakeAgent(project, dynamicTool: true);
-        var pendingRun = waitingHost.RunAsync("Run bounded test", CancellationToken.None, toolAgent);
+        var pendingRun = waitingHost.RunAsync("Run bounded test", CancellationToken.None, toolAgent, approvalModeLimit: "auto");
         string pendingFile = Path.Combine(parent, "tool-wait", "approval.json");
         for (int i = 0; i < 100 && !File.Exists(pendingFile); i++) await Task.Delay(20);
         using (var pending = JsonDocument.Parse(File.ReadAllText(pendingFile)))
@@ -100,6 +100,17 @@ internal static class AgentChecks
         Check(!toolAgent.Replies.Single().GetProperty("success").GetBoolean() &&
             new LearningSession(Path.Combine(parent, "tool-wait", "tools-learning.json")).Read().Episodes.Length == 0,
             "wait policy persists dynamic command approval and honors user decline without execution");
+        var automatic = new AgentDelegationHost(Path.Combine(parent, "tool-auto"));
+        automatic.Create(new("unused", project, MaxRepairs: 0, AttachDocumentation: false, Development: policy, HostToolsOnly: true));
+        var automaticAgent = new FakeAgent(project, dynamicTool: true, approval: true);
+        await automatic.RunAsync("Run the granted fixture", CancellationToken.None, automaticAgent, approvalModeLimit: "auto");
+        Check(automaticAgent.Replies[0].GetProperty("success").GetBoolean() &&
+            automaticAgent.Replies[1].GetProperty("decision").GetString() == "decline",
+            "private host grants run fixed tools directly and decline native commands");
+        var restrictedAgent = new FakeAgent(project, dynamicTool: true);
+        var restricted = await automatic.RunAsync("Recheck under the new policy", CancellationToken.None, restrictedAgent, approvalModeLimit: "decline");
+        Check(!restrictedAgent.Replies.Single().GetProperty("success").GetBoolean() && restricted.Policy.ApprovalMode == "decline",
+            "a resumed automatic task observes a stricter current approval policy");
         bool pause = false;
         string suspendFolder = Path.Combine(parent, "tool-suspend");
         var suspendHost = new AgentDelegationHost(suspendFolder, (_, _) => { pause = true; return Task.CompletedTask; },

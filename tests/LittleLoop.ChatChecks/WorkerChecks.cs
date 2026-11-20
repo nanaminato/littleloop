@@ -8,17 +8,42 @@ internal static class WorkerChecks
 {
     public static async Task Run(ChatStore store, Account owner, Account approver, Account robot, string room, Action<bool, string> check)
     {
+        await ConversationChecks.Run(check);
         string root = Path.GetFullPath(Path.Combine("data", "continuous-worker-checks", Guid.NewGuid().ToString("N")));
         string project = Path.Combine(root, "project"); Directory.CreateDirectory(project);
         File.WriteAllText(Path.Combine(project, "code.txt"), "fixture");
         File.WriteAllText(Path.Combine(project, "verify.txt"), "protected verifier fixture");
         string policy = Path.Combine(root, "policy.json");
-        File.WriteAllText(policy, ChatStore.ToJson(new AgentHostPolicy("unused", project,
-            Development: new(project, ["code.txt"], [new("verify", Environment.ProcessPath!, ["--verify-fixture"], true, ["verify.txt"])], [".txt"]))));
+        var grant = new DevelopmentPolicy(project, ["code.txt"], [new("verify", Environment.ProcessPath!, ["--verify-fixture"], true, ["verify.txt"])], [".txt"]);
+        var originalPolicy = new AgentHostPolicy("unused", project, Development: grant);
+        File.WriteAllText(policy, ChatStore.ToJson(originalPolicy));
+        string savedFolder = Path.Combine(root, "previous-task");
+        var savedHost = new AgentDelegationHost(savedFolder);
+        savedHost.Create(originalPolicy);
+        string stateFile = Path.Combine(savedFolder, "agent.json");
+        string suspended = ChatStore.ToJson(savedHost.Read() with { Status = "suspended", ThreadId = "old-thread" });
+        File.WriteAllText(stateFile, suspended);
+        foreach (var replacement in new[] { grant with { WritableFiles = [] },
+            grant with { Commands = [grant.Commands[0] with { Arguments = ["--new-verifier"] }] },
+            grant with { Root = Directory.CreateDirectory(Path.Combine(root, "replacement-project")).FullName } })
+        {
+            var primary = new LittleLoopChatAdapter(originalPolicy with { Project = replacement.Root, Development = replacement },
+                root, _ => Task.FromResult(true));
+            var outcome = await primary.Run(new(Guid.NewGuid(), room, owner.Id, 1, "task", "running", new("继续")),
+                savedFolder, (_, _) => throw new Exception("Stale grant requested approval"), CancellationToken.None);
+            check(outcome.Status == "needs-reconciliation" && outcome.Report!.Contains("开发授权已变更") &&
+                File.ReadAllText(stateFile) == suspended && File.ReadAllText(Path.Combine(project, "code.txt")) == "fixture",
+                "old task cannot start its agent or execute when the current development grant changes");
+        }
+        var deviceOwner = new Account(Guid.NewGuid().ToString(), "host_" + Guid.NewGuid().ToString("N")[..8], "!fixture");
+        await store.Register(deviceOwner);
+        await store.SetBotFriendAllowlist(robot.Id, deviceOwner.Name, true);
+        var deviceRoom = (await store.RequestBotFriend(deviceOwner.Id, robot.Id))?.RoomId ?? throw new Exception("Missing host operator private room");
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ChatBot:Policy"] = policy, ["ChatBot:Data"] = Path.Combine(root, "worker"),
-            ["ChatBot:Operators"] = owner.Name, ["ChatBot:Approvers"] = approver.Name
+            ["ChatBot:Operators"] = owner.Name, ["ChatBot:Approvers"] = approver.Name,
+            ["ChatBot:HostOperators"] = deviceOwner.Name, ["ChatBot:HostPairingCandidate"] = owner.Name
         }).Build();
         var executor = new ControlledAdapter();
         var independent = new ControlledAdapter(ChatStore.DeepSeekTestBotName, Path.Combine(root, "independent"));
@@ -38,8 +63,71 @@ internal static class WorkerChecks
         var worker = Create(); await worker.StartAsync(CancellationToken.None);
         try
         {
-            var message = await Send("任务：验证持续调度");
+            var capabilities = await Send("你能修改哪些系统设置？");
+            check((await ReplyTo(capabilities.Message.Sequence)).Text.Contains("文件扩展名"), "private chat lists real host settings");
+            var unpairedRequest = await Send("把这台电脑的应用主题改成深色");
+            check((await ReplyTo(unpairedRequest.Message.Sequence)).Text.Contains("绑定这台电脑"), "pairing candidate cannot write before local consent");
+            var foreignRoom = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
+                new(Guid.NewGuid().ToString(), "绑定这台电脑", null), goalRobot: robot.Id);
+            using (var limit = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                while (!(await store.History(deviceOwner.Id, deviceRoom, foreignRoom!.Message.Sequence, null))!.Any(m =>
+                    m.ReplyTo == foreignRoom.Message.Sequence && m.Text.Contains("已经可以操作")))
+                    await Task.Delay(50, limit.Token);
+            check(!worker.CanOperate(deviceOwner.Id) && !worker.CanApprove(deviceOwner.Id),
+                "dedicated host operator can use host settings without project or approval rights");
+            if (OperatingSystem.IsWindows())
+            {
+                var sent = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
+                    new(Guid.NewGuid().ToString(), "把本机时区设为 " + TimeZoneInfo.Local.Id, null), goalRobot: robot.Id);
+                using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                while (!(await store.History(deviceOwner.Id, deviceRoom, sent!.Message.Sequence, null))!.Any(m =>
+                    m.ReplyTo == sent.Message.Sequence && m.Text.Contains("已经使用")))
+                    await Task.Delay(50, limit.Token);
+                check(true, "host-only friend can request an already satisfied change under manual project approval");
+                var read = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
+                    new(Guid.NewGuid().ToString(), "这台电脑的时区是什么？", null), goalRobot: robot.Id);
+                ChatMessage? answer;
+                while ((answer = (await store.History(deviceOwner.Id, deviceRoom, read!.Message.Sequence, null))!
+                    .SingleOrDefault(m => m.ReplyTo == read.Message.Sequence && m.Sender == robot.Name)) is null)
+                    await Task.Delay(50, limit.Token);
+                var follow = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
+                    new(Guid.NewGuid().ToString(), "改成" + TimeZoneInfo.Local.Id, answer.Sequence), goalRobot: robot.Id);
+                while (!(await store.History(deviceOwner.Id, deviceRoom, follow!.Message.Sequence, null))!.Any(m =>
+                    m.ReplyTo == follow.Message.Sequence && m.Text.Contains("已经使用")))
+                    await Task.Delay(50, limit.Token);
+                check(true, "short follow-up to a verified host reply uses its original setting and the same account");
+                var ambiguous = await store.Send(deviceOwner.Id, deviceOwner.Name, deviceRoom,
+                    new(Guid.NewGuid().ToString(), "把本机睡眠时间设为15分钟", null), goalRobot: robot.Id);
+                while (!(await store.History(deviceOwner.Id, deviceRoom, ambiguous!.Message.Sequence, null))!.Any(m =>
+                    m.ReplyTo == ambiguous.Message.Sequence && m.Text.Contains("插电时还是")))
+                    await Task.Delay(50, limit.Token);
+                check(true, "missing power source produces a direct clarification without changing the host");
+            }
+            const string quoteRequest = "帮我查询一下最近黄金的价格走势，整理为一个 Excel 发给我。";
+            var general = await Send(quoteRequest);
+            var firstReply = await ReplyTo(general.Message.Sequence);
+            check(general.Message.Card is null && firstReply.Card is null && firstReply.Text.Contains("查询实时行情") &&
+                firstReply.Text.Contains("日期\t品种") && executor.Calls == 0,
+                "ordinary market and Excel request gets a text answer with precise capability limits and no development execution");
+            var followup = await Send("那能帮我解释一下这几列吗？", firstReply.Sequence);
+            await ReplyTo(followup.Message.Sequence);
+            check(executor.LastChat?.History.LastOrDefault() is { Quoted: true } previous &&
+                previous.User == quoteRequest && previous.Assistant == firstReply.Text,
+                "ordinary text answers include the referenced exchange from the same conversation");
+
+            var message = await Send("/task 验证持续调度");
             var first = await executor.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
+            var group = await store.CreateRoom(owner, new("group", "Private grant boundary", [approver.Name]));
+            await store.InstallRobot(group.Id, owner.Id, [robot.Id], true);
+            check(await worker.IsPrivateOperator(first) && !await worker.IsPrivateOperator(first with { Room = group.Id }) &&
+                !await worker.IsPrivateOperator(first with { Input = first.Input with { Provider = independent.Name } }),
+                "direct operator grant is specific to the primary bot and private room");
+            var clockQuestion = await Send("这台电脑的时区是什么？");
+            using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                while (!(await store.History(owner.Id, room, null, null))!.Any(m =>
+                    m.Sender == robot.Name && m.ReplyTo == clockQuestion.Message.Sequence && m.Text.Contains("时区") && m.Card is null))
+                    await Task.Delay(50, deadline.Token);
+            check(true, "host time zone answers directly while a development task is active");
             check(first.Goal is { Version: 1, Status: "running" }, "background worker consumes ordinary chat message without manual queue action");
 
             Guid sameProjectId = Guid.NewGuid();
@@ -136,8 +224,9 @@ internal static class WorkerChecks
             check(!worker.CanOperate(friend.Id) && await worker.CanOperateRoom(friend.Id, friendRoom),
                 "friend access is scoped to its room, independently of static operators");
             await store.Send(friend.Id, friend.Name, friendRoom,
-                new(Guid.NewGuid().ToString(), "任务：验证执行中撤销机器人访问", null), goalRobot: robot.Id, legacyBotOperator: false);
+                new(Guid.NewGuid().ToString(), "/task 验证执行中撤销机器人访问", null), goalRobot: robot.Id, legacyBotOperator: false);
             var friendWork = await inFlight.Started.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
+            check(!await worker.IsPrivateOperator(friendWork), "friendship alone cannot use private operator grants");
             await store.SetBotFriendAllowlist(robot.Id, friend.Name, false);
             await inFlight.Yielded.Task.WaitAsync(TimeSpan.FromSeconds(15));
             using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
@@ -150,6 +239,18 @@ internal static class WorkerChecks
                 "revoked in-flight work yields and granting future access does not replay the old task");
         }
         finally { await worker.StopAsync(CancellationToken.None); worker.Dispose(); }
+
+        async Task<ChatMessage> ReplyTo(long sequence)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            while (true)
+            {
+                var messages = await store.History(owner.Id, room, sequence, null);
+                if (messages?.FirstOrDefault(m => m.Sender == robot.Name && m.ReplyTo == sequence) is { } reply)
+                    return reply;
+                await Task.Delay(50, timeout.Token);
+            }
+        }
     }
 
     private sealed class ControlledAdapter(string name = ChatStore.BotName, string? projectRoot = null) : IChatRobotAdapter
@@ -161,7 +262,13 @@ internal static class WorkerChecks
         public TaskCompletionSource Yielded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Calls { get; private set; }
-        public Task<string> Answer(BotInput input, CancellationToken token) => Task.FromResult("fixture");
+        public BotInput? LastChat { get; private set; }
+        public Task<string> Answer(BotInput input, CancellationToken token)
+        {
+            if (input.Source is not null) return Task.FromResult("fixture");
+            LastChat = input;
+            return Task.FromResult(ChatConversation.Unavailable(input));
+        }
         public async Task<RobotOutcome> Run(BotWork work, string folder, Func<AgentApprovalRequest, CancellationToken, Task> approval,
             CancellationToken token, Func<CancellationToken, Task<bool>>? shouldYield = null)
         {

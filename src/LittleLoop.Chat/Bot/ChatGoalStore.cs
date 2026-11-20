@@ -1,4 +1,5 @@
 using LittleLoop.Core;
+using LittleLoop.Tools;
 using System.Data.Common;
 
 sealed record GoalNotice(string Id, string Room, long ReplyTo, string Text, Guid? TaskId);
@@ -112,7 +113,56 @@ sealed partial class ChatStore
             await tx.CommitAsync();
             return true;
         }
-        var intent = GoalMessageRouter.Parse(text, candidates.Count > 0, privateDocumentRequests: roomType == "direct");
+        bool activeTarget = candidates is [var selected] && ActiveForMemory(selected);
+        var intent = GoalMessageRouter.Parse(text, candidates.Count > 0, privateChat: roomType == "direct",
+            taskReply: target is not null && activeTarget, awaitingInput: candidates is [{ Status: "waiting-input" }]);
+        BotInput? continuation = null;
+        bool continueWaiting = intent.Action == "resume" && text.Trim().TrimEnd('。', '！', '!') is "继续" or "继续吧" or "接着做吧";
+        if (roomType == "direct" && candidates is [{ Status: "waiting-input" } pending] &&
+            (continueWaiting || target is not null && intent.Action == "chat" || intent.Action == "revise" &&
+                GoalMessageRouter.Parse(text, false, privateChat: true).Action == "chat"))
+            continuation = await ReadEarlierChatRequest(db, tx, pending, continueWaiting ? text.Trim() : intent.Text);
+        string? hostWork = null;
+        string hostText = text;
+        if (roomType == "direct" && target is null)
+        {
+            if (HostSettings.IsPairingMessage(text))
+            {
+                await using var pendingPair = Command(db, tx, """
+                    SELECT 1 FROM chat_bot_work WHERE room_id=@room AND owner_id=@user AND kind='pair'
+                        AND status IN ('queued','running') LIMIT 1
+                    """, ("room", room), ("user", user));
+                if (await pendingPair.ExecuteScalarAsync() is not null)
+                {
+                    await AddGoalNotice(db, tx, room, seq, "已有配对请求，请查看这台电脑的桌面提示。", null);
+                    await tx.CommitAsync();
+                    return true;
+                }
+                hostWork = "pair";
+            }
+            else if (HostSettings.Parse(text) is not null) hostWork = "setting";
+            else if (HostSettings.MayContinue(text))
+            {
+                await using var previous = Command(db, tx, """
+                    SELECT w.input,w.status FROM chat_bot_work w
+                    JOIN chat_messages answer ON answer.room_id=w.room_id AND answer.client_id=w.id AND answer.reply_to=w.seq
+                    JOIN chat_messages request ON request.room_id=w.room_id AND request.seq=w.seq AND request.sender_id=w.owner_id
+                    WHERE w.owner_id=@user AND w.room_id=@room AND w.kind IN ('setting','timezone') AND w.status IN ('completed','needs-input')
+                      AND answer.seq=@answer AND answer.sender_id=@robot AND NOT answer.deleted AND NOT request.deleted
+                    """, ("user", user), ("room", room), ("answer", replyTo ?? seq - 1), ("robot", robot));
+                await using var prior = await previous.ExecuteReaderAsync();
+                if (await prior.ReadAsync() && HostSettings.Continue(FromJson<BotInput>(prior.GetString(0)).Text,
+                    prior.GetString(1), text) is { } expanded)
+                { hostText = expanded; hostWork = "setting"; }
+            }
+        }
+        if (hostWork is not null || intent.Action == "chat" || continuation is not null)
+        {
+            await InsertJob(db, tx, new(Guid.NewGuid(), room, user, seq, hostWork ?? "chat", "queued",
+                hostWork is not null ? new(hostText) : continuation ?? new(intent.Text)));
+            await tx.CommitAsync();
+            return true;
+        }
         // A plain progress question still works after completion/cancellation. Explicit replies
         // must resolve their own task; never silently redirect them to another active goal.
         if (intent.Action == "status" && replyTo is null && candidates.Count == 0)
@@ -129,10 +179,10 @@ sealed partial class ChatStore
         string response;
         try
         {
-            if (intent.Action == "help")
+            if (intent.Action is "help" or "reply")
             {
                 work = null;
-                response = "可以发送“任务：具体目标和验收要求”，或说“帮我修复…”；回复任务卡可补充要求、查询进度、暂停、恢复或取消。";
+                response = intent.Action == "reply" ? intent.Text : "你想让我处理什么？如果是在说群里已有的任务，可以直接回复对应的任务。";
             }
             else if (intent.Action == "create")
             {
@@ -140,7 +190,7 @@ sealed partial class ChatStore
                 work = new(Guid.NewGuid(), room, user, seq, "task", goal.Status, new(goal.Prompt), Goal: goal);
                 await InsertJob(db, tx, work);
                 await SaveGoal(db, tx, work, goal, seq, "create");
-                response = goal.Status == "waiting-input" ? "请补充具体要完成什么，以及如何判断完成。" : "已接收任务，将在现有权限和预算内持续推进。";
+                response = goal.Status == "waiting-input" ? "你想让我做什么？" : "收到，我开始处理。";
             }
             else if (intent.Action == "status" && candidates.Count > 1)
             {
@@ -155,7 +205,7 @@ sealed partial class ChatStore
                     string.Join("\n", overview);
             }
             else if (work is null) response = candidates.Count > 1
-                ? "你有多个进行中的任务，请回复要操作的任务卡。" : "未找到你在此会话中可操作的目标。请回复自己的任务卡，或发送“任务：具体目标”。";
+                ? "你有多个进行中的任务，请回复要操作的那一项。" : "我没找到对应的任务。如果你指的是之前的任务，可以回复那条消息。";
             else
             {
                 var goal = work.Goal!.Change(intent.Action, intent.Text, work.Goal.Version);
@@ -177,10 +227,27 @@ sealed partial class ChatStore
             await using var card = Command(db, tx, "UPDATE chat_messages SET card=@card WHERE room_id=@room AND seq=@seq",
                 ("card", ToJson(new MessageCard("task", TaskId: work.Id))), ("room", room), ("seq", seq));
             await card.ExecuteNonQueryAsync();
-            response += $"\n目标 v{work.Goal!.Version}：{work.Goal.Objective}";
+            if (intent.Action == "status") response += $"\n目标 v{work.Goal!.Version}：{work.Goal.Objective}";
         }
         await AddGoalNotice(db, tx, room, seq, response, work?.Id);
         await tx.CommitAsync(); return true;
+    }
+
+    // Previous versions sent general requests through development when the sender used “任务：”.
+    // The original inbox row distinguishes those messages from a deliberately scheduled project job.
+    private static async Task<BotInput?> ReadEarlierChatRequest(DbConnection db, DbTransaction tx, BotWork pending, string reply)
+    {
+        await using var cmd = Command(db, tx, """
+            SELECT i.body, m.deleted, m.edited FROM chat_goal_inbox i
+            JOIN chat_messages m ON m.room_id=i.room_id AND m.seq=i.seq AND m.sender_id=i.owner_id
+            WHERE i.room_id=@room AND i.seq=@seq AND i.owner_id=@owner AND i.processed
+            """, ("room", pending.Room), ("seq", pending.Sequence), ("owner", pending.Owner));
+        await using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync()) return null;
+        var original = GoalMessageRouter.Parse(reader.GetString(0), false, privateChat: true);
+        if (original.Action != "chat" || original.Text != pending.Goal!.Objective) return null;
+        string? context = reader.GetBoolean(1) || reader.GetBoolean(2) ? null : GoalMemoryExcerpt(original.Text);
+        return new(reply, context);
     }
 
     private static async Task<string?> LockGoalRoom(DbConnection db, DbTransaction tx, string room)
@@ -225,9 +292,11 @@ sealed partial class ChatStore
                 await SaveGoalExperience(db, tx, executed, experience);
             bool includeObjective = next.Status == "completed" && roomType == "direct" &&
                 await CompletionIncludesGoal(db, tx, executed);
+            string clarification = next.Status == "waiting-input" && output is not null
+                ? AgentConversationSupport.ReportText(output) : "";
             await AddGoalNotice(db, tx, executed.Room, executed.Sequence,
                 $"任务 v{next.Version}：{GoalStatusText(next.Status)}" + (error is null ? "" : "\n" + error) +
-                (next.Status == "waiting-input" && output is not null ? "\n" + output[..Math.Min(output.Length, 3000)] : "") +
+                (clarification.Length == 0 ? "" : "\n" + clarification[..Math.Min(clarification.Length, 3000)]) +
                 (includeObjective ? "\n任务目标：" + GoalMemoryExcerpt(next.Objective) : ""), executed.Id);
         }
         await tx.CommitAsync();

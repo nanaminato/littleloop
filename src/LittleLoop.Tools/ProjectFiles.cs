@@ -47,7 +47,9 @@ public sealed class ProjectFiles
             if (policy.Commands.SelectMany(c => c.ProtectedFiles).Any(p => Same(p, path))) throw new ArgumentException("Verifier inputs cannot be writable.");
         }
     }
-    public string PolicyHash => Hash(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(Policy)));
+    public string PolicyHash => GrantHash(Policy);
+    public static string GrantHash(DevelopmentPolicy policy) => Hash(JsonSerializer.SerializeToUtf8Bytes(
+        policy with { Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(policy.Root)) }));
     public static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
     public static bool Same(string a, string b) => string.Equals(a.Replace('\\', '/'), b.Replace('\\', '/'), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     public string Resolve(string relative)

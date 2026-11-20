@@ -6,6 +6,7 @@ namespace LittleLoop.Tools;
 
 public sealed record AgentTurnRecord(string DecisionId, string? TurnId, string Prompt, string Status, string Report, string[] Issues);
 public sealed record AgentHostState(AgentHostPolicy Policy, string? ThreadId, string Status, AgentTurnRecord[] Turns);
+public sealed class DevelopmentGrantChangedException() : InvalidOperationException("项目路径或开发授权已变更。请核对旧任务的执行记录，再按当前授权安排任务。");
 
 public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequest, CancellationToken, Task>? onApproval = null,
     Func<CancellationToken, Task<bool>>? shouldYield = null, string transport = "codex-app-server")
@@ -51,11 +52,24 @@ public sealed class AgentDelegationHost(string directory, Func<AgentApprovalRequ
         new LearningSession(Path.Combine(root, "learning.json")).Initialize(policy.Role);
         Save(new(policy, null, "ready", []));
     }
-    public async Task<AgentHostState> RunAsync(string task, CancellationToken token, IAgentSessionClient? testClient = null)
+    public Task<AgentHostState> RunAsync(string task, CancellationToken token, IAgentSessionClient? testClient = null) =>
+        RunAsync(task, token, testClient, approvalModeLimit: null);
+
+    public async Task<AgentHostState> RunAsync(string task, CancellationToken token, IAgentSessionClient? testClient,
+        string? approvalModeLimit, DevelopmentPolicy? currentDevelopment = null)
     {
         if (string.IsNullOrWhiteSpace(task) || task.Length > 32000) throw new ArgumentException("Bounded task required.");
         using var lease = Lease(); var state = Read();
+        if (currentDevelopment is not null &&
+            (!ProjectFiles.Same(state.Policy.Project, Path.TrimEndingDirectorySeparator(Path.GetFullPath(currentDevelopment.Root))) ||
+             state.Policy.Development is not { } saved || ProjectFiles.GrantHash(saved) != ProjectFiles.GrantHash(currentDevelopment)))
+            throw new DevelopmentGrantChangedException();
         if (state.Status is not ("ready" or "completed" or "needs-revision" or "suspended")) throw new ArgumentException("Prior execution is pending/refused/unknown. Inspect it; never replay automatically.");
+        // Resuming a private task can tighten its original grant, e.g. after an operator is removed.
+        if (approvalModeLimit is not (null or "auto" or "wait" or "user" or "decline"))
+            throw new ArgumentException("Unknown approval mode limit.");
+        if (approvalModeLimit == "decline" || (approvalModeLimit is "user" or "wait" && state.Policy.ApprovalMode == "auto"))
+            state = state with { Policy = state.Policy with { ApprovalMode = approvalModeLimit } };
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(state.Policy.TimeoutSeconds)); token = timeout.Token;
         await using var client = testClient ?? new CodexAppServerClient(state.Policy.Executable, state.Policy.Project, root);
         var learning = new LearningSession(Path.Combine(root, "learning.json"));

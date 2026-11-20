@@ -26,6 +26,7 @@ from friend_access import ACCOUNTS as FRIEND_ACCOUNTS, run as run_friend_access
 
 parser = argparse.ArgumentParser(description=__doc__)
 mode = parser.add_mutually_exclusive_group()
+mode.add_argument('--conversation', action='store_true', help='check natural replies and preauthorized private project work')
 mode.add_argument('--memory', action='store_true', help='run the private memory and override experiment')
 mode.add_argument('--memory-generalization', action='store_true', help='measure held-out private task recall and outcomes')
 mode.add_argument('--friend-access', action='store_true', help='verify robot friend access through its real HTTP routes')
@@ -54,6 +55,8 @@ for name, value in [('code.txt', 'broken'), ('notes.txt', 'pending')]:
 policy = dict(executable=str(EXECUTABLE), project=str(PROJECT), maxTurns=8, timeoutSeconds=300, maxRepairs=1,
     development=dict(root=str(PROJECT), writableFiles=['code.txt', 'notes.txt'], readExtensions=['.txt', '.py'], budget=40,
         commands=[dict(id='verify', executable=sys.executable, arguments=['verify.py'], isTest=True, protectedFiles=['verify.py'])]))
+if not options.conversation:
+    policy['approvalMode'] = 'user'
 if options.memory or options.memory_generalization:
     # The independently checked convention is deliberately absent from both the workspace and test command.
     policy['development']['writableFiles'] = ['notes.txt']
@@ -195,8 +198,8 @@ def settled(task, status):
     return value['status'] == status and (value.get('execution') or {}).get('status') == 'suspended'
 
 
-def reply_for(message):
-    return wait(lambda: next((m for m in history() if m['sender'] == 'littleloop' and m.get('replyTo') == message['sequence']), None), 20)
+def reply_for(message, seconds=20):
+    return wait(lambda: next((m for m in history() if m['sender'] == 'littleloop' and m.get('replyTo') == message['sequence']), None), seconds)
 
 
 def progress(task, status):
@@ -268,8 +271,8 @@ def check_direct():
     greeting = send('你好')
     assert reply_for(greeting).get('card') is None
     discussion = send('如果修改数据库会怎样')
-    assert reply_for(discussion).get('card') is None
-    record('greeting and hypothetical discussion do not create work')
+    assert reply_for(discussion, 150).get('card') is None
+    record('greeting and hypothetical discussion do not create development work')
 
     text = '帮我修复 code.txt：将 broken 改为 fixed，然后运行 verify 测试。只使用宿主工具。'
     identifier = str(uuid.uuid4())
@@ -283,7 +286,7 @@ def check_direct():
     record('ordinary message creates one real Codex task; reads work and mutations await approval')
     progress(task, '正在工作')
     active_discussion = send('如果修改数据库会怎样')
-    assert reply_for(active_discussion).get('card') is None and state(task)['goal']['version'] == 1
+    assert reply_for(active_discussion, 150).get('card') is None and state(task)['goal']['version'] == 1
     unrelated = send('取消', active_discussion['sequence'])
     assert reply_for(unrelated).get('card') is None and state(task)['status'] == 'running'
     irrelevant = send('取消', greeting['sequence'])
@@ -302,7 +305,8 @@ def check_direct():
     assert settled(task, 'paused')
     record('confirmed tool-boundary pause, stale approval rejected, supplement persists paused across restart')
 
-    send('恢复')
+    resumed = send('恢复')
+    assert reply_for(resumed)['card']['taskId'] == task
     completed, approvals = complete_with_approvals(task, {'code.txt', 'notes.txt'})
     assert completed['goal']['version'] == 4 and completed['execution']['threadId'] == thread
     assert set(completed['execution']['changes']) == {'code.txt', 'notes.txt'}
@@ -359,6 +363,43 @@ try:
     record('authenticated private Codex room, idempotent enrollment and operator isolation')
     if options.friend_access:
         details = run_friend_access(sessions, request, wait, record, PROJECT, tools=options.friend_tools)
+    elif options.conversation:
+        answers = []
+
+        def converse(text, reply=None):
+            msg = send(text, reply)
+            answer = reply_for(msg, 150)
+            assert not answer.get('card') and not answer.get('attachment')
+            assert not next(m for m in history() if m['sequence'] == msg['sequence']).get('card')
+            answers.append(answer['text'])
+            return answer
+
+        first = converse('仓库里现在有 37 个苹果，今天又收到 15 个。请用阿拉伯数字告诉我共有几个。')
+        assert '52' in first['text'], first['text']
+        follow = converse('从刚才的总数里拿走 9 个，还剩几个？请用阿拉伯数字回答。', first['sequence'])
+        assert '43' in follow['text'], follow['text']
+        sheet = converse('帮我查一下最近黄金的价格走势，整理为一个 Excel 发给我。')
+        assert any(s in sheet['text'].lower() for s in ('excel', '表格', '金价', '行情', '黄金')), sheet['text']
+        assert 'appid-tests' not in sheet['text'] and 'ApplicationDescriptor' not in sheet['text']
+        zone = converse('这台电脑的时区是什么？')
+        assert '时区' in zone['text'], zone['text']
+        if os.name == 'nt':
+            current_zone = subprocess.check_output([str(Path(os.environ['SystemRoot']) / 'System32/tzutil.exe'), '/g'])
+            assert current_zone.decode().strip() in zone['text'], zone['text']
+        assert (PROJECT / 'code.txt').read_text() == 'broken' and (PROJECT / 'notes.txt').read_text() == 'pending'
+        record('two contextual text replies, spreadsheet capability reply and host time-zone read with no development job')
+
+        task = task_for(send('帮我修改 code.txt 为 fixed，修改 notes.txt 为 supplemented，并通过现有测试。'))
+        def finished():
+            value = state(task)
+            assert value['status'] in ('queued', 'running', 'completed'), (value['status'], value.get('output'))
+            assert not (value.get('execution') or {}).get('approval'), 'Unexpected interactive approval'
+            return value if value['status'] == 'completed' else None
+        done = wait(finished)
+        assert done['execution']['receipts'] and (PROJECT / 'code.txt').read_text().strip() == 'fixed'
+        subprocess.run([sys.executable, 'verify.py'], cwd=PROJECT, check=True)
+        record('default private operator project grant performs both fixture changes and the fixed test without approval clicks')
+        details = dict(answers=answers, task=task, statusBeforeVerification=done['status'])
     elif options.memory_generalization:
         def decide(task, nonce, decision):
             request(owner, f'/bot/work/{task}/decision', dict(nonce=nonce, value=decision), 204)

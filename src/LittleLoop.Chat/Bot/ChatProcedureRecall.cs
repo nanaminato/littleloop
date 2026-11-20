@@ -6,16 +6,19 @@ sealed record ProcedureMatch(GoalLessonHint Source, string Quote);
 
 static class ChatProcedureRecall
 {
-    internal static HttpSemanticModelClient? Configure(string? path)
+    internal static SemanticModelConfig? ReadConfig(string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
         var settings = ChatStore.FromJson<SemanticModelConfig>(File.ReadAllText(path));
         HttpSemanticModelClient.Validate(settings);
         if (!new Uri(settings.Endpoint).IsLoopback)
             throw new ArgumentException("ChatBot:MemorySemantics requires a loopback semantic-model endpoint.");
-        return new(settings with { TimeoutSeconds = Math.Min(8, settings.TimeoutSeconds),
-            MaxOutputTokens = Math.Min(256, settings.MaxOutputTokens), MaxResponseBytes = Math.Min(8192, settings.MaxResponseBytes) });
+        return settings;
     }
+
+    internal static HttpSemanticModelClient? CreateClient(SemanticModelConfig? settings) => settings is null ? null :
+        new(settings with { TimeoutSeconds = Math.Min(8, settings.TimeoutSeconds),
+            MaxOutputTokens = Math.Min(256, settings.MaxOutputTokens), MaxResponseBytes = Math.Min(8192, settings.MaxResponseBytes) });
 
     internal static async Task<ProcedureMatch?> Select(ISemanticModelClient client, ContinuousGoal goal,
         GoalLessonHint[] eligible, CancellationToken token)

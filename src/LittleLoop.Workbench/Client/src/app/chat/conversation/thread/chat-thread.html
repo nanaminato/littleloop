@@ -146,11 +146,15 @@
             <button type="button" class="icon attachment-button" [attr.aria-label]="store.t('添加图片或文件')" (click)="attachmentInput.click()" [disabled]="store.busy()">＋</button>
             <input #attachmentInput id="attachment" class="upload-input" type="file" tabindex="-1" (change)="store.upload($event)" [disabled]="store.busy()">
             <div class="composer-field">
-              <textarea id="message" name="message" [attr.aria-label]="store.t('消息内容')" [placeholder]="store.t('写消息…')"
-                [(ngModel)]="store.text" (keydown)="store.composerKey($event)" maxlength="4000" rows="1"></textarea>
-              @if (store.text.length > 3500) { <small class="counter">{{ store.text.length }}/4000</small> }
+              <div class="composer-input" [attr.data-draft]="store.text">
+                <textarea id="message" name="message" [attr.aria-label]="store.t('消息内容')" [placeholder]="store.t('写消息…')"
+                  [attr.aria-describedby]="store.text.length > 3500 ? 'message-count' : null"
+                  [attr.enterkeyhint]="store.devicePrefs().sendOnEnter ? 'send' : 'enter'"
+                  [(ngModel)]="store.text" (keydown)="store.composerKey($event)" maxlength="4000" rows="1"></textarea>
+              </div>
+              @if (store.text.length > 3500) { <small id="message-count" class="counter">{{ store.text.length }}/4000</small> }
             </div>
-            <button class="icon send" [attr.aria-label]="store.t('发送')" [disabled]="store.busy() || (!store.text.trim() && !store.attachment())">➤</button>
+            <button type="submit" class="icon send" [attr.aria-label]="store.t('发送')" [disabled]="store.busy() || (!store.text.trim() && !store.attachment())">➤</button>
           </div>
         }
       </form>

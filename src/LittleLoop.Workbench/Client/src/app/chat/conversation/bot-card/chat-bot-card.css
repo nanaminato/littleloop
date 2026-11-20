@@ -1,5 +1,5 @@
 :host { display: block; margin: .45rem 0; min-width: 0; }
-details, .task {
+details {
   border: 1px solid var(--line, #b9cad2); border-radius: var(--radius-md, 10px);
   margin: .35rem 0; padding: .5rem .6rem; background: color-mix(in srgb, var(--paper, #fff) 82%, var(--paper-tint, #eef5fb));
 }
@@ -10,8 +10,8 @@ pre {
   background: #1d2f3a; color: #eaf4fa; border-radius: 7px; font-size: .78rem; line-height: 1.45;
 }
 small { overflow-wrap: anywhere; color: var(--muted, #647b8b); }
-.provider { margin-left: .45rem; }
-.task strong { display: block; margin-bottom: 2px; }
+.provider { display: block; margin-top: .35rem; }
+.report { white-space: pre-wrap; overflow-wrap: anywhere; }
 .approval {
   background: color-mix(in srgb, #f0b45a 14%, var(--paper, #fff));
   border: 1px solid color-mix(in srgb, #d9a13f 42%, var(--line, #b9cad2));

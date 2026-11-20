@@ -60,6 +60,15 @@ export class ChatStore {
   readonly selected = signal('');
   readonly currentRoom = computed(() => this.rooms().find(room => room.id === this.selected()));
   readonly messages = signal<ChatMessage[]>([]);
+  readonly latestTaskMessage = computed(() => {
+    const latest = new Map<string, number>();
+    for (const message of this.messages()) {
+      if (!message.deleted && message.card?.kind === 'task' && message.card.taskId && !message.card.source) {
+        latest.set(message.card.taskId, message.sequence);
+      }
+    }
+    return latest;
+  });
   readonly connection = signal('正在连接');
   readonly error = signal('');
   readonly more = signal(false);

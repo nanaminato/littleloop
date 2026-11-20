@@ -21,14 +21,15 @@ public sealed class CodexAppServerClient : IAgentSessionClient
     private readonly SemaphoreSlim send = new(1);
     private readonly CancellationTokenSource stopped = new();
     private readonly Task reader, errors;
-    private readonly string requestsFile;
+    private readonly string? requestsFile;
     private long sequence;
-    public CodexAppServerClient(string executable, string cwd, string logDirectory)
+    public CodexAppServerClient(string executable, string cwd, string logDirectory) : this(executable, cwd, logDirectory, false) { }
+    public CodexAppServerClient(string executable, string cwd, string logDirectory, bool conversationOnly)
     {
         if (!Path.IsPathFullyQualified(executable) || !File.Exists(executable)) throw new ArgumentException("Absolute Codex executable required.");
         ProjectFiles.CheckAncestors(executable);
         Directory.CreateDirectory(logDirectory);
-        requestsFile = Path.Combine(logDirectory, "requests.jsonl");
+        if (!conversationOnly) requestsFile = Path.Combine(logDirectory, "requests.jsonl");
         var start = new ProcessStartInfo(executable) { WorkingDirectory = cwd, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
@@ -40,6 +41,14 @@ public sealed class CodexAppServerClient : IAgentSessionClient
             start.Environment["CODEX_HOME"] = serviceHome;
         }
         start.ArgumentList.Add("app-server"); start.ArgumentList.Add("--stdio");
+        if (conversationOnly)
+        {
+            foreach (string feature in new[] { "apps", "plugins", "hooks", "shell_tool", "view_image", "computer_use", "browser_use" })
+            {
+                start.ArgumentList.Add("--disable");
+                start.ArgumentList.Add(feature);
+            }
+        }
         // Keep resumable runtime databases with this host session. The desktop's
         // personal CODEX_HOME may be read-only to a service or restricted process.
         string runtime = Path.GetFullPath(Path.Combine(logDirectory, "codex-runtime"));
@@ -65,7 +74,7 @@ public sealed class CodexAppServerClient : IAgentSessionClient
             name.StartsWith("ChatBot__", StringComparison.OrdinalIgnoreCase)).ToArray())
             start.Environment.Remove(name);
         process = Process.Start(start) ?? throw new IOException("Could not start Codex App Server.");
-        reader = ReadAsync(Path.Combine(logDirectory, "events.jsonl"));
+        reader = ReadAsync(conversationOnly ? null : Path.Combine(logDirectory, "events.jsonl"));
         errors = DrainErrors(Path.Combine(logDirectory, "stderr.log"));
     }
     public async Task InitializeAsync(CancellationToken token, bool experimental = false)
@@ -93,21 +102,21 @@ public sealed class CodexAppServerClient : IAgentSessionClient
         try
         {
             string line = JsonSerializer.Serialize(message);
-            await File.AppendAllTextAsync(requestsFile, line + "\n", token);
+            if (requestsFile is not null) await File.AppendAllTextAsync(requestsFile, line + "\n", token);
             await process.StandardInput.WriteLineAsync(line.AsMemory(), token); await process.StandardInput.FlushAsync(token);
         }
         finally { send.Release(); }
     }
-    private async Task ReadAsync(string logPath)
+    private async Task ReadAsync(string? logPath)
     {
         Exception? failure = null; long bytes = 0;
         try
         {
-            using var log = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.Read));
+            using var log = logPath is null ? null : new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.Read));
             while (await process.StandardOutput.ReadLineAsync(stopped.Token) is { } line)
             {
                 if (line.Length > 2_000_000 || (bytes += line.Length) > 40_000_000) throw new IOException("App Server event budget exceeded.");
-                await log.WriteLineAsync(line); await log.FlushAsync();
+                if (log is not null) { await log.WriteLineAsync(line); await log.FlushAsync(); }
                 using var doc = JsonDocument.Parse(line); var item = doc.RootElement.Clone();
                 if (!item.TryGetProperty("method", out _) && item.TryGetProperty("id", out var id) && id.TryGetInt64(out long number) && calls.TryRemove(number, out var completion))
                 {

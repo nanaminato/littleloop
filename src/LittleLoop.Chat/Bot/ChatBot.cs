@@ -10,8 +10,12 @@ sealed class ChatBot : BackgroundService
     private readonly AgentHostPolicy policy;
     private readonly ProjectFiles files;
     private readonly HttpSemanticModelClient? memorySemantics;
+    private readonly HttpSemanticModelClient? conversationModel;
     private readonly HashSet<string> operators;
     private readonly HashSet<string> approvers;
+    private readonly HashSet<string> hostOperatorIds = new(StringComparer.Ordinal);
+    private readonly HostPairing hostPairing;
+    private string? pairingCandidateId;
     private readonly HashSet<string> accessAdmins;
     private readonly HashSet<string> operatorIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> approverIds = new(StringComparer.Ordinal);
@@ -37,7 +41,9 @@ sealed class ChatBot : BackgroundService
         maxConcurrentTasks = ReadConcurrency(config, "MaxConcurrentTasks", 2);
         maxConcurrentQuestions = ReadConcurrency(config, "MaxConcurrentQuestions", 1);
         var original = ChatStore.FromJson<AgentHostPolicy>(File.ReadAllText(config["ChatBot:Policy"]!));
-        policy = original with { ApprovalMode = "user", OutsideRule = "decline", Commands = [], AttachDocumentation = false, HostToolsOnly = true };
+        if (original.ApprovalMode is not ("auto" or "user" or "wait" or "decline"))
+            throw new ArgumentException("Unknown approvalMode in ChatBot policy.");
+        policy = original with { OutsideRule = "decline", Commands = [], AttachDocumentation = false, HostToolsOnly = true };
         files = new ProjectFiles(policy.Development ?? throw new InvalidOperationException("Bot requires a bounded development policy."));
         if (!ProjectFiles.Same(files.Root, Path.TrimEndingDirectorySeparator(Path.GetFullPath(policy.Project)))) throw new InvalidOperationException("Development and chat bot projects must match.");
         directory = Path.GetFullPath(config["ChatBot:Data"] ?? throw new InvalidOperationException("Set ChatBot__Data"));
@@ -46,7 +52,13 @@ sealed class ChatBot : BackgroundService
         if (!Path.IsPathFullyQualified(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new InvalidOperationException("Keep agent state outside project.");
         Directory.CreateDirectory(directory);
-        IChatRobotAdapter[] configured = configuredAdapters ?? [new LittleLoopChatAdapter(policy, directory), new SourceReviewChatAdapter()];
+        hostPairing = new(directory);
+        var localModel = ChatProcedureRecall.ReadConfig(config["ChatBot:MemorySemantics"]);
+        memorySemantics = ChatProcedureRecall.CreateClient(localModel);
+        var chatModel = config["ChatBot:ConversationModel"] is { Length: > 0 } modelPath
+            ? ChatStore.FromJson<SemanticModelConfig>(File.ReadAllText(modelPath)) : localModel;
+        if (chatModel is not null) conversationModel = new(chatModel);
+        IChatRobotAdapter[] configured = configuredAdapters ?? [new LittleLoopChatAdapter(policy, directory, IsPrivateOperator, conversationModel), new SourceReviewChatAdapter()];
         if (configuredAdapters is null && config["ChatBot:DeepSeek:ReadOnlyLauncher"] is { Length: > 0 } launcher)
         {
             var project = config["ChatBot:DeepSeek:Project"];
@@ -62,8 +74,9 @@ sealed class ChatBot : BackgroundService
             var timeout = TimeSpan.FromSeconds(policy.TimeoutSeconds);
             var readOnly = new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron, project, timeout);
             configured = [.. configured, readOnly];
+            var reviewedPolicy = policy.ApprovalMode == "auto" ? policy with { ApprovalMode = "user" } : policy;
             if (options.GetValue<bool>("ReviewCodexChanges"))
-                configured = [.. configured, new CollaborationChatAdapter(policy, new LittleLoopChatAdapter(policy, directory), readOnly)];
+                configured = [.. configured, new CollaborationChatAdapter(reviewedPolicy, new LittleLoopChatAdapter(reviewedPolicy, directory), readOnly)];
             var roots = new List<string>();
             if (options["TestDevelopmentPolicy"] is { Length: > 0 } grantPath)
                 AddProject(ChatStore.DeepSeekTestBotName, grantPath, legacy: true);
@@ -89,7 +102,7 @@ sealed class ChatBot : BackgroundService
                     scoped.Policy.Commands.Any(command => !command.IsTest))
                     throw new InvalidOperationException("DeepSeek grant requires a distinct, bounded project and fixed tests; host state must stay outside it.");
                 roots.Add(scoped.Root);
-                var development = policy with { Project = scoped.Root, Development = scoped.Policy };
+                var development = reviewedPolicy with { Project = scoped.Root, Development = scoped.Policy };
                 configured = [.. configured, new DeepSeekChatAdapter(launcher, arguments, harnessHome, electron,
                     scoped.Root, timeout, development, provider)];
             }
@@ -99,11 +112,11 @@ sealed class ChatBot : BackgroundService
         approvers = Names(config["ChatBot:Approvers"]);
         accessAdmins = Names(config["ChatBot:AccessAdmins"] ?? config["ChatBot:Approvers"]);
         if (operators.Count == 0 || approvers.Count == 0) throw new InvalidOperationException("Configure bot operators and approvers.");
-        memorySemantics = ChatProcedureRecall.Configure(config["ChatBot:MemorySemantics"]);
     }
 
     public override void Dispose()
     {
+        conversationModel?.Dispose();
         memorySemantics?.Dispose();
         base.Dispose();
     }
@@ -130,6 +143,10 @@ sealed class ChatBot : BackgroundService
     public bool CanOperate(string? user) => user is not null && operatorIds.Contains(user);
     public bool CanApprove(string? user) => user is not null && approverIds.Contains(user);
     public bool CanManageAccess(string user) => accessAdminIds.Contains(user);
+
+    internal async Task<bool> IsPrivateOperator(BotWork work) =>
+        work.Input.Provider is (null or ChatStore.BotName) && CanOperate(work.Owner) &&
+        await store.BotRoom(work.Room, work.Owner) is { Member: true, Installed: true, Type: "direct" };
 
     public async Task<bool> CanOperateRoom(string user, string room, string? provider = null)
     {
@@ -163,6 +180,11 @@ sealed class ChatBot : BackgroundService
             if (await store.ResolveConfiguredAccount(name) is { } account && !ChatStore.IsRobot(account.Name)) operatorIds.Add(account.Id);
         foreach (var name in approvers)
             if (await store.ResolveConfiguredAccount(name) is { } account && !ChatStore.IsRobot(account.Name)) approverIds.Add(account.Id);
+        foreach (var name in Names(config["ChatBot:HostOperators"]))
+            if (await store.ResolveConfiguredAccount(name) is { } account && !ChatStore.IsRobot(account.Name)) hostOperatorIds.Add(account.Id);
+        if (config["ChatBot:HostPairingCandidate"]?.Trim() is { Length: > 0 } candidate &&
+            await store.ResolveConfiguredAccount(candidate) is { } candidateAccount && !ChatStore.IsRobot(candidateAccount.Name))
+            pairingCandidateId = candidateAccount.Id;
         foreach (var name in accessAdmins)
             if (await store.ResolveConfiguredAccount(name) is { } account && !ChatStore.IsRobot(account.Name)) accessAdminIds.Add(account.Id);
         await LegacyWorkbenchImport.Import(store, Robot(null), config);
@@ -224,13 +246,14 @@ sealed class ChatBot : BackgroundService
 
                 while (!token.IsCancellationRequested)
                 {
-                    int questions = active.Count(item => item.Work.Kind == "question");
+                    int questions = active.Count(item => item.Work.IsAnswer);
                     bool canAsk = questions < maxConcurrentQuestions;
                     bool canRun = active.Count - questions < maxConcurrentTasks;
                     if (!canAsk && !canRun) break;
                     var next = await store.ClaimBotWork(lease, candidate =>
                     {
-                        if (candidate.Kind == "question" ? !canAsk : !canRun) return false;
+                        if (candidate.IsAnswer ? !canAsk : !canRun) return false;
+                        if (HostSettings.IsWork(candidate.Kind) && active.Any(item => HostSettings.IsWork(item.Work.Kind))) return false;
                         string? root = Workspace(candidate);
                         return root is null || !active.Any(item => item.Root is { } occupied && Overlaps(root, occupied));
                     });
@@ -243,9 +266,10 @@ sealed class ChatBot : BackgroundService
 
         string? Workspace(BotWork work)
         {
+            if (HostSettings.IsWork(work.Kind)) return null;
             var adapter = adapters.GetValueOrDefault(work.Input.Provider ?? ChatStore.BotName);
             // The default question path uses a frozen citation; ACP answers have a working directory.
-            return adapter?.ProjectRoot ?? (work.Kind == "question" ? null : files.Root);
+            return adapter?.ProjectRoot ?? (work.IsAnswer ? null : files.Root);
         }
 
         async Task ExecuteWork(BotWork work)
@@ -255,10 +279,60 @@ sealed class ChatBot : BackgroundService
                 var provider = work.Input.Provider ?? ChatStore.BotName;
                 var robot = Robot(provider);
                 var adapter = adapters[provider];
-                if (!(await store.BotRoom(work.Room, work.Owner)).Installed || !await store.RobotIsMember(work.Room, robot.Id) ||
+                var room = await store.BotRoom(work.Room, work.Owner);
+                if (!room.Installed || !room.Member || !await store.RobotIsMember(work.Room, robot.Id) ||
                     !await CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
                 {
                     await store.SetBotStatus(work, "disabled");
+                    return;
+                }
+                if (HostSettings.IsWork(work.Kind))
+                {
+                    var request = work.Kind == "timezone" ? HostTimeZone.Parse(work.Input.Text) : HostSettings.Parse(work.Input.Text);
+                    RobotOutcome result;
+                    bool candidate = pairingCandidateId == work.Owner;
+                    bool hostOperator = hostOperatorIds.Contains(work.Owner) || candidate && hostPairing.IsBound(work.Owner);
+                    bool canWrite = hostOperator || (CanOperate(work.Owner) && CanApprove(work.Owner) && policy.ApprovalMode == "auto");
+                    if (room.Type != "direct" || provider != ChatStore.BotName)
+                        result = new("refused", "请在 LittleLoop 私聊中直接说明要查看或修改的系统设置。");
+                    else if (work.Kind == "pair" && HostSettings.IsPairingMessage(work.Input.Text))
+                        result = canWrite ? new("completed", "这个账号已经可以操作这台电脑的系统设置。") :
+                            candidate ? await Pair(work, robot) :
+                            new("refused", "这个聊天账号没有本机配对邀请。");
+                    else if (request is null)
+                        result = new("refused", "没有识别出这项系统设置。你可以问我「你能修改哪些系统设置？」。");
+                    else if (candidate && !canWrite && (request.IsWrite || !CanOperate(work.Owner)) &&
+                        request is not HostSettings.Capabilities)
+                        result = new("refused", "首次使用请发「绑定这台电脑」，并在这台电脑的 Windows 桌面确认你的聊天账号。");
+                    else if (request is not HostSettings.Capabilities && !CanOperate(work.Owner) && !hostOperator)
+                        result = new("refused", "这个聊天账号还没有这台电脑的系统设置权限。");
+                    else
+                        result = await request.Execute(canWrite, token);
+                    await SendSettingResult(work, robot, result);
+                    return;
+                }
+                if (work.Kind == "chat")
+                {
+                    var input = work.Input with { History = await store.ConversationHistory(work, robot.Id) };
+                    string answer;
+                    bool failed = false;
+                    try { answer = await adapter.Answer(input, token); }
+                    catch (Exception e) when (!token.IsCancellationRequested)
+                    {
+                        log.LogWarning(e, "Conversation model could not answer {Id}", work.Id);
+                        answer = ChatConversation.Unavailable(input);
+                        failed = true;
+                    }
+                    if (!await CanOperateRoom(work.Owner, work.Room, work.Input.Provider))
+                    {
+                        await store.SetBotStatus(work, "disabled");
+                        return;
+                    }
+                    var result = await store.Send(robot.Id, robot.Name, work.Room,
+                        new(work.Id.ToString(), answer[..Math.Min(answer.Length, 12000)], work.Sequence),
+                        answeredWork: work, answerStatus: failed ? "failed" : "completed");
+                    if (result is null) await store.SetBotStatus(work, "disabled");
+                    else await Notify(result.Recipients, work.Room);
                     return;
                 }
                 if (work.Kind == "question")
@@ -318,6 +392,19 @@ sealed class ChatBot : BackgroundService
             catch (Exception e) when (!token.IsCancellationRequested)
             {
                 log.LogError(e, "Chat bot work {Id} interrupted", work.Id);
+                if (HostSettings.IsWork(work.Kind))
+                {
+                    if (work.Kind == "pair")
+                    {
+                        await SendSettingResult(work, Robot(null), new("failed", "未能完成本机配对，可以再发「绑定这台电脑」查看状态。"));
+                        return;
+                    }
+                    bool write = HostSettings.Parse(work.Input.Text)?.IsWrite == true;
+                    await SendSettingResult(work, Robot(null), write
+                        ? new("needs-reconciliation", "未能确认这次修改的结果。请查询这项设置的当前值。")
+                        : new("failed", "这次没能读取系统设置。请稍后再查一次。"));
+                    return;
+                }
                 if (work.Kind == "question")
                 {
                     await store.SetBotStatus(work, "failed", "源码问答未完成。");
@@ -325,6 +412,31 @@ sealed class ChatBot : BackgroundService
                 }
                 await store.SetBotStatus(work, "needs-reconciliation", "任务已停止，请核对执行记录。");
             }
+        }
+
+        async Task<RobotOutcome> Pair(BotWork work, Account robot)
+        {
+            string alias = config["ChatBot:HostPairingCandidate"]!.Trim();
+            var current = await store.ResolveConfiguredAccount(alias);
+            if (current?.Id != work.Owner) return new("refused", "这个聊天账号没有本机配对邀请。");
+            return await hostPairing.Confirm(work.Owner, current.Name, token, async () =>
+                await store.ResolveConfiguredAccount(alias) is { } account && account.Id == work.Owner && account.Name == current.Name &&
+                await store.ReadBotFriendAccess(work.Owner, robot.Id, work.Room) == BotFriendAccessState.Active &&
+                await store.RobotIsMember(work.Room, robot.Id) &&
+                await store.BotRoom(work.Room, work.Owner) is { Member: true, Installed: true, Type: "direct" });
+        }
+
+        async Task SendSettingResult(BotWork work, Account robot, RobotOutcome outcome)
+        {
+            if (!await CanOperateRoom(work.Owner, work.Room))
+            {
+                await store.SetBotStatus(work, "disabled");
+                return;
+            }
+            var sent = await store.Send(robot.Id, robot.Name, work.Room,
+                new(work.Id.ToString(), outcome.Report!, work.Sequence), answeredWork: work, answerStatus: outcome.Status);
+            if (sent is null) await store.SetBotStatus(work, "disabled");
+            else await Notify(sent.Recipients, work.Room);
         }
     }
 

@@ -91,7 +91,7 @@ dotnet run --no-build --project src/LittleLoop.Cli -- replay trace.json
 
 [Chat SQLite 适配](docs/52-chat-sqlite.md)提供不依赖 MySQL 服务的本地单实例选项，MySQL 仍为默认。[普通消息工作承诺](docs/53-chat-commitments.md)以显式启用的私聊模拟执行器验证接受、修订、暂停、取消、替换和迟到回执边界；尚未连接真实开发工具中断。
 
-[私聊真实开发任务](docs/54-private-development-work.md)复用真实机器人的消息收件箱与开发宿主，支持普通消息创建、查询、补充、暂停、恢复和取消；与上述模拟入口独立。
+[LittleLoop 私聊](docs/54-private-development-work.md)可以直接提问、接着上一句追问，或交代项目修改。私聊开发任务支持查询、补充、暂停、恢复和取消。Windows 宿主可以查看和修改时区、关屏与睡眠超时、资源管理器的隐藏文件与扩展名显示，以及当前桌面账号的应用深浅色偏好。单独配置 `ChatBot__HostOperators` 可将这些系统设置权限授予已有私聊访问权的账号。
 
 [聊天平台扩展](docs/27-chat-phase-d.md)增加源码审阅机器人、群话题和频道订阅广播。
 

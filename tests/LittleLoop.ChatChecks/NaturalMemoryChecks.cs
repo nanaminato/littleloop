@@ -44,7 +44,7 @@ internal static class NaturalMemoryChecks
         ChatMessage Reply(ChatMessage source) => replies.Last(m => m.RoomId == source.RoomId && m.ReplyTo == source.Sequence);
         async Task<BotWork> TaskFor(string objective, string? to = null, Account? actor = null, bool natural = false)
         {
-            string prefix = natural ? "" : "任务：";
+            string prefix = natural ? "" : "/task ";
             var message = await Say((to == group.Id ? "@littleloop " : "") + prefix + objective, to: to, actor: actor);
             var card = await store.FindMessage(message.RoomId, message.Sequence, (actor ?? owner).Id);
             return await store.ClaimBotWork(lease, w => w.Id == card?.Card?.TaskId)
@@ -131,7 +131,7 @@ internal static class NaturalMemoryChecks
         await Complete(await TaskFor("修复登录超时问题"));
         var discussion = await Say("如果把另一份样稿复制到存档目录会怎样？");
         check((await store.FindMessage(room.Id, discussion.Sequence, owner.Id))?.Card is null &&
-            await store.ClaimBotWork(lease, w => w.Room == room.Id) is null,
+            await store.ClaimBotWork(lease, w => w.Room == room.Id && w.Goal is not null) is null,
             "discussing the same document operation does not create a task");
         var neutral = await TaskFor("把另一份样稿复制到存档目录", natural: true);
         check((await store.PrepareGoalMemory(neutral, files)).LessonHints.Any(l => l.SourceSequence == source.Sequence),

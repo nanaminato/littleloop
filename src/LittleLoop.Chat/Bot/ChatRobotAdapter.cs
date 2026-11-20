@@ -16,7 +16,8 @@ interface IChatRobotAdapter
 
 sealed record RobotOutcome(string Status, string? Report = null);
 
-sealed class LittleLoopChatAdapter(AgentHostPolicy policy, string directory) : IChatRobotAdapter
+sealed class LittleLoopChatAdapter(AgentHostPolicy policy, string directory, Func<BotWork, Task<bool>>? canUseProjectGrants = null,
+    ISemanticModelClient? conversationModel = null) : IChatRobotAdapter
 {
     private static readonly JsonSerializerOptions MemoryPromptJson = new(JsonSerializerDefaults.Web)
     {
@@ -25,14 +26,20 @@ sealed class LittleLoopChatAdapter(AgentHostPolicy policy, string directory) : I
     public string Name => ChatStore.BotName;
     public bool SupportsApproval => true;
     public Task<string> Answer(BotInput input, CancellationToken token) =>
-        AgentConversationSupport.Answer(input.Text, input.Source!, policy.Executable, directory, null, token);
+        input.Source is { } source
+            ? AgentConversationSupport.Answer(input.Text, source, policy.Executable, directory, null, token)
+            : ChatConversation.Answer(input, conversationModel, policy.Executable, directory, token);
 
     public async Task<RobotOutcome> Run(BotWork work, string folder, Func<AgentApprovalRequest, CancellationToken, Task> onApproval, CancellationToken token,
         Func<CancellationToken, Task<bool>>? shouldYield = null)
     {
         var host = new AgentDelegationHost(folder, onApproval, shouldYield);
-        if (!File.Exists(Path.Combine(folder, "agent.json"))) host.Create(policy);
-        var state = await host.RunAsync(BuildPrompt(work), token);
+        string mode = policy.ApprovalMode;
+        if (mode == "auto" && (canUseProjectGrants is null || !await canUseProjectGrants(work))) mode = "user";
+        if (!File.Exists(Path.Combine(folder, "agent.json"))) host.Create(policy with { ApprovalMode = mode });
+        AgentHostState state;
+        try { state = await host.RunAsync(BuildPrompt(work), token, testClient: null, approvalModeLimit: mode, currentDevelopment: policy.Development); }
+        catch (DevelopmentGrantChangedException e) { return new("needs-reconciliation", e.Message); }
         string? report = state.Turns.LastOrDefault()?.Report;
         if (report?.Length > 12000) report = report[..12000];
         return new(work.Goal is not null && state.Status == "needs-revision" ? "waiting-input" : state.Status,

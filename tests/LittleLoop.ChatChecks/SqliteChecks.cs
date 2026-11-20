@@ -85,6 +85,15 @@ static class SqliteChecks
             await Initialize(reopened);
             var legacy = await reopened.ReadBotWork(legacyId, alice.Id);
             Check(legacy is { Status: "completed", Goal: null, Input.Text: "Legacy task" }, "upgrade preserves legacy work without a continuous goal");
+            foreach (string kind in new[] { "timezone", "setting", "pair" })
+            {
+                Guid interrupted = Guid.NewGuid();
+                await reopened.Send(alice.Id, alice.Name, room.Id, new(interrupted.ToString(), "interrupted host request", null),
+                    job: new(interrupted, room.Id, alice.Id, 0, kind, "running", new("interrupted host request")));
+                await reopened.RecoverBotWork(nextLease);
+                Check((await reopened.ReadBotWork(interrupted, alice.Id))?.Status == "needs-reconciliation" &&
+                    await reopened.ClaimBotWork(nextLease) is null, "service restart never replays interrupted host work: " + kind);
+            }
             integrity.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('chat_goal_inbox','chat_goal_events','chat_goal_outbox')";
             Check(Convert.ToInt32(await integrity.ExecuteScalarAsync()) == 3, "upgrade adds the continuous goal tables");
             Console.WriteLine("SQLite Chat checks passed: schema replay, accounts, rooms, messages, authorization, idempotency, settings, devices, password CAS, leases, restart, concurrency, notification queues, integrity/indexes.");

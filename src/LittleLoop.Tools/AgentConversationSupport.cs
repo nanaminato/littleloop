@@ -10,6 +10,24 @@ public static class AgentConversationSupport
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    public static string ReportText(string report)
+    {
+        if (!report.AsSpan().TrimStart().StartsWith("{")) return report;
+        try
+        {
+            using var document = JsonDocument.Parse(report);
+            var root = document.RootElement;
+            // Other report schemas can carry additional evidence, e.g. a verification matrix.
+            if (root.EnumerateObject().Count() != 2 ||
+                !root.TryGetProperty("summary", out var summary) || summary.ValueKind != JsonValueKind.String ||
+                !root.TryGetProperty("questions", out var questions) || questions.ValueKind != JsonValueKind.Array ||
+                questions.EnumerateArray().Any(q => q.ValueKind != JsonValueKind.String)) return report;
+            return string.Join("\n\n", questions.EnumerateArray().Select(q => q.GetString())
+                .Prepend(summary.GetString()).Where(line => !string.IsNullOrWhiteSpace(line)));
+        }
+        catch (JsonException) { return report; }
+    }
+
     public static SourceCitation Cite(ProjectFiles files, string path, int start, int end)
     {
         if (start < 1 || end < start || end - start >= 80) throw new ArgumentException("每次引用最多 80 行。");
@@ -84,7 +102,7 @@ public static class AgentConversationSupport
             changes[path] = changes.GetValueOrDefault(path) + "- " + args["oldText"] + "\n+ " + args["newText"] + "\n";
         }
         return new { state.Status, state.ThreadId, approval, receipts, changes, writableFiles = state.Policy.Development?.WritableFiles,
-            turns = state.Turns.Select(t => new { t.Status, t.Report, t.Issues }) };
+            turns = state.Turns.Select(t => new { t.Status, report = ReportText(t.Report), t.Issues }) };
     }
 
     public static bool IsApprovalPending(string folder, string nonce) =>

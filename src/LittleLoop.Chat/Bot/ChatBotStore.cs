@@ -7,10 +7,15 @@ using MySqlConnector;
 
 sealed record MessageCard(string Kind, SourceCitation? Source = null, Guid? TaskId = null);
 sealed record BotInput(string Text, string? Anchor = null, SourceCitation? Source = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Provider = null)
+{
+    [JsonIgnore] public ChatExchange[] History { get; init; } = [];
+}
+sealed record ChatExchange(string User, string Assistant, bool Quoted);
 sealed record BotWork(Guid Id, string Room, string Owner, long Sequence, string Kind, string Status, BotInput Input,
     string? Error = null, string? Output = null, ContinuousGoal? Goal = null)
 {
+    [JsonIgnore] public bool IsAnswer => Kind is "question" or "chat";
     [JsonIgnore]
     public GoalExperienceHint? ExperienceHint { get; init; }
     [JsonIgnore]
@@ -91,6 +96,30 @@ sealed partial class ChatStore
     {
         await using var db = await Open();
         return await IsMember(db, null, room, robot);
+    }
+
+    public async Task<ChatExchange[]> ConversationHistory(BotWork work, string robot)
+    {
+        await using var db = await Open();
+        await using var cmd = Command(db, null, """
+            SELECT w.seq,question.body,answer.body,
+                   CASE WHEN current_msg.reply_to IN (question.seq,answer.seq) THEN 1 ELSE 0 END AS quoted
+            FROM chat_bot_work w
+            JOIN chat_messages question ON question.room_id=w.room_id AND question.seq=w.seq AND question.sender_id=w.owner_id
+            JOIN chat_messages answer ON answer.room_id=w.room_id AND answer.reply_to=w.seq AND answer.sender_id=@robot AND answer.client_id=w.id
+            JOIN chat_messages current_msg ON current_msg.room_id=w.room_id AND current_msg.seq=@seq
+            JOIN chat_members m ON m.room_id=w.room_id AND m.user_id=@owner
+            WHERE w.room_id=@room AND w.owner_id=@owner AND w.kind='chat' AND w.status='completed' AND w.seq<@seq
+                  AND NOT question.deleted AND NOT answer.deleted
+            ORDER BY quoted DESC,w.seq DESC LIMIT 6
+            """, ("room", work.Room), ("owner", work.Owner), ("robot", robot), ("seq", work.Sequence));
+        var history = new List<(long Seq, ChatExchange Exchange)>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            history.Add((reader.GetInt64(0), new(Excerpt(reader.GetString(1)), Excerpt(reader.GetString(2)), reader.GetBoolean(3))));
+        return history.OrderBy(row => row.Seq).Select(row => row.Exchange).ToArray();
+
+        static string Excerpt(string text) => text.Length <= 1200 ? text : text[..1200] + "…";
     }
 
     internal static async Task AddMember(DbConnection db, DbTransaction tx, string room, string robot)
@@ -174,7 +203,23 @@ sealed partial class ChatStore
 
     public async Task RecoverBotWork(DbConnection lease)
     {
+        // A settings change may have reached Windows even when its reply never committed.
+        var interrupted = new List<(string Id, string Room, long Sequence)>();
+        await using (var lookup = Command(lease, null, "SELECT id,room_id,seq FROM chat_bot_work WHERE kind IN ('setting','timezone','pair') AND status='running'"))
+        await using (var reader = await lookup.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) interrupted.Add((reader.GetString(0), reader.GetString(1), reader.GetInt64(2)));
+        foreach (var work in interrupted)
+        {
+            await using var tx = await lease.BeginTransactionAsync();
+            await LockGoalRoom(lease, tx, work.Room);
+            await using var mark = Command(lease, tx,
+                "UPDATE chat_bot_work SET status='needs-reconciliation' WHERE id=@id AND status='running'", ("id", work.Id));
+            if (await mark.ExecuteNonQueryAsync() == 1)
+                await AddGoalNotice(lease, tx, work.Room, work.Sequence, "处理这项系统设置时服务重启了。请查询这项设置的当前值，核对结果。", null);
+            await tx.CommitAsync();
+        }
         await using var cmd = Command(lease, null, """
+            UPDATE chat_bot_work SET status='queued' WHERE status='running' AND kind='chat';
             UPDATE chat_bot_work SET status='needs-reconciliation', error='进程曾中断，请核对执行记录。'
             WHERE status='running' AND goal IS NULL
             """);
@@ -187,7 +232,10 @@ sealed partial class ChatStore
         string limit = canDispatch is null ? " LIMIT 1" : "";
         await using (var select = Command(lease, null, """
             SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal
-            FROM chat_bot_work WHERE status='queued' ORDER BY created,id
+            FROM chat_bot_work w WHERE status='queued' AND (kind NOT IN ('chat','setting','timezone','pair') OR NOT EXISTS(
+                SELECT 1 FROM chat_bot_work older WHERE older.room_id=w.room_id AND older.owner_id=w.owner_id
+                AND older.kind IN ('chat','setting','timezone','pair') AND older.seq<w.seq AND older.status IN ('queued','running')))
+            ORDER BY created,id
             """ + limit))
         {
             await using var reader = await select.ExecuteReaderAsync();

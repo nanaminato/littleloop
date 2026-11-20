@@ -189,7 +189,8 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
     }
 
     public async Task<SendResult?> Send(string user, string name, string room, PostMessage input, ForwardMessage? forward = null,
-        MessageCard? card = null, BotWork? job = null, string? goalRobot = null, bool legacyBotOperator = true)
+        MessageCard? card = null, BotWork? job = null, string? goalRobot = null, bool legacyBotOperator = true,
+        BotWork? answeredWork = null, string answerStatus = "completed")
     {
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -204,6 +205,22 @@ sealed partial class ChatStore(string connection, bool fcmEnabled, string provid
             latest = reader.GetInt64(0);
         }
         if (!await IsMember(db, tx, room, user)) return null;
+        if (answeredWork is not null)
+        {
+            if ((answeredWork.Kind != "chat" && !HostSettings.IsWork(answeredWork.Kind)) ||
+                answerStatus is not ("completed" or "failed" or "refused" or "needs-reconciliation" or "needs-input"))
+                throw new ArgumentException("Invalid reply job or result.");
+            // Commit the reply and its job's result together. Room locking also orders
+            // delivery against a simultaneous revocation, which cancels outstanding jobs.
+            await using var finish = Command(db, tx, """
+                UPDATE chat_bot_work SET status=@status WHERE id=@work AND kind=@kind AND status='running'
+                AND room_id=@room AND owner_id=@owner AND seq=@seq
+                AND EXISTS (SELECT 1 FROM chat_bot_rooms b WHERE b.room_id=@room AND b.enabled)
+                AND EXISTS (SELECT 1 FROM chat_members m WHERE m.room_id=@room AND m.user_id=@owner)
+                """, ("status", answerStatus), ("work", answeredWork.Id.ToString()), ("kind", answeredWork.Kind),
+                ("owner", answeredWork.Owner), ("room", room), ("seq", answeredWork.Sequence));
+            if (await finish.ExecuteNonQueryAsync() != 1) return null;
+        }
         if (roomType == "channel" && owner != user &&
             !await HasChannelRight(db, tx, room, user, ChannelRights.Publish))
             throw new ChannelWriteDeniedException();

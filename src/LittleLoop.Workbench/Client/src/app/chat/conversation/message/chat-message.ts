@@ -19,6 +19,12 @@ export class ChatMessageView {
 
   readonly channel = computed(() => this.store.currentRoom()?.type === 'channel' ? this.store.currentRoom() : undefined);
   readonly mine = computed(() => !this.channel() && this.message().sender === this.store.user());
+  readonly visibleCard = computed(() => {
+    const { card, sequence } = this.message();
+    if (card?.kind === 'task' && card.taskId && !card.source &&
+        this.store.latestTaskMessage().get(card.taskId) !== sequence) return null;
+    return card;
+  });
   canChange(flag: number) {
     const room = this.store.currentRoom();
     return !this.message().card && !this.message().discussionRoot && (room?.type === 'channel'

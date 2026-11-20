@@ -182,7 +182,8 @@ static class ChatBotEndpoints
                 ? AgentConversationSupport.Details(bot.Folder(job), canApprove && job.Status == "running") : null;
             return Results.Ok(new { job.Id, job.Status, job.Error, canApprove, execution,
                 goal = job.Goal,
-                provider = job.Input.Provider ?? ChatStore.BotName, output = seeEvidence ? job.Output : null });
+                provider = job.Input.Provider ?? ChatStore.BotName,
+                output = seeEvidence && job.Output is not null ? AgentConversationSupport.ReportText(job.Output) : null });
         });
 
         api.MapPost("/work/{id:guid}/decision", async (Guid id, BotDecision input, ClaimsPrincipal user) =>

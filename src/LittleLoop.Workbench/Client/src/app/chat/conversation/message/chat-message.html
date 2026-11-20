@@ -20,7 +20,7 @@
       } @else {
         @if (message().forwardedFrom) { <small class="forwarded">{{ store.t('转发自') }} {{ message().forwardedFrom }}</small> }
         @if (message().text) { <p [id]="'message-' + message().sequence" class="text">{{ message().text }}</p> }
-        @if (message().card; as card) { <chat-bot-card [card]="card" /> }
+        @if (visibleCard(); as card) { <chat-bot-card [card]="card" /> }
         @if (message().attachment; as file) {
           @if (file.mime.startsWith('image/')) {
             @if (store.showImage(message())) {

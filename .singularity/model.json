@@ -3126,6 +3126,87 @@
         "REF-CHAT-LITTLELOOP-FRIEND-ACCESS",
         "REF-CHAT-LITTLELOOP-FRIEND-ACCESS-HTTP"
       ]
+    },
+    {
+      "id": "INTENT-CHAT-DIRECT-HANDLING",
+      "type": "intent",
+      "title": "按用户的自然表达直接处理私聊请求",
+      "body": "在普通私聊中理解并回应用户的实际目标。用户希望像人对话一样直接处理，不必先把请求改写成特定任务命令。",
+      "references": [
+        "REF-CHAT-CONTINUOUS-WORK",
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "actor": "Human",
+      "attributes": {},
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "authorization_basis": "2026-11-19 用户在聊天中明确要求“应该像人对话一样直接处理”以及“默认littleloop 机器人就是要拥有所有的权限（包括修改计算机的任何配置）”，并提出可以添加提升为管理员的逻辑，执行前可能再询问用户。"
+    },
+    {
+      "id": "INTENT-LITTLELOOP-DEFAULT-MACHINE-PERMISSIONS",
+      "type": "intent",
+      "title": "默认赋予 LittleLoop 广泛的机器操作权限",
+      "body": "用户希望机器人默认拥有全部操作权限，包括修改计算机的任何配置，也提出可增加管理员提升逻辑。机器人可以在执行前再次询问用户。面向整台计算机的无限制操作仍属待实现目标。",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "actor": "Human",
+      "attributes": {},
+      "authorization": "confirmed",
+      "delivery": "planned",
+      "verification": "unverified",
+      "authorization_basis": "2026-11-19 用户在聊天中明确要求“应该像人对话一样直接处理”以及“默认littleloop 机器人就是要拥有所有的权限（包括修改计算机的任何配置）”，并提出可以添加提升为管理员的逻辑，执行前可能再询问用户。"
+    },
+    {
+      "id": "DECISION-CHAT-OPERATOR-HOST-AUTHORITY",
+      "type": "decision",
+      "title": "区分机器人操作能力、发起人权限和操作系统授权",
+      "body": "私聊根据用户请求选择对话或现有执行能力。配置的操作员在与默认 LittleLoop 的私聊中可使用宿主预授的项目权限。仅凭好友身份发起的任务和群组任务继续独立审批。机器配置操作须有对应的宿主能力，需要管理员权限时由操作系统向本地用户请求授权。具体交付及验收范围单独记录。 主机器人私聊在执行时核验发起人仍有访问权。ChatBot:HostOperators 可单独指定操作已接入 Windows 设置的账号，也可配置一个候选账号，通过当前桌面用户确认后绑定账号 ID。项目操作员与审批人角色独立配置。用户级设置只作用于身份已核实的登录桌面。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "not_applicable",
+      "verification": "not_applicable",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK",
+        "REF-CHAT-LITTLELOOP-FRIEND-ACCESS"
+      ],
+      "attributes": {
+        "rationale": "当前消息指定了机器人期望拥有的能力，未明确把操作员和管理员的权限转授给每位聊天用户。已有好友接入意图明确要求独立审批。"
+      }
+    },
+    {
+      "id": "CAP-CHAT-WINDOWS-HOST-SETTINGS",
+      "type": "capability",
+      "title": "私聊管理 Windows 时区、电源超时和桌面偏好",
+      "body": "私聊通过明确的中文请求查看或修改时区、当前电源计划的屏幕和睡眠超时，以及登录用户的隐藏文件、文件扩展名和应用主题偏好。宿主核对目标值并区分结果和待核对情况。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "passed",
+      "verification_basis": [
+        "EVIDENCE-CHAT-WINDOWS-HOST-SETTINGS"
+      ],
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "attributes": {}
+    },
+    {
+      "id": "EVIDENCE-CHAT-WINDOWS-HOST-SETTINGS",
+      "type": "evidence",
+      "title": "Windows 设置专项回归与 5190 部署私聊只读验证",
+      "body": "核对已接入的时区、电源和用户桌面设置，以及候选账号的本地确认。受控写入和确认分支与实际 Windows 只读结果分别记录。",
+      "actor": "AI",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "references": [
+        "REF-PRIVATE-DEVELOPMENT-WORK"
+      ],
+      "attributes": {
+        "observation": "2026-11-20，时区 27 项、电源 34 项、桌面 25 项、绑定 21 项检查通过。真实桌面账号的隐藏文件、扩展名和应用主题查询与独立读取的 Windows 设置全部一致。真实系统写入、UAC 和真人点击绑定窗口未在该轮执行。专项记录位于 data/desktop-settings-qa/focused-checks.log 和 data/desktop-settings-qa/read-checks.json。 同日完整回归通过 SQLite 聊天目标 250 项和核心 357 项检查，详见 data/host-settings-checks.log 和 data/host-core-checks.log。已部署的 5190 服务在登录后的私聊返回能力清单、时区、电源计划的四项闲置超时、隐藏文件、扩展名与应用主题，六次请求均通过。部署验证只读，服务哈希和结果保存于 data/continuous-deployment/host-chat-deployment-20261120.json。"
+      }
     }
   ],
   "relations": [
@@ -4268,6 +4349,49 @@
       "type": "depends_on",
       "source": "CAP-CHAT-LITTLELOOP-FRIEND-ACCESS",
       "target": "CAP-CHAT-CONTINUOUS-S1"
+    },
+    {
+      "id": "REL-DIRECT-HANDLING-GOAL",
+      "type": "decomposes",
+      "source": "GOAL-CONTINUOUS-COLLABORATOR",
+      "target": "INTENT-CHAT-DIRECT-HANDLING"
+    },
+    {
+      "id": "REL-MACHINE-PERMISSIONS-GOAL",
+      "type": "decomposes",
+      "source": "GOAL-CONTINUOUS-COLLABORATOR",
+      "target": "INTENT-LITTLELOOP-DEFAULT-MACHINE-PERMISSIONS"
+    },
+    {
+      "id": "REL-CHAT-AUTHORITY-DEFAULT-PERMISSIONS",
+      "type": "derived_from",
+      "source": "DECISION-CHAT-OPERATOR-HOST-AUTHORITY",
+      "target": "INTENT-LITTLELOOP-DEFAULT-MACHINE-PERMISSIONS"
+    },
+    {
+      "id": "REL-CHAT-AUTHORITY-FRIEND-SCOPE",
+      "type": "derived_from",
+      "source": "DECISION-CHAT-OPERATOR-HOST-AUTHORITY",
+      "target": "INTENT-CHAT-LITTLELOOP-FRIEND-ACCESS"
+    },
+    {
+      "id": "REL-CHAT-PERMISSION-SCOPE-TENSION",
+      "type": "conflicts_with",
+      "source": "INTENT-LITTLELOOP-DEFAULT-MACHINE-PERMISSIONS",
+      "target": "INTENT-CHAT-LITTLELOOP-FRIEND-ACCESS",
+      "rationale": "若将“默认所有权限”理解为对任意新好友都自动批准工具操作，会与已确认的好友逐项审批要求冲突。当前工程决定保留好友的独立审批。"
+    },
+    {
+      "type": "implements",
+      "source": "CAP-CHAT-WINDOWS-HOST-SETTINGS",
+      "id": "REL-WINDOWS-HOST-SETTINGS-APPLY-AUTHORITY",
+      "target": "DECISION-CHAT-OPERATOR-HOST-AUTHORITY"
+    },
+    {
+      "type": "supports",
+      "source": "EVIDENCE-CHAT-WINDOWS-HOST-SETTINGS",
+      "id": "REL-WINDOWS-HOST-SETTINGS-EVIDENCE",
+      "target": "CAP-CHAT-WINDOWS-HOST-SETTINGS"
     }
   ],
   "references": [
