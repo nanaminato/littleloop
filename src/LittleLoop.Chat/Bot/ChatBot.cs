@@ -149,8 +149,10 @@ sealed class ChatBot : BackgroundService
         foreach (var work in await store.InterruptedDispatches())
         {
             var dispatch = work.Input.Loop!.Dispatch!;
-            var saved = NativeBotHarness.RecoverReceipt(Session(work, dispatch), dispatch.Id);
-            if (saved is not null) await store.SaveHarnessReceipt(work, saved);
+            var recovery = await RecoverDispatch(dispatch, Session(work, dispatch), token);
+            if (recovery.Receipt is { } receipt) await store.SaveHarnessReceipt(work, receipt);
+            else if (await store.GoalShouldYield(work))
+                await store.SaveHarnessReceipt(work, new("interrupted", null, "本轮指令尚未发送，目标已变更。", []));
             else active.Add((work, Workspace(work), ExecuteWork(work)));
         }
         Task cognition = Task.CompletedTask;
@@ -194,7 +196,7 @@ sealed class ChatBot : BackgroundService
                         if (candidate.IsAnswer ? !canAsk : !canRun) return false;
                         string? root = Workspace(candidate);
                         return root is null || !active.Any(item => item.Root is { } occupied && Overlaps(root, occupied));
-                    });
+                    }, name => harnesses.GetValueOrDefault(name)?.RecoveryKey);
                     if (next is null) break;
                     active.Add((next, Workspace(next), ExecuteWork(next)));
                 }
@@ -282,6 +284,7 @@ sealed class ChatBot : BackgroundService
                 if (work.Input.Loop?.Dispatch is { } dispatch)
                 {
                     HarnessReceipt receipt;
+                    bool sending = false;
                     try
                     {
                         if (!harnesses.TryGetValue(dispatch.Harness, out var harness))
@@ -295,13 +298,15 @@ sealed class ChatBot : BackgroundService
                                 instruction += "\n来自用户的历史做法及已验证文件线索（当前要求优先）\n" +
                                     ChatStore.ToJson(new { recalled.LessonHints, recalled.ExperienceHint });
                         }
+                        sending = true;
                         receipt = await harness.SendAsync(session, dispatch.Id, instruction,
                             async _ => await store.GoalShouldYield(work) || !await CanOperateRoom(work.Owner, work.Room),
                             token, PrivateWorkspace(work));
                     }
-                    catch (Exception e) when (!token.IsCancellationRequested)
+                    catch (Exception e) when (!token.IsCancellationRequested && e is not OutOfMemoryException)
                     {
-                        receipt = new("failed", null, e.Message, []);
+                        receipt = sending ? new("uncertain", null, "Harness 调用中断，执行结果待核对：" + e.Message, [])
+                            : new("failed", null, e.Message, []);
                     }
                     await store.SaveHarnessReceipt(work, receipt);
                     return;
@@ -326,6 +331,30 @@ sealed class ChatBot : BackgroundService
             }
         }
 
+    }
+
+    private async Task<HarnessRecovery> RecoverDispatch(BotDispatch dispatch, string session, CancellationToken token)
+    {
+        harnesses.TryGetValue(dispatch.Harness, out var harness);
+        if (harness is not null && dispatch.RecoveryKey == harness.RecoveryKey)
+        {
+            try { return await harness.RecoverAsync(session, dispatch.Id, token); }
+            catch (Exception error) when (!token.IsCancellationRequested && error is not OutOfMemoryException)
+            {
+                log.LogWarning(error, "Unable to recover dispatch {Dispatch} from harness {Harness}", dispatch.Id, harness.Name);
+                return HarnessRecovery.Unknown($"无法从 Harness {harness.Name} 核对本轮指令。");
+            }
+        }
+
+        // Old claims had only a name. A positive journal entry identifies their original execution protocol.
+        if (dispatch.RecoveryKey == NativeBotHarness.JournalKey || dispatch is { RecoveryKey: null, Harness: "codex" or "deepseek" })
+        {
+            var evidence = NativeBotHarness.ReadJournal(session, dispatch.Id);
+            if (evidence == HarnessRecovery.NotSubmitted && harness?.RecoveryKey != NativeBotHarness.JournalKey)
+                return HarnessRecovery.FromReceipt(new("interrupted", null, "原生指令尚未发送，原适配器已移除。", []));
+            return evidence ?? HarnessRecovery.Unknown($"缺少 Harness {dispatch.Harness} 原生派发的恢复证据。");
+        }
+        return HarnessRecovery.Unknown($"Harness {dispatch.Harness} 的原恢复来源已不可用。");
     }
 
     public async Task<ChatMessage?> Queue(string room, string user, string name, Guid id, long? anchor, string kind, BotInput input)

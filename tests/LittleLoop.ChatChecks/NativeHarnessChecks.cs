@@ -47,17 +47,17 @@ static class NativeHarnessChecks
             journal.Sending();
             journal.Tool("work", "commandExecution", "failed", "before disconnect");
             int calls = protocol.Calls.Count;
-            var recovered = NativeBotHarness.RecoverReceipt(session, lost);
+            var recovered = NativeBotHarness.ReadJournal(session, lost)?.Receipt;
             var uncertain = await restarted.SendAsync(session, lost, "unacknowledged", null, default);
             check(recovered is { Status: "uncertain", Tools.Length: 1 } && uncertain.Status == "uncertain" && protocol.Calls.Count == calls,
                 "recovery retains pre-crash tool results and never resends a submitted prompt");
             var corrupt = Guid.NewGuid();
             File.WriteAllText(Path.Combine(session, $"{corrupt:N}.json"), "{truncated");
-            check(NativeBotHarness.RecoverReceipt(session, corrupt)?.Status == "uncertain" &&
+            check(NativeBotHarness.ReadJournal(session, corrupt)?.Receipt?.Status == "uncertain" &&
                 harness.GetStatus(session, corrupt).Status == "uncertain" &&
-                NativeBotHarness.RecoverReceipt(session, firstId)?.Status == "returned" &&
-                NativeBotHarness.RecoverReceipt(session, Guid.NewGuid()) is null,
-                "offline recovery distinguishes unreadable, completed and never-submitted dispatches");
+                NativeBotHarness.ReadJournal(session, firstId)?.Receipt?.Status == "returned" &&
+                NativeBotHarness.ReadJournal(session, Guid.NewGuid()) is null,
+                "offline recovery distinguishes unreadable, completed and missing dispatch records");
 
             var disconnect = new Protocol { DisconnectAfterToolStart = true };
             var broken = await new FixtureHarness(project, disconnect).SendAsync(Path.Combine(directory, "broken"),
@@ -89,7 +89,7 @@ static class NativeHarnessChecks
             Observe("65", "failed");
             Observe("0", "failed");
             overflow.Finish("returned", "finished");
-            var summary = NativeBotHarness.RecoverReceipt(session, overflowId)!.SummarizeTools();
+            var summary = NativeBotHarness.ReadJournal(session, overflowId)!.Receipt!.SummarizeTools();
             check(overflowNames.Count == 64 && summary is { Recorded: 64, ReportedCompleted: 63, ReportedFailed: 1,
                     Truncated: true, FirstFailure.ToolId: "0", FirstOmittedFailure: { ToolId: "65", Detail.Length: 256 } },
                 "reopened ACP journal preserves bounded failure evidence on both sides of the native tool cap");
@@ -97,7 +97,7 @@ static class NativeHarnessChecks
             var legacyId = Guid.NewGuid();
             File.WriteAllText(Path.Combine(session, $"{legacyId:N}.json"),
                 """{"Status":"returned","SessionId":"old","Report":"done","Tools":[]}""");
-            var legacy = NativeBotHarness.RecoverReceipt(session, legacyId);
+            var legacy = NativeBotHarness.ReadJournal(session, legacyId)?.Receipt;
             var observation = ChatStore.FromJson<BotObservation>("""{"kind":"HarnessReceipt","text":"done"}""");
             check(legacy?.SummarizeTools() is { Recorded: 0, Truncated: null } &&
                 observation is { ToolEvidence: null, DispatchId: null }, "older journals and SQL observations retain unknown coverage");

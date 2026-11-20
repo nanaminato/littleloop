@@ -4,15 +4,32 @@ using LittleLoop.Core;
 interface IBotHarness
 {
     string Name { get; }
+    // Identifies the durable lookup namespace. Change it if the backing ledger or its interpretation changes.
+    string RecoveryKey => GetType().FullName!;
     string Description => Name;
     string? ProjectRoot { get; }
     Task<HarnessReceipt> SendAsync(string sessionDirectory, Guid dispatchId, string instruction,
         Func<CancellationToken, Task<bool>>? shouldInterrupt, CancellationToken token, string? workspace = null);
+    // Recover the original dispatch without submitting work. Only positive evidence permits resubmission.
+    Task<HarnessRecovery> RecoverAsync(string sessionDirectory, Guid dispatchId, CancellationToken token) =>
+        Task.FromResult(HarnessRecovery.Unknown($"Harness {Name} 未提供本轮指令的恢复记录。"));
     HarnessRunState GetStatus(string sessionDirectory, Guid dispatchId);
     void Interrupt(string sessionDirectory, Guid dispatchId);
 }
 
 sealed record HarnessRunState(string Status, string? SessionId = null);
+sealed class HarnessRecovery
+{
+    private HarnessRecovery(HarnessReceipt? receipt) => Receipt = receipt;
+    public HarnessReceipt? Receipt { get; }
+    public static HarnessRecovery NotSubmitted { get; } = new(null);
+    public static HarnessRecovery FromReceipt(HarnessReceipt receipt) => receipt.Status switch
+    {
+        "returned" or "failed" or "interrupted" or "uncertain" => new(receipt),
+        _ => throw new InvalidDataException("Harness recovery requires a final or uncertain receipt.")
+    };
+    public static HarnessRecovery Unknown(string reason) => new(new("uncertain", null, reason, []));
+}
 sealed record HarnessToolResult(string Id, string Kind, string Status, string Detail)
 {
     public bool ReportsFailure() => Status.ToLowerInvariant() is "failed" or "error" or "declined" or "denied";
@@ -34,6 +51,8 @@ sealed record HarnessReceipt(string Status, string? SessionId, string Report, Ha
 // Journal submission before writing to the pipe. A lost reply must never replay side effects.
 abstract class NativeBotHarness : IBotHarness
 {
+    internal const string JournalKey = "littleloop/native-dispatch-journal/v1";
+    public string RecoveryKey => JournalKey;
     public abstract string Name { get; }
     public virtual string Description => Name;
     public abstract string ProjectRoot { get; }
@@ -44,7 +63,7 @@ abstract class NativeBotHarness : IBotHarness
         string directory = Directory.CreateDirectory(sessionDirectory).FullName;
         var journal = new HarnessTurn(directory, dispatchId, shouldInterrupt);
         using var lease = await LockSession(directory, token);
-        if (Recover(journal) is { } prior) return prior;
+        if (ReadDispatch(journal)?.Receipt is { } prior) return prior;
         try
         {
             string workingDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workspace ?? ProjectRoot));
@@ -73,39 +92,48 @@ abstract class NativeBotHarness : IBotHarness
     protected abstract Task<HarnessReceipt> Run(string directory, string workspace, bool isolated,
         string instruction, HarnessTurn turn, CancellationToken token);
 
+    public Task<HarnessRecovery> RecoverAsync(string sessionDirectory, Guid dispatchId, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        // A claimed dispatch may reference a moved or lost data directory; an absent file cannot attest to submission.
+        return Task.FromResult(ReadJournal(sessionDirectory, dispatchId) ??
+            HarnessRecovery.Unknown("本轮原生派发的日志缺失，无法确认指令是否已发出。"));
+    }
+
     // Reading evidence needs neither the original executable nor an active user's project grant.
     // The worker owns the service lease before it examines a recovered native dispatch.
-    public static HarnessReceipt? RecoverReceipt(string sessionDirectory, Guid dispatchId)
+    public static HarnessRecovery? ReadJournal(string sessionDirectory, Guid dispatchId)
     {
         try
         {
             using var lease = new FileStream(Path.Combine(sessionDirectory, "harness.lock"), FileMode.OpenOrCreate, FileAccess.Write, FileShare.None);
-            return Recover(new HarnessTurn(sessionDirectory, dispatchId, null));
+            return ReadDispatch(new HarnessTurn(sessionDirectory, dispatchId, null));
         }
         catch (DirectoryNotFoundException) { return null; }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        { return new("uncertain", null, "无法核对已派发指令：" + error.Message, []); }
+        { return HarnessRecovery.Unknown("无法核对已派发指令：" + error.Message); }
     }
 
-    private static HarnessReceipt? Recover(HarnessTurn journal)
+    private static HarnessRecovery? ReadDispatch(HarnessTurn journal)
     {
         try
         {
             return journal.Read() switch
             {
-                null or { Status: "opening" } => null,
-                { Status: "running" } => journal.Finish("uncertain", "服务在发出原生指令后中断，缺少最终回执。"),
-                { Status: "returned" or "failed" or "interrupted" or "uncertain" } terminal => terminal,
-                _ => journal.Finish("uncertain", "原生指令的状态无法识别，未重新发送。")
+                null => null,
+                { Status: "opening" } => HarnessRecovery.NotSubmitted,
+                { Status: "running" } => HarnessRecovery.FromReceipt(journal.Finish("uncertain", "服务在发出原生指令后中断，缺少最终回执。")),
+                { Status: "returned" or "failed" or "interrupted" or "uncertain" } terminal => HarnessRecovery.FromReceipt(terminal),
+                _ => HarnessRecovery.FromReceipt(journal.Finish("uncertain", "原生指令的状态无法识别，未重新发送。"))
             };
         }
         catch (Exception error) when (error is JsonException or InvalidDataException)
         {
-            return journal.Finish("uncertain", "原生指令记录无法解析，未重新发送。");
+            return HarnessRecovery.FromReceipt(journal.Finish("uncertain", "原生指令记录无法解析，未重新发送。"));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            return new("uncertain", journal.SessionId, "无法读取原生指令记录：" + error.Message, []);
+            return HarnessRecovery.FromReceipt(new("uncertain", journal.SessionId, "无法读取原生指令记录：" + error.Message, []));
         }
     }
 

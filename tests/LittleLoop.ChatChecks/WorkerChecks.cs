@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
-internal static class WorkerChecks
+internal static partial class WorkerChecks
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
@@ -59,6 +59,7 @@ internal static class WorkerChecks
             ["ChatBot:Policy"] = policy, ["ChatBot:Data"] = Path.Combine(root, "worker"),
             ["ChatBot:Operators"] = owner.Name, ["ChatBot:MaxHarnessTurns"] = "3"
         }).Build();
+        await CheckHarnessRecovery(config, project, owner, check);
 
         var deepseek = new ControlledHarness("deepseek", project);
         var codex = new ControlledHarness("codex", project);

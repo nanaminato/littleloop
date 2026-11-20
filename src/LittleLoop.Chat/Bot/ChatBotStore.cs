@@ -252,7 +252,8 @@ sealed partial class ChatStore
         return await cmd.ExecuteScalarAsync() is { } value ? Convert.ToInt64(value) : null;
     }
 
-    public async Task<BotWork?> ClaimBotWork(DbConnection lease, Func<BotWork, bool>? canDispatch = null)
+    public async Task<BotWork?> ClaimBotWork(DbConnection lease, Func<BotWork, bool>? canDispatch = null,
+        Func<string, string?>? recoveryKey = null)
     {
         BotWork? work = null;
         string limit = canDispatch is null ? " LIMIT 1" : "";
@@ -288,6 +289,8 @@ sealed partial class ChatStore
         if (await update.ExecuteNonQueryAsync() != 1) return null;
         if (work.Input.Loop?.Dispatch is { } dispatch)
         {
+            var bound = dispatch with { RecoveryKey = recoveryKey?.Invoke(dispatch.Harness) };
+            running = running with { Input = running.Input with { Loop = running.Input.Loop! with { Dispatch = bound } } };
             await using var claimed = Command(lease, tx, "INSERT INTO chat_bot_inflight(dispatch_id,work_id,claimed_work) VALUES(@dispatch,@id,@work)",
                 ("dispatch", dispatch.Id.ToString()), ("id", work.Id.ToString()), ("work", ToJson(running)));
             await claimed.ExecuteNonQueryAsync();

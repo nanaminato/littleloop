@@ -2,7 +2,7 @@ using System.Data.Common;
 using LittleLoop.Core;
 
 // Stored in the existing job row, atomically with the goal, budget and next action.
-sealed record BotDispatch(Guid Id, string Harness, string Instruction);
+sealed record BotDispatch(Guid Id, string Harness, string Instruction, string? RecoveryKey = null);
 sealed record BotGoalLoop(int Used, int Limit, BotDispatch? Dispatch = null, BotObservation? Next = null);
 sealed record DecisionInput(long? Inbox, string Room, string Owner, long Sequence, long? ReplyTo,
     BotObservation Trigger, string? Citation = null);

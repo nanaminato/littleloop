@@ -144,8 +144,8 @@ internal static class BotRecoveryChecks
                 await store.ClaimBotWork(restartedLease) is null,
                 "reopened database recovers the original dispatch identity, version and budget reservation");
             var replay = new CountingHarness(root.FullName);
-            var receipt = NativeBotHarness.RecoverReceipt(session, dispatch.Id)
-                ?? await replay.SendAsync(session, dispatch.Id, dispatch.Instruction, null, default);
+            var recovered = await replay.RecoverAsync(session, dispatch.Id, default);
+            var receipt = recovered.Receipt ?? await replay.SendAsync(session, dispatch.Id, dispatch.Instruction, null, default);
             check(replay.Submissions == 0 && receipt.Status == (lostReceipt ? "uncertain" : "returned"),
                 "durable native journal reconciles completed and unknown submissions without another turn");
             await store.SaveHarnessReceipt(claim, receipt);
