@@ -12,13 +12,16 @@ from autonomy_reliability_batch import DATA, REPO, read_json, write_json
 
 def audit(events):
     calls = []
-    invalid = 0
+    invalid = repeated_errors = rejected_evaluations = redrafted_and_committed = 0
     repaired = repair_attempted = normalized = 0
     stale_decisions = retry_waits = 0
+    deferred_decisions = blocked_decisions = errors_repeated_after_deferral = 0
     categories = Counter()
     codes = Counter()
     pending_retries = set()
     recovered_retries = set()
+    deferred_inputs = {}
+    recovered_inputs = set()
     for event in events:
         if event['kind'] not in ('BotDecision', 'DecisionAudit'):
             continue
@@ -28,17 +31,24 @@ def audit(events):
         calls.extend(attempts)
         rejected = [attempt for attempt in attempts if attempt.get('outcome') == 'invalid-decision']
         invalid += len(rejected)
+        rejected_evaluations += bool(rejected)
         accepted = [attempt for attempt in attempts if attempt.get('outcome') == 'accepted']
         changes = [attempt for attempt in attempts if (attempt.get('draft') or {}).get('repairs')]
         if rejected or changes:
             repair_attempted += 1
             applied = event['kind'] == 'BotDecision' and accepted and not source.get('engine', '').startswith('host/')
             repaired += bool(applied)
+            redrafted_and_committed += bool(rejected and applied)
             normalized += bool(applied and any(attempt in changes for attempt in accepted))
+        seen_errors = set()
         for attempt in rejected:
             error = attempt.get('error') or {}
             categories[error.get('category', 'not-recorded')] += 1
             codes[error.get('code', 'not-recorded')] += 1
+            if error.get('code'):
+                key = (error['code'], error.get('field'))
+                repeated_errors += key in seen_errors
+                seen_errors.add(key)
         if event['kind'] == 'DecisionAudit' and detail.get('error'):
             category = detail['error'].get('category', 'not-recorded')
             categories[category] += 1
@@ -46,6 +56,22 @@ def audit(events):
             stale_decisions += category == 'goal-version-conflict'
         retry_waits += source.get('engine') == 'host/decision-retry'
         observation = event['observation']
+        engine = source.get('engine', '')
+        trigger_kind = detail.get('triggerKind')
+        # User sources are unique by sequence. Goal observations use their version, never draft text.
+        version = None if trigger_kind == 'UserMessage' else detail.get('triggerGoalVersion', observation.get('goalVersion'))
+        recovery_key = (trigger_kind, observation.get('sequence'), version)
+        if engine == 'host/decision-deferred':
+            deferred_decisions += 1
+            prior_errors = deferred_inputs.setdefault(recovery_key, set())
+            errors_repeated_after_deferral += len(prior_errors & seen_errors)
+            prior_errors.update(seen_errors)
+        elif engine == 'host/decision-blocked':
+            blocked_decisions += 1
+            errors_repeated_after_deferral += len(deferred_inputs.pop(recovery_key, set()) & seen_errors)
+        elif event['kind'] == 'BotDecision' and not engine.startswith('host/') and recovery_key in deferred_inputs:
+            recovered_inputs.add(recovery_key)
+            errors_repeated_after_deferral += len(deferred_inputs.pop(recovery_key) & seen_errors)
         if source.get('engine') == 'host/decision-retry':
             pending_retries.add((observation.get('goalId'), observation.get('goalVersion')))
         if (event['kind'] == 'BotDecision' and accepted and not source.get('engine', '').startswith('host/')
@@ -55,12 +81,19 @@ def audit(events):
                 recovered_retries.add(key)
     return calls, {
         'invalidDrafts': invalid,
+        'repeatedDraftErrors': repeated_errors,
+        'rejectedDecisionEvaluations': rejected_evaluations,
+        'redraftedAndCommitted': redrafted_and_committed,
         'repairEvaluations': {'succeeded': repaired, 'attempted': repair_attempted, 'normalizedAndAccepted': normalized},
         'structuredErrorCategories': dict(categories),
         'structuredErrorCodes': dict(codes),
         'staleDecisions': stale_decisions,
         'automaticRetryWaits': retry_waits,
         'successfulAutomaticRetries': len(recovered_retries),
+        'deferredDecisions': deferred_decisions,
+        'blockedDecisions': blocked_decisions,
+        'recoveredDecisions': len(recovered_inputs),
+        'errorsRepeatedAfterDeferral': errors_repeated_after_deferral,
     }
 
 
@@ -71,8 +104,7 @@ def status(root, goal):
     with sqlite3.connect(f'{db_path.as_uri()}?mode=ro', uri=True) as db:
         row = db.execute('SELECT status,input FROM chat_bot_work WHERE id=?', (goal,)).fetchone()
     if row:
-        wake = (json.loads(row[1]).get('loop') or {}).get('wake')
-        return row[0], wake
+        return row[0], (json.loads(row[1]).get('loop') or {}).get('wake')
     return None, None
 
 
@@ -152,6 +184,10 @@ def measure(batch, rates):
         codes.update(diagnostics['structuredErrorCodes'])
         metrics = trace.get('metrics', {})
         current, wake = status(root, trace.get('task'))
+        goal_events = [row for row in trace.get('events', []) if row['observation'].get('goalId') == trace.get('task')
+            and row['kind'] in ('BotDecision', 'DecisionAudit') and row['detail'].get('triggerKind') != 'UserMessage']
+        last_goal_evaluation = (goal_events[-1]['detail'].get('cognitionSource') or {}).get('engine') if goal_events else None
+        technical_block = last_goal_evaluation == 'host/decision-blocked'
         business_wait = business_timer_honored(trace) if metrics else False
         revised = revision_applied(trace)
         completions = [row['id'] for row in trace.get('events', []) if row['kind'] == 'BotDecision'
@@ -163,7 +199,9 @@ def measure(batch, rates):
         trials.append({
             'trial': indexed['number'], 'evidence': indexed['evidence'], 'seconds': indexed['seconds'],
             'exitCode': indexed['exitCode'], 'goalId': trace.get('task'), 'finalStatus': current,
-            'waitingForHuman': current == 'needs-reconciliation' or (current == 'waiting-input' and wake is None),
+            'waitingForHuman': (current == 'needs-reconciliation' or (current == 'waiting-input' and wake is None))
+                and not technical_block,
+            'stoppedByDecisionFailure': technical_block and current in ('deciding', 'waiting-input', 'needs-reconciliation'),
             'verifiedDeliverable': verified_output,
             'businessTimerHonored': business_wait,
             'revisionApplied': revised,
@@ -185,8 +223,13 @@ def measure(batch, rates):
         'completionsWithMissedRevision': sum(len(trial['completionWithMissedRevisionIds']) for trial in trials),
         'repeatExecutions': sum(trial['metrics'].get('invalidRepeats', 0) for trial in trials),
         'humanWaitTrials': sum(trial['waitingForHuman'] for trial in trials),
+        'decisionBlockedTrials': sum(trial['stoppedByDecisionFailure'] for trial in trials),
+        'businessTimerHonoredTrials': sum(trial['businessTimerHonored'] for trial in trials),
         'trialsWithoutEnduranceMetrics': sum(not trial['metrics'] for trial in trials),
         'invalidDrafts': sum(trial['diagnostics']['invalidDrafts'] for trial in trials),
+        'repeatedDraftErrors': sum(trial['diagnostics']['repeatedDraftErrors'] for trial in trials),
+        'rejectedDecisionEvaluations': sum(trial['diagnostics']['rejectedDecisionEvaluations'] for trial in trials),
+        'redraftedAndCommitted': sum(trial['diagnostics']['redraftedAndCommitted'] for trial in trials),
         'committedApiAttempts': sum(trial['metrics'].get('cognitionApi', {}).get('committedCallCount', 0) for trial in trials),
         'structuredErrorCategories': dict(categories),
         'structuredErrorCodes': dict(codes),
@@ -194,6 +237,9 @@ def measure(batch, rates):
             for key in ('succeeded', 'attempted', 'normalizedAndAccepted')},
         'automaticRetryWaits': sum(trial['diagnostics']['automaticRetryWaits'] for trial in trials),
         'successfulAutomaticRetries': sum(trial['diagnostics']['successfulAutomaticRetries'] for trial in trials),
+        'deferredDecisions': sum(trial['diagnostics']['deferredDecisions'] for trial in trials),
+        'recoveredDecisions': sum(trial['diagnostics']['recoveredDecisions'] for trial in trials),
+        'errorsRepeatedAfterDeferral': sum(trial['diagnostics']['errorsRepeatedAfterDeferral'] for trial in trials),
         'decisionApi': cost(calls, rates),
         'trials': trials,
     }

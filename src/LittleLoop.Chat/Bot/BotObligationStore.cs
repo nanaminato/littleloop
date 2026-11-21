@@ -42,55 +42,46 @@ sealed partial class ChatStore
     }
 
     private static async Task<Guid[]> ReadUnavailableObligationEvidence(DbConnection db, DbTransaction tx, string room,
-        string owner, BotGoalSnapshot target)
+        string owner, BotGoalSnapshot target, BotGoalEvidence? current = null)
     {
         var assessed = (target.Goal.Obligations ?? []).Where(condition => condition.Status == GoalObligationStatus.Satisfied &&
             condition.Assessment?.CompletionNotice != true).ToArray();
         if (assessed.Length == 0) return [];
 
-        // A long-running goal may have rolled this proof out of the conversational evidence window.
-        var eventIds = assessed.Select(condition => condition.Assessment?.EventId).OfType<long>().Distinct()
-            .Select((id, index) => (Name: $"event{index}", Value: (object?)id)).ToArray();
+        // A long-running goal may have rolled its cited proof out of the conversational evidence window.
+        var dispatchAssessments = assessed.Where(condition => condition.Assessment?.DispatchId is not null)
+            .Select(condition => condition.Assessment!).ToArray();
+        var dispatchEvidence = dispatchAssessments.Length == 0 ? null :
+            await ReadCitedEvidence(db, tx, room, owner, target,
+                new(BotAction.Complete, target.Id, ObligationAssessments: dispatchAssessments),
+                current ?? await ReadDispatchEvidence(db, tx, room, owner, target));
         var checkIds = assessed.Select(condition => condition.Assessment?.CheckId).OfType<Guid>().Distinct()
             .Select((id, index) => (Name: $"check{index}", Value: (object?)id.ToString())).ToArray();
-        string receipts = eventIds.Length == 0 ? "1=0" : $"e.id IN ({Parameters(eventIds)})";
-        string checks = checkIds.Length == 0 ? "1=0" :
-            $"e.kind='Timer' AND JSON_UNQUOTE(JSON_EXTRACT(e.observation,'$.checkId')) IN ({Parameters(checkIds)})";
-        await using var evidence = Command(db, tx, $"""
-            SELECT e.id,e.observation FROM chat_bot_events e JOIN chat_messages m ON m.room_id=e.room_id AND m.seq=e.seq
-            WHERE e.room_id=@room AND e.owner_id=@owner AND e.work_id=@work AND NOT m.deleted AND NOT m.edited
-                AND (({receipts}) OR ({checks}))
-            """, [("room", room), ("owner", owner), ("work", target.Id.ToString()), .. eventIds, .. checkIds]);
-
-        var observed = new Dictionary<long, BotObservation>();
-        await using var rows = await evidence.ExecuteReaderAsync();
-        while (await rows.ReadAsync()) observed.Add(rows.GetInt64(0), FromJson<BotObservation>(rows.GetString(1)));
+        var observed = new List<BotObservation>();
+        if (checkIds.Length > 0)
+        {
+            string checks = string.Join(",", checkIds.Select(entry => "@" + entry.Name));
+            await using var evidence = Command(db, tx, $"""
+                SELECT e.observation FROM chat_bot_events e JOIN chat_messages m ON m.room_id=e.room_id AND m.seq=e.seq
+                WHERE e.room_id=@room AND e.owner_id=@owner AND e.work_id=@work AND NOT m.deleted AND NOT m.edited
+                    AND e.kind='Timer' AND JSON_UNQUOTE(JSON_EXTRACT(e.observation,'$.checkId')) IN ({checks})
+                """, [("room", room), ("owner", owner), ("work", target.Id.ToString()), .. checkIds]);
+            await using var rows = await evidence.ExecuteReaderAsync();
+            while (await rows.ReadAsync()) observed.Add(FromJson<BotObservation>(rows.GetString(0)));
+        }
         return assessed.Where(condition => !HasProof(condition)).Select(condition => condition.Id).ToArray();
 
         bool HasProof(GoalObligation condition)
         {
             var assessment = condition.Assessment;
             if (assessment is null || assessment.Id != condition.Id || condition.GoalId != target.Id) return false;
-            if (assessment.EventId is long eventId &&
-                (!observed.TryGetValue(eventId, out var fact) || fact.GoalId != target.Id ||
-                 fact.DispatchId != assessment.DispatchId || fact.GoalVersion is not int version ||
-                 version < condition.CreatedVersion || version > target.Goal.Version ||
-                 !MatchesExpectedOutcome(fact, condition, assessment))) return false;
-            if (assessment.CheckId is Guid checkId && (condition.Check is not { Observed: true } check || check.Id != checkId ||
-                !observed.Values.Any(fact => fact.Kind == BotEventKind.Timer && fact.Status == "due" && fact.GoalId == target.Id &&
+            if (assessment.EventId.HasValue)
+                return dispatchEvidence?.Dispatches.FirstOrDefault(dispatch => dispatch.DispatchId == assessment.DispatchId) is { } dispatch &&
+                    GoalObligationPolicy.SupportsRecordedEvidence(condition, assessment, dispatch, target.Goal.Version);
+            return assessment.CheckId is Guid checkId && condition.Check is { Observed: true } check && check.Id == checkId &&
+                observed.Any(fact => fact.Kind == BotEventKind.Timer && fact.Status == "due" && fact.GoalId == target.Id &&
                     fact.WakeObligationId == condition.Id && fact.CheckId == check.Id && fact.GoalVersion == check.GoalVersion &&
-                    fact.WakeAtUnixMilliseconds == check.DueAtUnixMilliseconds))) return false;
-            return assessment.EventId.HasValue || assessment.CheckId.HasValue;
+                    fact.WakeAtUnixMilliseconds == check.DueAtUnixMilliseconds);
         }
-
-        static bool MatchesExpectedOutcome(BotObservation fact, GoalObligation condition, GoalObligationAssessment assessment) =>
-            assessment.ExpectedToolStatus is null
-                ? fact is { Kind: BotEventKind.HarnessReceipt, Status: "returned" } or
-                    { Kind: BotEventKind.ToolResult, Status: "completed" }
-                : assessment.ExpectedToolStatus == "failed" &&
-                    condition.Kind is GoalObligationKind.Behavior or GoalObligationKind.Constraint &&
-                    fact is { Kind: BotEventKind.ToolResult, Status: "failed" };
-
-        static string Parameters((string Name, object? Value)[] entries) => string.Join(",", entries.Select(entry => "@" + entry.Name));
     }
 }

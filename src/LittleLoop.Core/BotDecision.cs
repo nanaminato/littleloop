@@ -39,11 +39,14 @@ public sealed record BotDecisionContext(BotObservation Trigger, BotGoalSnapshot[
     public bool RequireObligations { get; init; }
     public GoalObligationSource[] ObligationSources { get; init; } = [];
     public Guid[] UnavailableObligationEvidence { get; init; } = [];
+    public BotDecisionRecovery? Recovery { get; init; }
 
     [JsonIgnore]
     public Action<BotModelCall>? ObserveModelCall { get; init; }
     [JsonIgnore]
     public Func<CancellationToken, Task<BotDecisionError?>>? CheckFreshness { get; init; }
+    [JsonIgnore]
+    public Func<BotFactQuery, CancellationToken, Task<BotFactQueryResponse>>? ReadFacts { get; init; }
 }
 
 /// <summary>The caller supplies a scoped snapshot. Deciding does not send messages, mutate goals or invoke tools.</summary>
@@ -81,19 +84,25 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
         if (GoalObligationPolicy.CheckUserSource(this, context) is { } sourceError) return sourceError;
         var target = GoalId is null ? null : context.Goals.FirstOrDefault(g => g.Id == GoalId);
         if (GoalId is not null && target is null)
-            return new("unknown-goal", "field", "Decision refers to an unknown or unlisted goal.", "goalId");
+            return new BotDecisionError("unknown-goal", "field", "Decision refers to an unknown or unlisted goal.", "goalId")
+            { Expected = "a UUID from the current goals" };
         bool readingLocalResult = context.Trigger is { Kind: BotEventKind.ToolResult, GoalId: null } &&
             Action == BotAction.Reply && GoalId is null;
         if (context.Trigger.Kind != BotEventKind.UserMessage && !readingLocalResult)
         {
             if (GoalId is null || GoalId != context.Trigger.GoalId)
-                return new("wrong-trigger-goal", "field", "A goal observation requires a next action for the same goal.", "goalId");
+                return new BotDecisionError("wrong-trigger-goal", "field", "A goal observation requires a next action for the same goal.", "goalId")
+                { Expected = $"trigger goal {context.Trigger.GoalId} at version {context.Trigger.GoalVersion?.ToString() ?? "unknown"}" };
             if (Action is not (BotAction.Delegate or BotAction.Wait or BotAction.Complete))
                 return new("invalid-trigger-action", "field", "A goal observation accepts Delegate, Wait or Complete for the same goal.", "action");
         }
         bool dueTimer = DueTimer(context, target);
         if (context.Trigger.Kind == BotEventKind.Timer && !dueTimer)
             return new("stale-timer", "goal-version-conflict", "A timer observation must match the current goal's scheduled check.", "goalId");
+        if (Action == BotAction.Wait && !dueTimer && target is { Goal.Status: "waiting-input", WakeAtUnixMilliseconds: long scheduled })
+            return new("wake-already-scheduled", "obligation-conflict",
+                $"Goal {target.Id} v{target.Goal.Version} already has a wake at {scheduled} Unix milliseconds. Keep the reservation or apply an explicit user-sourced revision or control.", "action")
+            { Expected = "Keep the existing wake until due or change the goal through an explicit control", Actual = nameof(BotAction.Wait) };
         if (target is not null && !(dueTimer && Action == BotAction.Delegate) && !AllowsAction(target.Goal.Status, Action))
             return target.Goal.Status == "needs-reconciliation"
                 ? new("execution-unknown", "evidence-conflict", "The execution result is unknown. Reconcile it before delegating or completing.", "action")
@@ -109,45 +118,60 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
         }
         if (Message is not null && !HasText(Message, 16000))
             return new("invalid-message", "field", "Decision has an empty or oversized message.", "message");
-        if ((Harness is not null && Action != BotAction.Delegate) ||
-            (Objective is not null && (Action != BotAction.Delegate || GoalId is not null)) ||
-            (Instruction is not null && Action is not (BotAction.Delegate or BotAction.Revise or BotAction.Remember)) ||
-            (MemorySource is not null && Action is not (BotAction.Remember or BotAction.Forget)) ||
-            (Enabled is not null && Action != BotAction.SetFinalReport))
-            return new("extraneous-fields", "field", "Decision contains fields for a different action.");
+        if (Harness is not null && Action != BotAction.Delegate) return Extraneous("harness");
+        if (Objective is not null && (Action != BotAction.Delegate || GoalId is not null)) return Extraneous("objective");
+        if (Instruction is not null && Action is not (BotAction.Delegate or BotAction.Revise or BotAction.Remember))
+            return Extraneous("instruction");
+        if (MemorySource is not null && Action is not (BotAction.Remember or BotAction.Forget)) return Extraneous("memorySource");
+        if (Enabled is not null && Action != BotAction.SetFinalReport) return Extraneous("enabled");
 
         if (Action == BotAction.Delegate)
         {
             if (string.IsNullOrWhiteSpace(Harness))
-                return new("missing-harness", "harness-reference", "Delegate requires the exact ID of a listed harness.", "harness");
+                return HarnessError("missing-harness", "Delegate requires the exact ID of a listed Harness.");
             if (!context.Harnesses.Contains(Harness, StringComparer.Ordinal))
             {
                 if (context.HarnessOptions.Any(h => h.Id == Harness && !h.CanQueue))
-                    return new("unavailable-harness", "harness-reference", "The selected Harness cannot be queued. Choose a currently available ID.", "harness");
-                return new("unknown-harness", "harness-reference", "The selected Harness ID is not listed.", "harness");
+                    return HarnessError("unavailable-harness", "The selected Harness cannot be queued.");
+                return HarnessError("unknown-harness", "The selected Harness ID is not listed.");
             }
             if (!HasText(Instruction, 16000))
                 return new("missing-instruction", "field", "Delegate requires a nonempty instruction (maximum 16000 characters).", "instruction");
-            if (target is null && (!HasText(Objective, 4000) || Message is null))
-                return new("missing-new-goal-fields", "field", "A new delegation requires both an objective (maximum 4000 characters) and a brief plan in message.");
+            if (target is null && !HasText(Objective, 4000))
+                return Missing("missing-new-goal-fields", "objective", "a nonempty objective of at most 4000 characters");
+            if (target is null && Message is null)
+                return Missing("missing-new-goal-fields", "message", "a brief plan for the user");
             if (target?.RemainingTurns <= 0)
                 return new("turn-budget-exhausted", "field", "This goal has no remaining harness turns.", "action");
             return CheckEvidence(context) ?? GoalObligationPolicy.Check(this, context, target);
         }
-        bool valid = Action switch
+        var missing = Action switch
         {
-            BotAction.Reply => Message is not null,
-            BotAction.Revise => target is not null && HasText(Instruction, 4000),
-            BotAction.Cancel or BotAction.Pause or BotAction.Resume or BotAction.Complete => target is not null,
-            BotAction.Wait => target is not null || Message is not null,
-            BotAction.Remember => target is null && HasText(Instruction, 4000),
-            BotAction.Forget => target is null && MemorySource > 0,
-            BotAction.SetFinalReport => target is null && Enabled.HasValue,
-            BotAction.ManageMemory => target is null,
-            _ => false
+            BotAction.Reply when Message is null => ("message", "a nonempty reply"),
+            BotAction.Revise or BotAction.Cancel or BotAction.Pause or BotAction.Resume or BotAction.Complete when target is null
+                => ("goalId", "an existing goal UUID"),
+            BotAction.Revise or BotAction.Remember when !HasText(Instruction, 4000)
+                => ("instruction", "a nonempty instruction of at most 4000 characters"),
+            BotAction.Wait when target is null && Message is null => ("message", "a concrete question when waiting without a goal"),
+            BotAction.Remember or BotAction.Forget or BotAction.SetFinalReport or BotAction.ManageMemory when target is not null
+                => ("goalId", "omitted"),
+            BotAction.Forget when MemorySource is not > 0 => ("memorySource", "a positive preference source sequence"),
+            BotAction.SetFinalReport when Enabled is null => ("enabled", "true or false"),
+            _ => ((string, string)?)null
         };
-        return valid ? CheckEvidence(context) ?? GoalObligationPolicy.Check(this, context, target)
-            : new("missing-action-fields", "field", $"Invalid target or required fields for {Action}.");
+        if (!Enum.IsDefined(Action)) return Missing("missing-action-fields", "action", "a supported action");
+        return missing is { } needed ? Missing("missing-action-fields", needed.Item1, needed.Item2)
+            : CheckEvidence(context) ?? GoalObligationPolicy.Check(this, context, target);
+
+        BotDecisionError Extraneous(string field) =>
+            new("extraneous-fields", "field", $"{field} does not apply to this {Action} decision.", field)
+            { Expected = "omitted" };
+
+        BotDecisionError HarnessError(string code, string message) => new(code, "harness-reference", message, "harness")
+        { Expected = context.Harnesses.Length > 0 ? string.Join(" | ", context.Harnesses) : "no Harness is available" };
+
+        BotDecisionError Missing(string code, string field, string expected) =>
+            new(code, "field", $"This {Action} decision requires {field} to be {expected}.", field) { Expected = expected };
     }
 
     public static BotAction[] LegalActions(BotDecisionContext context, BotGoalSnapshot? target)
@@ -172,6 +196,7 @@ public sealed partial record BotDecision(BotAction Action, Guid? GoalId = null, 
 
         bool Allowed(BotAction action) => target is not null &&
             (AllowsAction(target.Goal.Status, action) || action == BotAction.Delegate && DueTimer(context, target)) &&
+            (action != BotAction.Wait || target.WakeAtUnixMilliseconds is null || DueTimer(context, target)) &&
             (action != BotAction.Delegate || target.RemainingTurns > 0 && context.Harnesses.Length > 0);
     }
 

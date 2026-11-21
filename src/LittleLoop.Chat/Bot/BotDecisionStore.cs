@@ -8,7 +8,7 @@ sealed record BotScheduledWake(long AtUnixMilliseconds, int GoalVersion, bool Re
 sealed record BotGoalLoop(int Used, int Limit, BotDispatch? Dispatch = null, BotObservation? Next = null,
     BotScheduledWake? Wake = null, int ScheduledWakeups = 0);
 sealed record DecisionInput(long? Inbox, string Room, string Owner, long Sequence, long? ReplyTo,
-    BotObservation Trigger, string? Citation = null);
+    BotObservation Trigger, string? Citation = null, BotDecisionRecovery? Recovery = null);
 sealed record DecisionSnapshot(DecisionInput Input, BotDecisionContext Context, long Revision);
 
 sealed partial class ChatStore
@@ -37,6 +37,12 @@ sealed partial class ChatStore
                 room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL, enabled BOOLEAN NOT NULL,
                 PRIMARY KEY(room_id,owner_id)
             );
+            CREATE TABLE IF NOT EXISTS chat_bot_decision_recovery (
+                room_id CHAR(36) NOT NULL, owner_id CHAR(36) NOT NULL, seq BIGINT NOT NULL,
+                scope VARCHAR(12) NOT NULL, work_id CHAR(36) NOT NULL, goal_version INT NOT NULL,
+                retry_at BIGINT NULL, recovery JSON NOT NULL,
+                PRIMARY KEY(room_id,owner_id,seq,scope,work_id)
+            );
             """);
         await cmd.ExecuteNonQueryAsync();
     }
@@ -56,44 +62,60 @@ sealed partial class ChatStore
     public async Task<DecisionInput?> NextBotInput(bool goal)
     {
         await using var db = await Open();
+        long now = clock.GetUtcNow().ToUnixTimeMilliseconds();
         if (goal)
         {
-            await using (var local = Command(db, null, "SELECT room_id,owner_id,seq,observation FROM chat_bot_local_results ORDER BY seq LIMIT 1"))
+            await using (var local = Command(db, null, """
+                SELECT l.room_id,l.owner_id,l.seq,l.observation,r.recovery FROM chat_bot_local_results l
+                LEFT JOIN chat_bot_decision_recovery r ON r.room_id=l.room_id AND r.owner_id=l.owner_id
+                    AND r.seq=l.seq AND r.scope='local' AND r.work_id=''
+                WHERE r.scope IS NULL OR r.retry_at<=@now ORDER BY l.seq LIMIT 1
+                """, ("now", now)))
             await using (var localReader = await local.ExecuteReaderAsync())
                 if (await localReader.ReadAsync()) return new(null, localReader.GetString(0), localReader.GetString(1), localReader.GetInt64(2),
-                    null, FromJson<BotObservation>(localReader.GetString(3)));
-            long now = clock.GetUtcNow().ToUnixTimeMilliseconds();
+                    null, FromJson<BotObservation>(localReader.GetString(3)), Recovery: ReadRecovery(localReader, 4));
             await using var next = Command(db, null, """
-                SELECT id,room_id,owner_id,seq,kind,status,input,error,output,goal FROM chat_bot_work
+                SELECT w.id,w.room_id,w.owner_id,w.seq,w.kind,w.status,w.input,w.error,w.output,w.goal,d.recovery FROM chat_bot_work w
+                LEFT JOIN chat_bot_decision_recovery d ON d.room_id=w.room_id AND d.owner_id=w.owner_id AND d.seq=w.seq
+                    AND d.scope='goal' AND d.work_id=w.id AND d.goal_version=JSON_EXTRACT(w.goal,'$.version')
                 WHERE (status='deciding' OR (status='needs-reconciliation'
                     AND JSON_UNQUOTE(JSON_EXTRACT(input,'$.loop.next.status'))='uncertain') OR
                     (status='waiting-input' AND CAST(JSON_UNQUOTE(JSON_EXTRACT(input,'$.loop.wake.atUnixMilliseconds')) AS SIGNED) BETWEEN 1 AND @now
                      AND JSON_EXTRACT(input,'$.loop.wake.goalVersion')=JSON_EXTRACT(goal,'$.version')))
-                AND NOT EXISTS(SELECT 1 FROM chat_bot_inflight f WHERE f.work_id=chat_bot_work.id)
-                AND NOT EXISTS(SELECT 1 FROM chat_goal_inbox i WHERE i.room_id=chat_bot_work.room_id
-                    AND i.owner_id=chat_bot_work.owner_id AND NOT i.processed)
-                ORDER BY created,id LIMIT 1
+                AND (d.scope IS NULL OR d.retry_at<=@now)
+                AND NOT EXISTS(SELECT 1 FROM chat_bot_inflight f WHERE f.work_id=w.id)
+                AND NOT EXISTS(SELECT 1 FROM chat_goal_inbox i WHERE i.room_id=w.room_id
+                    AND i.owner_id=w.owner_id AND NOT i.processed)
+                ORDER BY w.created,w.id LIMIT 1
                 """, ("now", now));
             await using var r = await next.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return null;
             var work = ReadWork(r);
             var observation = work.Status == "waiting-input" ? DueTimer(work, now) : work.Input.Loop?.Next;
             return observation is null ? null : new(null, work.Room, work.Owner, work.Sequence, null, observation,
-                work.Input.Source?.Text ?? work.Input.Anchor);
+                work.Input.Source?.Text ?? work.Input.Anchor, ReadRecovery(r, 10));
         }
         await using var cmd = Command(db, null, """
-            SELECT i.id,i.room_id,i.owner_id,i.seq,i.reply_to,i.body,m.card
+            SELECT i.id,i.room_id,i.owner_id,i.seq,i.reply_to,i.body,m.card,r.recovery
             FROM chat_goal_inbox i JOIN chat_messages m ON m.room_id=i.room_id AND m.seq=i.seq
-            WHERE NOT i.processed ORDER BY i.id LIMIT 1
-            """);
+            LEFT JOIN chat_bot_decision_recovery r ON r.room_id=i.room_id AND r.owner_id=i.owner_id
+                AND r.seq=i.seq AND r.scope='inbox' AND r.work_id=''
+            WHERE NOT i.processed AND (r.scope IS NULL OR r.retry_at<=@now)
+            AND NOT EXISTS(SELECT 1 FROM chat_goal_inbox previous WHERE previous.room_id=i.room_id
+                AND previous.owner_id=i.owner_id AND NOT previous.processed AND previous.id<i.id)
+            ORDER BY i.id LIMIT 1
+            """, ("now", now));
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync()) return null;
         var card = reader.IsDBNull(6) ? null : FromJson<MessageCard>(reader.GetString(6));
         return new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3),
             reader.IsDBNull(4) ? null : reader.GetInt64(4), new(BotEventKind.UserMessage, reader.GetString(5),
                 Status: card?.Kind, Sequence: reader.GetInt64(3)), Citation: card?.Source is { } citation
-                    ? $"{citation.Path}:{citation.Start}–{citation.End}\n{citation.Text}" : null);
+                    ? $"{citation.Path}:{citation.Start}–{citation.End}\n{citation.Text}" : null, Recovery: ReadRecovery(reader, 7));
     }
+
+    private static BotDecisionRecovery? ReadRecovery(DbDataReader reader, int index) =>
+        reader.IsDBNull(index) ? null : FromJson<BotDecisionRecovery>(reader.GetString(index));
 
     private static BotObservation? DueTimer(BotWork? work, long now) =>
         work is { Status: "waiting-input", Goal: { } goal, Input.Loop.Wake: { } wake } &&
@@ -189,6 +211,14 @@ sealed partial class ChatStore
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
         await LockGoalRoom(db, tx, input.Room);
+        await WriteDecisionAudit(db, tx, snapshot, source, error);
+        await tx.CommitAsync();
+    }
+
+    private static async Task WriteDecisionAudit(DbConnection db, DbTransaction tx, DecisionSnapshot snapshot,
+        BotDecisionSource source, BotDecisionError error)
+    {
+        var input = snapshot.Input;
         Guid? goalId = input.Trigger.GoalId ?? snapshot.Context.ReplyGoalId;
         int? observedVersion = input.Trigger.GoalVersion ?? snapshot.Context.Goals.FirstOrDefault(goal => goal.Id == goalId)?.Goal.Version;
         var observation = new BotObservation(BotEventKind.DecisionAudit, error.Code, goalId, Status: error.Category,
@@ -197,7 +227,6 @@ sealed partial class ChatStore
         {
             triggerKind = input.Trigger.Kind.ToString(), snapshot.Revision, error, cognitionSource = source
         }));
-        await tx.CommitAsync();
     }
 
     public async Task<DecisionSnapshot?> DecisionContext(DecisionInput input, string robot, bool operatorAccess,
@@ -321,16 +350,21 @@ sealed partial class ChatStore
             [await ReadDispatchEvidence(db, tx, input.Room, input.Owner, evidenceGoal)];
         var obligationSources = requireObligations ? await ReadObligationSources(db, tx, input, evidenceGoal) : [];
         var unavailableEvidence = requireObligations && evidenceGoal is not null
-            ? await ReadUnavailableObligationEvidence(db, tx, input.Room, input.Owner, evidenceGoal) : [];
+            ? await ReadUnavailableObligationEvidence(db, tx, input.Room, input.Owner, evidenceGoal, dispatchEvidence[0]) : [];
         await tx.CommitAsync();
         var context = new BotDecisionContext(input.Trigger, goals.ToArray(), history.ToArray(), memory.ToArray(), harnesses, report,
             quotedGoal, quote)
         {
             DispatchEvidence = dispatchEvidence,
             RequireObligations = requireObligations,
+            Recovery = input.Recovery,
             ObligationSources = obligationSources,
             UnavailableObligationEvidence = unavailableEvidence
         };
-        return new(input, context, roomRevision);
+        var snapshot = new DecisionSnapshot(input, context, roomRevision);
+        return snapshot with { Context = context with
+        {
+            ReadFacts = (query, token) => ReadGoalFacts(snapshot, query, robot, operatorAccess, token)
+        } };
     }
 }

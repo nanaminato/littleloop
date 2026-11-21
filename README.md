@@ -19,6 +19,7 @@
 
 ## 文档
 
+- [Bot 事实核对、决策修复与唤醒](docs/62-bot-fact-recovery.md) — 按需事实查询、内部恢复、预约与冻结配对验收
 - [目标待满足条件与完成核对](docs/61-goal-obligations.md) — 用户修订、定时事实、完成证据和冻结对照
 - [自主决策可靠性与失败恢复](docs/60-decision-reliability.md) — 草稿诊断、决策修复、证据投影和冻结版本对照
 - [持续自主工作验收](docs/59-autonomy-endurance.md) — 目标定时唤醒、认知对照评测、真实双 Harness 长任务与计量边界

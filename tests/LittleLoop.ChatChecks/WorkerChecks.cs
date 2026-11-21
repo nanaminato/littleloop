@@ -291,17 +291,23 @@ internal static partial class WorkerChecks
             failedDecision.Context.ObserveModelCall?.Invoke(new("invalid-decision", "fixture-model", new(12, 3)));
             failedDecision.Context.ObserveModelCall?.Invoke(new("request-failed"));
             failedDecision.Result.SetException(new InvalidOperationException("controlled-model-outage"));
-            await Notice("controlled-model-outage");
+            var recovered = await engine.Next();
+            check(recovered.Context.Trigger.Sequence == unavailable.Sequence &&
+                recovered.Context.Recovery?.Errors.Any(error => error.Message == "controlled-model-outage") == true,
+                "the original user observation and diagnostics survive an engine failure");
+            recovered.Choose(new(BotAction.Reply, Message: "我恢复了这次判断。"));
+            await Notice("恢复了这次判断");
 
             var auditConnection = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(fixture.Connection) { Pooling = false };
             await using var db = new Microsoft.Data.Sqlite.SqliteConnection(auditConnection.ConnectionString);
             await db.OpenAsync();
             await using var sources = db.CreateCommand();
             sources.CommandText = """
-                SELECT json_extract(detail,'$.action'),json_extract(detail,'$.cognitionSource.engine'),
+                SELECT COALESCE(json_extract(detail,'$.action'),kind),json_extract(detail,'$.cognitionSource.engine'),
                     json_array_length(detail,'$.cognitionSource.modelCalls'),
                     json_extract(detail,'$.cognitionSource.modelCalls[0].usage.inputTokens')
-                FROM chat_bot_events WHERE room_id=$room AND seq IN ($memory,$uncertain,$unavailable) AND kind='BotDecision'
+                FROM chat_bot_events WHERE room_id=$room AND seq IN ($memory,$uncertain,$unavailable)
+                    AND kind IN ('BotDecision','DecisionAudit')
                 ORDER BY id
                 """;
             sources.Parameters.AddWithValue("$room", room.Id);
@@ -314,8 +320,8 @@ internal static partial class WorkerChecks
                 audit.Add((reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.IsDBNull(3) ? null : reader.GetInt32(3)));
             check(audit.SequenceEqual([("ManageMemory", "ControlledEngine", 0, null), ("Reply", "local/memory-result/1", 0, null),
                 ("Delegate", "ControlledEngine", 0, null), ("Wait", "local/reconciliation/1", 0, null),
-                ("Reply", "host/decision-error", 2, 12)]),
-                "SQLite preserves decision provenance and model attempts even when the host must reply to an engine error");
+                ("DecisionAudit", "host/decision-deferred", 2, 12), ("Reply", "ControlledEngine", 0, null)]),
+                "SQLite preserves failed model attempts and subsequent Bot decisions as separate ledger events");
         }
         finally
         {

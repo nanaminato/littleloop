@@ -69,27 +69,70 @@ internal static partial class WorkerChecks
             return Convert.ToInt64(await query.ExecuteScalarAsync()) == 1;
         }
 
+        async Task<long> RetryAt(Guid id, int failures)
+        {
+            using var deadline = new CancellationTokenSource(Timeout);
+            while (true)
+            {
+                await using var query = db.CreateCommand();
+                query.CommandText = """
+                    SELECT retry_at FROM chat_bot_decision_recovery WHERE work_id=$id
+                      AND json_extract(recovery, '$.failures')=$failures
+                    """;
+                query.Parameters.AddWithValue("$id", id.ToString());
+                query.Parameters.AddWithValue("$failures", failures);
+                if (await query.ExecuteScalarAsync() is long at) return at;
+                await Task.Delay(25, deadline.Token);
+            }
+        }
+
         await worker.StartAsync(default);
         try
         {
             var (timed, first) = await StartGoal("Inspect the first report.");
             first.Timeout();
-            var waiting = await UntilWork(timed, work => work.Input.Loop?.Wake?.RetryDecision == true);
+            long firstDue = await RetryAt(timed, 1);
+            var waiting = await UntilWork(timed, work => work.Status == "deciding");
             clock.Advance(29_999);
-            check(waiting.Status == "waiting-input" && waiting.Input.Loop!.ScheduledWakeups == 1 &&
+            check(firstDue == clock.GetUtcNow().ToUnixTimeMilliseconds() + 1 &&
+                waiting.Input.Loop is { ScheduledWakeups: 0, Wake: null } &&
                 await store.NextBotInput(goal: true) is null && harness.Calls.Count == 1,
-                "a transient cognition timeout schedules one durable wait without repeating the original Harness dispatch");
+                "a transient cognition timeout delays the same trigger without consuming a goal wakeup or repeating execution");
 
             clock.Advance(1);
             var retry = await model.Next();
             using (var body = JsonDocument.Parse(retry.Input))
-                check(body.RootElement.GetProperty("trigger").GetProperty("status").GetString() == "decision-retry",
-                    "the single delayed retry is a normal timer input marked as cognition recovery");
+                check(body.RootElement.GetProperty("trigger").GetProperty("kind").GetString() == "harnessReceipt" &&
+                    body.RootElement.GetProperty("decisionRecovery").GetProperty("failures").GetInt32() == 1,
+                    "technical recovery re-presents the original Harness evidence with durable failure diagnostics");
             retry.Timeout();
-            await UntilWork(timed, work => work.Error is not null && work.Input.Loop?.Wake is null);
+            long secondDue = await RetryAt(timed, 2);
+            clock.Advance(59_999);
+            var reopened = new ChatStore(fixture.Connection, false, "Sqlite", clock);
+            check(secondDue == clock.GetUtcNow().ToUnixTimeMilliseconds() + 1 &&
+                await reopened.NextBotInput(goal: true) is null && harness.Calls.Count == 1,
+                "a repeated transient failure persists exponential backoff without a user wait or another Harness call");
+            clock.Advance(1);
+            (await model.Next()).Return("""{"action":"wait","wakeAfterSeconds":5}""");
+            var scheduled = await UntilWork(timed, work => work.Input.Loop?.Wake is not null);
+            clock.Advance(5_000);
+            (await model.Next()).Timeout();
+            await RetryAt(timed, 1);
+            check((await UntilWork(timed, work => work.Status == "waiting-input")).Input.Loop?.Wake == scheduled.Input.Loop!.Wake &&
+                (await store.GoalObservations(timed)).All(observation => observation.Kind != BotEventKind.Timer),
+                "a cognition outage at expiry preserves the original appointment and leaves it unconsumed");
             clock.Advance(30_000);
-            check(await store.NextBotInput(goal: true) is null && harness.Calls.Count == 1,
-                "a second transient failure stops for human input without another timer or Harness call");
+            var timerRetry = await model.Next();
+            using (var body = JsonDocument.Parse(timerRetry.Input))
+            {
+                var trigger = body.RootElement.GetProperty("trigger");
+                check(trigger.GetProperty("kind").GetString() == "timer" && trigger.GetProperty("wakeAtUnixMilliseconds").GetInt64() ==
+                    scheduled.Input.Loop!.Wake!.AtUnixMilliseconds, "timer recovery carries the same business wake, timestamp and version");
+            }
+            timerRetry.Return("""{"action":"wait","message":"Which version of the report should I use?"}""");
+            await UntilWork(timed, work => work.Status == "waiting-input" && work.Input.Loop?.Wake is null);
+            check((await store.GoalObservations(timed)).Count(observation => observation.Kind == BotEventKind.Timer) == 1,
+                "the recovered Bot decision consumes and records the business timer once");
 
             var (revised, stale) = await StartGoal("Inspect the second report.");
             await Say("Only compare the archived copy.");

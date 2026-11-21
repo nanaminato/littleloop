@@ -260,14 +260,15 @@ sealed class ChatBot : BackgroundService
             {
                 var result = await engine.DecideWithSourceAsync(snapshot.Context, token);
                 var source = result.Source with { ModelCalls = modelCalls.ToArray() };
+                snapshot = await store.WithDecisionEvidence(snapshot, result.Decision);
                 if (result.Decision.Check(snapshot.Context) is { } invalid)
                 {
-                    await ReportDecisionFailure(invalid, allowDelayedRetry: false);
+                    await ReportDecisionFailure(invalid, transient: false);
                     return;
                 }
                 var rejected = await store.ApplyDecision(snapshot, result.Decision, Robot(null).Id,
                     CanOperate(input.Owner), maxTurns, projectGrant, cognitionSource: source);
-                if (rejected is not null) await store.RecordDecisionAudit(snapshot, source, rejected);
+                if (rejected is not null) await ReportDecisionFailure(rejected, transient: false);
             }
             catch (BotDecisionSupersededException superseded)
             {
@@ -281,28 +282,17 @@ sealed class ChatBot : BackgroundService
                     error is SemanticModelException provider && IsTemporaryCognitionFailure(provider.Code));
             }
 
-            async Task ReportDecisionFailure(BotDecisionError error, bool allowDelayedRetry)
+            async Task ReportDecisionFailure(BotDecisionError error, bool transient)
             {
                 if (error.Category is "permission-denied" or "goal-version-conflict")
                 {
                     await store.RecordDecisionAudit(snapshot, new("host/superseded") { ModelCalls = modelCalls.ToArray() }, error);
                     return;
                 }
-                string reason = "本次决策未能执行：" + error.Message;
-                if (snapshot.Context.Goals.Any(g => g.Id == input.Trigger.GoalId && g.RemainingTurns == 0))
-                    reason = $"目标的 Harness 调用预算已用尽。{reason}";
-                if (reason.Length > 600) reason = reason[..600];
-                bool retry = allowDelayedRetry && input.Trigger.Status != "decision-retry" &&
-                    snapshot.Context.Goals.Any(g => g.Id == input.Trigger.GoalId &&
-                        g.Goal.Status is "deciding" or "waiting-input" && g.RemainingWakeups > 0);
-                if (retry) reason = "认知服务暂不可用，约 30 秒后重新评估。";
-                var fallback = input.Trigger.GoalId is Guid id
-                    ? new BotDecision(BotAction.Wait, id, reason, WakeAfterSeconds: retry ? 30 : null)
-                    : new BotDecision(BotAction.Reply, Message: reason);
-                var source = new BotDecisionSource(retry ? "host/decision-retry" : "host/decision-error")
+                var source = new BotDecisionSource("host/decision-error")
                 { ModelCalls = modelCalls.ToArray(), Error = error };
-                var rejected = await store.ApplyDecision(snapshot, fallback, Robot(null).Id, CanOperate(input.Owner), maxTurns,
-                    projectGrant, retry ? null : reason, source, retryCognition: retry);
+                var rejected = await store.DeferFailedDecision(snapshot, source, error, Robot(null).Id,
+                    CanOperate(input.Owner), transient);
                 if (rejected is not null) await store.RecordDecisionAudit(snapshot, source, rejected);
             }
         }

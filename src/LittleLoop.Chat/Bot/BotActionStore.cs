@@ -6,23 +6,18 @@ sealed partial class ChatStore
 {
     // The network call took place outside this transaction. Commit only against the observed source and version.
     public async Task<BotDecisionError?> ApplyDecision(DecisionSnapshot snapshot, BotDecision decision, string robot, bool operatorAccess,
-        int turnLimit, string grant, string? failure = null, BotDecisionSource? cognitionSource = null, bool retryCognition = false)
+        int turnLimit, string grant, BotDecisionSource? cognitionSource = null)
     {
         var input = snapshot.Input;
         var context = snapshot.Context;
         await using var db = await Open();
         await using var tx = await db.BeginTransactionAsync();
         string? type = await LockGoalRoom(db, tx, input.Room);
-        bool hostFallback = failure is not null || retryCognition;
-        if (hostFallback && (decision.Action is not (BotAction.Reply or BotAction.Wait) ||
-            decision.ObligationEdits is not null || decision.ObligationAssessments is not null ||
-            decision.WakeObligationId.HasValue || decision.ResolveSourceSequence.HasValue))
-            return new("invalid-host-fallback", "field", "A host failure can only report or wait without changing requirements.");
         Guid? target = decision.GoalId ?? (requireObligations && input.Inbox.HasValue && decision.Action == BotAction.Reply
             ? context.ReplyGoalId : null);
         var (error, work) = await DecisionCommitGate(db, tx, snapshot, robot, operatorAccess, type, target);
         if (error is not null) return error;
-        if (requireObligations && !hostFallback)
+        if (requireObligations)
         {
             context = context with { RequireObligations = true };
             if (work?.Goal is { } current && context.Goals.FirstOrDefault(goal => goal.Id == work.Id) is { } observed)
@@ -31,7 +26,8 @@ sealed partial class ChatStore
                 context = context with
                 {
                     Goals = context.Goals.Select(goal => goal.Id == locked.Id ? locked : goal).ToArray(),
-                    DispatchEvidence = [await ReadDispatchEvidence(db, tx, input.Room, input.Owner, locked)],
+                    DispatchEvidence = [await ReadCitedEvidence(db, tx, input.Room, input.Owner, locked, decision,
+                        await ReadDispatchEvidence(db, tx, input.Room, input.Owner, locked))],
                     ObligationSources = await ReadObligationSources(db, tx, input, locked),
                     UnavailableObligationEvidence = await ReadUnavailableObligationEvidence(db, tx, input.Room, input.Owner, locked)
                 };
@@ -65,18 +61,9 @@ sealed partial class ChatStore
         }
         else if (input.Inbox is null)
         {
-            if (input.Trigger.Kind == BotEventKind.Timer)
-            {
-                if (DueTimer(work, clock.GetUtcNow().ToUnixTimeMilliseconds()) != input.Trigger)
-                    return new("timer-changed", "goal-version-conflict", "The scheduled decision trigger changed.");
-            }
-            else if (work?.Status is not ("deciding" or "needs-reconciliation") || work.Input.Loop?.Next != input.Trigger)
-                return new("trigger-changed", "goal-version-conflict", "The pending goal observation changed.");
-            await using var pending = Command(db, tx, "SELECT 1 FROM chat_goal_inbox WHERE room_id=@room AND owner_id=@owner AND NOT processed LIMIT 1",
-                ("room", input.Room), ("owner", input.Owner));
-            if (await pending.ExecuteScalarAsync() is not null)
-                return new("pending-user-input", "goal-version-conflict", "User input superseded this pending decision.");
+            if (await PendingGoalTriggerError(db, tx, input, work) is { } obsolete) return obsolete;
         }
+        await ClearDecisionRecovery(db, tx, input);
 
         var goal = work?.Goal;
         var loop = work?.Input.Loop ?? new BotGoalLoop(0, turnLimit);
@@ -121,12 +108,12 @@ sealed partial class ChatStore
                 if (decision.WakeAfterSeconds is int delay)
                 {
                     long at = clock.GetUtcNow().AddSeconds(delay).ToUnixTimeMilliseconds();
-                    if (!hostFallback && decision.WakeObligationId.HasValue)
+                    if (decision.WakeObligationId.HasValue)
                         scheduledCheck = new(Guid.NewGuid(), at, goal.Version);
                     loop = loop with
                     {
-                        Wake = new(at, goal.Version, retryCognition, scheduledCheck?.Id,
-                            scheduledCheck is null ? null : decision.WakeObligationId),
+                        Wake = new(at, goal.Version, CheckId: scheduledCheck?.Id,
+                            WakeObligationId: scheduledCheck is null ? null : decision.WakeObligationId),
                         ScheduledWakeups = loop.ScheduledWakeups + 1
                     };
                 }
@@ -187,8 +174,6 @@ sealed partial class ChatStore
                     decision, input.Trigger, scheduledCheck);
             if (decision.Action == BotAction.Reply)
             {
-                if (requireObligations && hostFallback && input.Inbox.HasValue && (ActiveForMemory(work) || work.Status == "needs-reconciliation"))
-                    goal = goal with { PendingRequirementSources = [.. (goal.PendingRequirementSources ?? []), input.Sequence] };
                 if (goal != work.Goal)
                     await SaveGoal(db, tx, work, goal, input.Sequence, "requirement-source", error: work.Error, output: work.Output);
                 if (requireObligations && input.Inbox.HasValue)
@@ -198,7 +183,7 @@ sealed partial class ChatStore
             {
                 work = work with { Input = work.Input with { Loop = loop } };
                 await SaveGoal(db, tx, work, goal, input.Sequence, decision.Action.ToString(),
-                    error: failure is not null ? Cut(failure, 250) : goal.Status == "needs-reconciliation" ? work.Error : null, output: output);
+                    error: goal.Status == "needs-reconciliation" ? work.Error : null, output: output);
             }
         }
         if (input.Inbox.HasValue)
@@ -221,9 +206,12 @@ sealed partial class ChatStore
         if (input.Trigger.GoalVersion is int triggerVersion) detail["triggerGoalVersion"] = triggerVersion;
         if (input.Trigger.DispatchId is Guid triggerDispatchId) detail["triggerDispatchId"] = triggerDispatchId;
         if (cognitionSource is not null) detail["cognitionSource"] = JsonSerializer.SerializeToNode(cognitionSource, BotJson);
+        var committedWake = decision.Action == BotAction.Wait && decision.WakeAfterSeconds.HasValue ? loop.Wake : null;
         await Record(db, tx, input.Room, input.Owner, input.Sequence, new(BotEventKind.BotDecision,
             decisionText, target, decision.Harness, decision.Action.ToString(), input.Sequence, goal?.Version,
-            DispatchId: decision.Action == BotAction.Delegate ? loop.Dispatch!.Id : null), detail.ToJsonString());
+            DispatchId: decision.Action == BotAction.Delegate ? loop.Dispatch!.Id : null,
+            WakeAtUnixMilliseconds: committedWake?.AtUnixMilliseconds,
+            CheckId: committedWake?.CheckId, WakeObligationId: committedWake?.WakeObligationId), detail.ToJsonString());
         if (decision.Action == BotAction.ManageMemory)
         {
             var observation = new BotObservation(BotEventKind.ToolResult, message!, Status: "memory", Sequence: input.Sequence);

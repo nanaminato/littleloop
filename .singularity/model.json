@@ -3415,7 +3415,7 @@
       "type": "capability",
       "title": "统一聊天认知、持续 Harness 委派与可恢复目标",
       "actor": "AI",
-      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。到期检查进入相同的决策接口，派发结果可为本地策略提供提交边界，已提交决策附有模型请求与服务回报用量。模型草稿按结构化错误进行有限修复，提交时复查权限及版本。决策读取现有账本的派发、回执和验证投影，复核保留理由。 用户提出的目标条件、修订、待核对来源与实际到期记录沿用同一目标账本。Bot 选择条件含义和证据，宿主验证来源与版本范围，并阻止仍有开放条件的完成。",
+      "body": "LittleLoop 在同一入口将用户消息、Harness 回执及工具结果提交给可替换决策引擎，按结构化动作回复、委派、更新任务和记忆或等待。持久调度保存目标、已用回合、下一动作、会话及通知。相同目标既可续接单一 Harness，也可将观察用于下一 Harness 的指令。已提交的记忆回执与待核对的未知执行可由本地策略判断，决策记录标明使用的认知来源。工具反馈关联到派发并保留有界失败证据。恢复时通过原执行器的恢复来源核对在途派发。到期检查进入相同的决策接口，派发结果可为本地策略提供提交边界，已提交决策附有模型请求与服务回报用量。模型草稿按结构化错误进行有限修复，提交时复查权限及版本。决策读取现有账本的派发、回执和验证投影，复核保留理由。 用户提出的目标条件、修订、待核对来源与实际到期记录沿用同一目标账本。Bot 选择条件含义和证据，宿主验证来源与版本范围，并阻止仍有开放条件的完成。 Bot 可按需读取已授权目标的条件与事实，选择补证及预约。宿主保留失败的原触发、单独登记技术重试，并以现有目标事务登记和恢复有效业务唤醒。",
       "authorization": "not_applicable",
       "delivery": "implemented",
       "verification": "passed",
@@ -3424,7 +3424,8 @@
         "EVIDENCE-BOT-AUTONOMY-INCREMENTS",
         "EVIDENCE-BOT-AUTONOMY-ENDURANCE",
         "EVIDENCE-BOT-DRAFT-RECOVERY",
-        "EVIDENCE-BOT-GOAL-OBLIGATIONS"
+        "EVIDENCE-BOT-GOAL-OBLIGATIONS",
+        "EVIDENCE-BOT-FACT-RECOVERY"
       ],
       "attributes": {},
       "references": [
@@ -3435,7 +3436,8 @@
         "REF-BOT-LOCAL-COGNITION",
         "REF-BOT-AUTONOMY-ENDURANCE",
         "REF-BOT-DECISION-RELIABILITY",
-        "REF-BOT-GOAL-OBLIGATIONS"
+        "REF-BOT-GOAL-OBLIGATIONS",
+        "REF-BOT-FACT-RECOVERY"
       ]
     },
     {
@@ -3545,6 +3547,23 @@
       "references": [
         "REF-BOT-GOAL-OBLIGATION-CHECKS",
         "REF-BOT-GOAL-OBLIGATIONS"
+      ]
+    },
+    {
+      "id": "EVIDENCE-BOT-FACT-RECOVERY",
+      "type": "evidence",
+      "actor": "AI",
+      "title": "Bot 事实查询与原触发恢复验收",
+      "body": "使用同一目标和原始来源检查草稿拒绝、历史引用、实际到期、恢复及提交边界。真实配对结果单独测量。",
+      "authorization": "not_applicable",
+      "delivery": "implemented",
+      "verification": "not_applicable",
+      "attributes": {
+        "observation": "SQLite 目标条件专项 44 项通过，覆盖失败探针拒绝、历史查询与提交核对、业务预约重开、技术恢复保留原触发、未核对来源阻止完成。自然语言覆盖、正确完成、重复执行与真实成本以独立冻结实验为准。"
+      },
+      "references": [
+        "REF-BOT-FACT-RECOVERY",
+        "REF-BOT-GOAL-OBLIGATION-CHECKS"
       ]
     }
   ],
@@ -4857,6 +4876,12 @@
       "type": "supports",
       "source": "EVIDENCE-BOT-DRAFT-RECOVERY",
       "target": "CAP-BOT-DECISION-LOOP"
+    },
+    {
+      "id": "REL-BOT-FACT-RECOVERY-SUPPORTS-LOOP",
+      "type": "supports",
+      "source": "EVIDENCE-BOT-FACT-RECOVERY",
+      "target": "CAP-BOT-DECISION-LOOP"
     }
   ],
   "references": [
@@ -5755,6 +5780,13 @@
       "target": "tests/LittleLoop.ChatChecks/BotGoalObligationChecks.cs",
       "tracking": "live",
       "id": "REF-BOT-GOAL-OBLIGATION-CHECKS"
+    },
+    {
+      "id": "REF-BOT-FACT-RECOVERY",
+      "kind": "project_file",
+      "target": "docs/62-bot-fact-recovery.md",
+      "tracking": "live",
+      "purpose": "按需证据查询、可恢复决策、定时预约和冻结对照记录"
     }
   ],
   "views": [

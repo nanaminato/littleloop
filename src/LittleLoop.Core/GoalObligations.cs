@@ -51,12 +51,26 @@ public static class GoalObligationPolicy
     internal static bool IsDirectedUserAction(BotAction action) =>
         action is BotAction.Reply or BotAction.Revise or BotAction.Pause or BotAction.Resume or BotAction.Cancel or BotAction.ManageMemory;
 
+    // Scheduling state is objective; only the Bot interprets when a condition's starting event occurred.
+    public static GoalObligation[] UnscheduledTimeConditions(BotGoalSnapshot goal, BotObservation trigger) =>
+        (goal.Goal.Obligations ?? []).Where(o => IsOpenTimeCondition(o) && (o.Check is not { } check ||
+            !check.Observed && !IsDueCheck(o, check, trigger) &&
+            (check.GoalVersion != goal.Goal.Version || check.DueAtUnixMilliseconds != goal.WakeAtUnixMilliseconds))).ToArray();
+
+    private static bool IsOpenTimeCondition(GoalObligation obligation) => obligation is
+        { Active: true, Kind: GoalObligationKind.Time, Status: not GoalObligationStatus.Satisfied };
+
     internal static BotDecisionError? CheckUserSource(BotDecision decision, BotDecisionContext context)
     {
         if (DirectedUserGoal(context) is not Guid directed) return null;
         if ((decision.GoalId is Guid chosen && chosen != directed) ||
             (decision.GoalId is null && decision.Action == BotAction.Delegate))
-            return Error("goal-source-target-conflict", "goalId", "The user message is linked to another existing goal.");
+        {
+            var linked = context.Goals.First(goal => goal.Id == directed);
+            return Error("goal-source-target-conflict", "goalId",
+                $"User message #{context.Trigger.Sequence} is linked to goal {linked.Id} at version {linked.Goal.Version}.")
+                with { Expected = linked.Id.ToString(), Actual = decision.GoalId?.ToString() ?? "<missing>" };
+        }
         if (!IsDirectedUserAction(decision.Action) ||
             (decision.Action == BotAction.Reply && !Text(decision.GoalReplyReason, 1000)))
             return Error("goal-source-disposition-required", "action",
@@ -80,8 +94,21 @@ public static class GoalObligationPolicy
         if (decision.ResolveSourceSequence is long resolved && (userSequence is null || target is null ||
             !pending.Contains(resolved) || !context.ObligationSources.Any(source => source.Sequence == resolved && source.GoalId == target.Id) ||
             decision.Action != BotAction.Revise && (decision.Action != BotAction.Reply || decision.GoalReplyReason is null)))
+        {
+            var available = context.ObligationSources.Where(source =>
+                source.GoalId == target?.Id && pending.Contains(source.Sequence)).Select(source => source.Sequence);
+            var sequences = string.Join(", ", available);
             return Error("unknown-pending-source", "resolveSourceSequence",
-                "Resolve only a pending source of this goal through a sourced revision or a reasoned informational reply.");
+                $"Source #{resolved} cannot be resolved by this {decision.Action} on goal {target?.Id} at version {target?.Goal.Version}. " +
+                "A current user turn is handled by a normal revision, while an older unresolved message needs an eligible pending source.")
+                with
+                {
+                    Expected = sequences.Length > 0
+                        ? $"omit for a normal revision, or use a pending source from [{sequences}] during a sourced Revise or Reply"
+                        : "omit resolveSourceSequence because no pending source is currently available",
+                    Actual = resolved.ToString()
+                };
+        }
 
         if (required && creating && edits.Length == 0)
             return Error("initial-obligations-required", "obligationEdits", "Record the user's distinct conditions as Add edits when creating this goal.");
@@ -102,33 +129,50 @@ public static class GoalObligationPolicy
         if (decision.WakeObligationId is Guid wake)
         {
             var obligation = obligations?.FirstOrDefault(o => o.Id == wake);
-            if (decision.Action != BotAction.Wait || decision.WakeAfterSeconds is not int delay ||
-                obligation is not { Active: true, Kind: GoalObligationKind.Time, Status: not GoalObligationStatus.Satisfied } ||
-                delay < obligation.DelaySeconds)
-                return Error("invalid-obligation-wake", "wakeObligationId",
-                    "Bind a Wait to an active unsatisfied time obligation and use at least its required delay.");
+            if (decision.Action != BotAction.Wait || decision.WakeAfterSeconds is null)
+                return Error("invalid-obligation-wake", "wakeObligationId", "A time condition reservation needs a timed Wait.") with
+                { Expected = "action=wait and wakeAfterSeconds set", Actual = $"{decision.Action}; {decision.WakeAfterSeconds?.ToString() ?? "no delay"}" };
+            if (obligation is null || obligation.GoalId != target!.Id || !IsOpenTimeCondition(obligation))
+                return Error("invalid-obligation-wake", "wakeObligationId", "Choose an active unsatisfied time condition of this goal.") with
+                { Expected = "An unsatisfied time condition ID of the target goal", Actual = wake.ToString() };
+            if (obligation.Check is { } check && (check.Observed || IsDueCheck(obligation, check, context.Trigger)))
+                return Error("time-check-already-observed", "wakeObligationId",
+                    $"Condition {wake} already has matching due-check evidence {check.Id}. Assess it, or schedule an independent check for further work.") with
+                { Expected = "An unsatisfied time condition without due-check evidence", Actual = wake.ToString() };
+            if (decision.WakeAfterSeconds < obligation.DelaySeconds)
+                return Error("wake-shorter-than-condition", "wakeAfterSeconds", $"Condition {wake} requires a minimum delay of {obligation.DelaySeconds} seconds.") with
+                { Expected = $"At least {obligation.DelaySeconds} seconds", Actual = decision.WakeAfterSeconds.ToString() };
         }
-        if (decision.GoalWakeDeferralReason is not null && (decision.Action != BotAction.Delegate ||
-            !Text(decision.GoalWakeDeferralReason, 1000) || obligations?.Any(o =>
-                o is { Active: true, Kind: GoalObligationKind.Time, Status: not GoalObligationStatus.Satisfied }) != true))
+        var unscheduled = target is null ? [] : UnscheduledTimeConditions(target, context.Trigger);
+        bool independentAction = decision.Action == BotAction.Delegate ||
+            decision is { Action: BotAction.Wait, WakeAfterSeconds: not null, WakeObligationId: null };
+        if (decision.GoalWakeDeferralReason is not null && (!independentAction || unscheduled.Length == 0 || !Text(decision.GoalWakeDeferralReason, 1000)))
             return Error("invalid-wake-deferral", "goalWakeDeferralReason",
-                "Only a delegation that leaves a recorded time obligation open can explain a deferred check.");
+                "A delegation or independent timed Wait can explain why recorded time conditions remain unscheduled.") with
+            { Expected = "A nonempty explanation of at most 1000 characters on Delegate or an independent timed Wait",
+                Actual = $"{decision.Action}; reason length {decision.GoalWakeDeferralReason.Length}" };
+        if (independentAction && unscheduled.Length > 0 && decision.GoalWakeDeferralReason is null)
+            return Error("time-condition-disposition-required", "goalWakeDeferralReason",
+                $"Goal {target!.Id} v{target.Goal.Version} has unreserved time conditions: {string.Join(", ", unscheduled.Select(o => $"{o.Id} ({o.DelaySeconds}s)"))}. " +
+                "Choose a bound timed Wait if the starting event has happened. If other work comes first, explain what still needs to happen before scheduling.") with
+            { Expected = "Timed Wait with wakeObligationId and wakeAfterSeconds, or a reasoned deferral", Actual = $"{decision.Action}; no deferral reason" };
 
         if (assessments.Length > MaxEditsPerDecision || assessments.Any(a => a is null) ||
             assessments.Select(a => a.Id).Distinct().Count() != assessments.Length)
             return Error("invalid-obligation-assessments", "obligationAssessments", "Assess each distinct obligation at most once within the bounded list.");
         if (assessments.Length > 0 && (target is null || decision.Action is not (BotAction.Delegate or BotAction.Wait or BotAction.Complete)))
             return Error("obligation-assessment-action", "obligationAssessments", "Assess existing obligations when choosing Delegate, Wait or Complete.");
-        foreach (var assessment in assessments)
+        for (int index = 0; index < assessments.Length; index++)
         {
+            var assessment = assessments[index];
             var obligation = obligations?.FirstOrDefault(o => o.Id == assessment.Id && o.GoalId == target!.Id);
             if (obligation is not { Active: true } || assessment.Id == decision.WakeObligationId ||
                 assessment.Status is not (GoalObligationStatus.Pending or GoalObligationStatus.InProgress or GoalObligationStatus.Unknown or GoalObligationStatus.Satisfied) ||
                 !Text(assessment.Reason, 1000))
                 return Error("invalid-obligation-assessment", "obligationAssessments", "Assess an active condition of this goal and explain the evidence.");
-            if (assessment.Status == GoalObligationStatus.Satisfied && !HasEvidence(assessment, obligation, decision, context, target!))
-                return Error("obligation-evidence-missing", "obligationAssessments",
-                    $"Condition {obligation.Id} requires current, matching evidence. A scheduled time alone is not due-check evidence.");
+            if (assessment.Status == GoalObligationStatus.Satisfied &&
+                CheckAssessmentEvidence(assessment, obligation, decision, context, target!, index) is { } conflict)
+                return conflict;
             if (assessment.Status != GoalObligationStatus.Satisfied &&
                 (assessment.CompletionNotice || assessment.ExpectedToolStatus is not null))
                 return Error("invalid-obligation-evidence", "obligationAssessments", "An expected tool outcome or completion notice must support a satisfied condition.");
@@ -137,7 +181,11 @@ public static class GoalObligationPolicy
         if (required && decision.Action == BotAction.Complete)
         {
             if (pending.Length > 0)
-                return Error("unreviewed-user-source", "action", "Review the pending user source before completing the goal.");
+                return Error("unreviewed-user-source", "action", "Review the pending user source before completing the goal.") with
+                {
+                    Expected = "no unreviewed user source sequences",
+                    Actual = string.Join(", ", pending.Take(12))
+                };
             if (obligations is null)
                 return Error("legacy-obligations-required", "obligationEdits", "First capture the conditions from the original goal sources on a non-completion decision.");
             var open = obligations.Where(o => o.Active &&
@@ -146,7 +194,13 @@ public static class GoalObligationPolicy
                 != GoalObligationStatus.Satisfied).ToArray();
             if (open.Length > 0)
                 return Error("unsatisfied-obligations", "obligationAssessments",
-                    "These active conditions still need evidence: " + string.Join(", ", open.Take(6).Select(o => o.Id)));
+                    "The goal still has open conditions. Continue with the next action that can obtain the missing evidence; consult the requirements and event query if needed.") with
+                {
+                    Expected = "every active condition satisfied by scoped evidence",
+                    Actual = string.Join("; ", open.Take(8).Select(o =>
+                        $"{o.Id} ({o.Kind}, source #{o.SourceSequence}, " +
+                        $"{assessments.FirstOrDefault(a => a.Id == o.Id)?.Status ?? (context.UnavailableObligationEvidence.Contains(o.Id) ? GoalObligationStatus.Unknown : o.Status)})"))
+                };
         }
         return null;
     }
@@ -200,40 +254,87 @@ public static class GoalObligationPolicy
         return null;
     }
 
-    private static bool HasEvidence(GoalObligationAssessment assessment, GoalObligation obligation, BotDecision decision,
-        BotDecisionContext context, BotGoalSnapshot goal)
+    private static BotDecisionError? CheckAssessmentEvidence(GoalObligationAssessment assessment, GoalObligation obligation,
+        BotDecision decision, BotDecisionContext context, BotGoalSnapshot goal, int index)
     {
-        if (assessment.CompletionNotice)
-            return obligation.Kind == GoalObligationKind.Notice && decision.Action == BotAction.Complete &&
+        if (obligation.Kind == GoalObligationKind.Notice || assessment.CompletionNotice)
+        {
+            bool valid = assessment.CompletionNotice && obligation.Kind == GoalObligationKind.Notice && decision.Action == BotAction.Complete &&
                 context.AutoFinalReport && Text(decision.Message, 16000) &&
                 assessment.DispatchId is null && assessment.EventId is null && assessment.CheckId is null &&
                 assessment.ExpectedToolStatus is null;
+            return valid ? null : Conflict("completionNotice",
+                "Submit a notice condition with completionNotice alone in a Complete action that has a message and automatic reporting enabled.",
+                "a notice condition, completionNotice=true, and no dispatchId, eventId, checkId or expectedToolStatus",
+                $"{obligation.Kind}; {decision.Action}; autoFinalReport={context.AutoFinalReport}; hasMessage={Text(decision.Message, 16000)}; " +
+                $"completionNotice={assessment.CompletionNotice}; dispatchId={assessment.DispatchId}; eventId={assessment.EventId}; " +
+                $"checkId={assessment.CheckId}; expectedToolStatus={assessment.ExpectedToolStatus}");
+        }
         if (obligation.Kind == GoalObligationKind.Time)
-            return assessment.DispatchId is null && assessment.EventId is null && assessment.CheckId is Guid checkId &&
+        {
+            bool valid = assessment.DispatchId is null && assessment.EventId is null && assessment.CheckId is Guid checkId &&
                 assessment.ExpectedToolStatus is null &&
                 obligation.Check is { } check && check.Id == checkId && check.GoalVersion >= obligation.CreatedVersion &&
                 (check.Observed || IsDueCheck(obligation, check, context.Trigger));
-        if (obligation.Kind == GoalObligationKind.Notice || assessment.CheckId is not null ||
-            assessment.DispatchId is not Guid dispatchId || assessment.EventId is not > 0)
-            return false;
+            return valid ? null : Conflict("checkId",
+                "This time condition needs its own observed, due check. Keep it open and schedule Wait when the required delay should start.",
+                "the condition's observed checkId only",
+                $"submitted checkId={assessment.CheckId}, dispatchId={assessment.DispatchId}, eventId={assessment.EventId}; " +
+                (obligation.Check is { } scheduled
+                    ? $"scheduled={scheduled.Id}, dueAt={scheduled.DueAtUnixMilliseconds}, version={scheduled.GoalVersion}, observed={scheduled.Observed}"
+                    : "no check registered"));
+        }
+        if (assessment.CheckId is not null || assessment.DispatchId is not Guid dispatchId || assessment.EventId is not > 0)
+            return Conflict(assessment.CheckId.HasValue ? "checkId" : assessment.DispatchId.HasValue ? "eventId" : "dispatchId",
+                "Cite a specific evidence event from this goal, or leave the condition open and seek evidence.",
+                "dispatchId and positive eventId for a tool outcome or report, with no checkId",
+                $"dispatchId={assessment.DispatchId}; eventId={assessment.EventId}; checkId={assessment.CheckId}");
         var dispatch = context.DispatchEvidence.FirstOrDefault(g => g.GoalId == goal.Id && g.GoalVersion == goal.Goal.Version)?
-            .Dispatches.FirstOrDefault(d => d.DispatchId == dispatchId && d.EvidenceState == "observed");
-        if (dispatch is null || dispatch.SubmissionStarted == false || dispatch.Execution is "uncertain" or "not-submitted") return false;
+            .Dispatches.FirstOrDefault(d => d.DispatchId == dispatchId);
+        if (dispatch is not { EvidenceState: "observed", SubmissionStarted: not false, Execution: not ("uncertain" or "not-submitted") })
+            return Conflict("dispatchId", "Use a submitted dispatch with an observed outcome from this goal, or obtain new evidence.",
+                $"an observed dispatch of goal {goal.Id} at version {goal.Goal.Version}",
+                $"dispatch={dispatchId}; execution={dispatch?.Execution}; evidenceState={dispatch?.EvidenceState}");
+        var fact = FindEvidenceEvent(dispatch, assessment.EventId.Value);
+        if (fact is null || fact.GoalVersion != dispatch.GoalVersion ||
+            fact.GoalVersion is not int version || version < obligation.CreatedVersion || version > goal.Goal.Version)
+            return Conflict("eventId", "The event is outside this condition's scope. Query the dispatch if the recorded event is missing from this view.",
+                $"an event of dispatch {dispatchId} executed within versions {obligation.CreatedVersion} through {goal.Goal.Version}",
+                $"event={assessment.EventId}; eventVersion={fact?.GoalVersion}; dispatchVersion={dispatch.GoalVersion}");
+        if (SupportsRecordedEvidence(obligation, assessment, dispatch, goal.Goal.Version)) return null;
+        string actual = $"event={fact.EventId}; source={fact.Source}; status={fact.Status}; toolId={fact.ToolId}; " +
+            $"laterFailure={fact.SupersededByEventId}; reportedFailures={dispatch.ReportedFailedTools}; " +
+            $"receiptTruncated={dispatch.ReceiptToolsTruncated}; expectedToolStatus={assessment.ExpectedToolStatus}";
+        if (fact.EvidenceKind == BotEvidenceKind.Counterexample)
+            return Conflict("eventId", "This event establishes a failed probe or denied action. Leave the result open and take the next authorized action to obtain it. An expected failed probe may support only a behavior or constraint explicitly requiring that outcome.",
+                "a positive fact for a result, or a failed tool event with expectedToolStatus=failed for a required failure observation", actual);
+        return Conflict("eventId", "This reference does not provide the claimed outcome. Seek a corroborating tool result or continue the unfinished work.",
+            "a completed tool outcome without a later conflicting failure, or a returned report with no failed or truncated tool evidence", actual);
+
+        BotDecisionError Conflict(string field, string message, string expected, string actual) =>
+            Error("obligation-evidence-missing", $"obligationAssessments[{index}].{field}",
+                $"Condition {obligation.Id} ({obligation.Kind}, source #{obligation.SourceSequence}). {message}") with
+            { Expected = expected, Actual = actual };
+    }
+
+    private static BotEvidenceFact? FindEvidenceEvent(BotDispatchEvidence dispatch, long eventId) =>
+        dispatch.Receipt?.EventId == eventId ? dispatch.Receipt : dispatch.ToolEvidence.FirstOrDefault(fact => fact.EventId == eventId);
+
+    public static bool SupportsRecordedEvidence(GoalObligation obligation, GoalObligationAssessment assessment,
+        BotDispatchEvidence dispatch, int currentVersion)
+    {
+        if (assessment.EventId is not long eventId || assessment.DispatchId != dispatch.DispatchId ||
+            dispatch is not { EvidenceState: "observed", SubmissionStarted: not false, Execution: not ("uncertain" or "not-submitted") } ||
+            FindEvidenceEvent(dispatch, eventId) is not { } fact || fact.GoalVersion is not int version ||
+            version != dispatch.GoalVersion || version < obligation.CreatedVersion || version > currentVersion) return false;
         if (assessment.ExpectedToolStatus is not null)
             return assessment.ExpectedToolStatus == "failed" && obligation.Kind is GoalObligationKind.Behavior or GoalObligationKind.Constraint &&
-                dispatch.ToolEvidence.Any(fact => Matches(fact) && fact.Source == BotEventKind.ToolResult && fact.Status == "failed");
-        return dispatch.ToolEvidence.Any(fact => Matches(fact) && fact.Source == BotEventKind.ToolResult && fact.Status == "completed" &&
-                !dispatch.ToolEvidence.Any(other => fact.ToolId is not null && other.ToolId == fact.ToolId &&
-                    other.EventId > fact.EventId && Failed(other))) ||
-            dispatch.Receipt is { Source: BotEventKind.HarnessReceipt, Status: "returned" } receipt && Matches(receipt) &&
-            dispatch.ReceiptToolsTruncated != true && dispatch.ReportedFailedTools is not > 0 &&
-            !dispatch.ToolEvidence.Any(Failed);
-
-        bool Matches(BotEvidenceFact fact) =>
-            fact.EventId == assessment.EventId && fact.GoalVersion == dispatch?.GoalVersion &&
-            fact.GoalVersion >= obligation.CreatedVersion && fact.GoalVersion <= goal.Goal.Version;
-
-        static bool Failed(BotEvidenceFact fact) => fact.Status is "failed" or "denied" or "error" or "declined";
+                fact is { Source: BotEventKind.ToolResult, Status: "failed" };
+        if (fact.EvidenceKind == BotEvidenceKind.ToolOutcome)
+            return fact.SupersededByEventId is null && !dispatch.ToolEvidence.Any(other => fact.ToolId is not null &&
+                other.ToolId == fact.ToolId && other.EventId > fact.EventId && other.EvidenceKind == BotEvidenceKind.Counterexample);
+        return fact.EvidenceKind == BotEvidenceKind.HarnessReport && dispatch.ReceiptToolsTruncated != true &&
+            dispatch.ReportedFailedTools is not > 0 && !dispatch.ToolEvidence.Any(other => other.EvidenceKind == BotEvidenceKind.Counterexample);
     }
 
     private static bool IsDueCheck(GoalObligation obligation, GoalObligationCheck check, BotObservation trigger) =>

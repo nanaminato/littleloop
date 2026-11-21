@@ -195,9 +195,11 @@ def measure_trial(trace, initial_sequence, goal, snapshots):
         active = [o for o in tracked if o['status'].lower() not in ('superseded', 'withdrawn')]
         present = capture_signals(active, trace, expected)
         timed = [o for o in active if o['id'] in present['timedCheck']]
-        enforceable = [o['id'] for o in timed if o['kind'].lower() == 'time' and o.get('delaySeconds') == 30]
+        classified = [o for o in timed if o['kind'].lower() == 'time' and o.get('delaySeconds') == 30]
+        timer = due_timer(trace, events)
+        observed = [o['id'] for o in classified if timer and timer_matches_check(timer, o) and o['check']['observed']]
         capture.update(sourceGroups=present, withoutCaptureSignal=[key for key, ids in present.items() if not ids],
-            timeConditionIdsWithDueCheck=enforceable)
+            timeConditionIdsWithRequiredDelay=[o['id'] for o in classified], timeConditionIdsWithDueCheck=observed)
         for _, snapshot in snapshots:
             for obligation in snapshot.get('obligations') or []:
                 if obligation['status'].lower() != 'satisfied':
@@ -270,6 +272,7 @@ def extended_report(batch, rates):
                 missing=len(observation['capture']['withoutCaptureSignal']))
             if observation['capture']['sourceGroups']['timedCheck']:
                 capture_counts.update(timeCaptured=1,
+                    timeNotClassified=not observation['capture']['timeConditionIdsWithRequiredDelay'],
                     timeWithoutDueCheck=not observation['capture']['timeConditionIdsWithDueCheck'])
         all_assessments.extend(observation['assessments'])
         if observation['restart'] is not None:
@@ -285,6 +288,7 @@ def extended_report(batch, rates):
         'receivedButUnpersistedRevision': rate(
             revisions_received - sum(trial['revisionApplied'] for trial in result['trials']), revisions_received),
         'captureSignalMissing': rate(capture_counts['missing'], capture_counts['eligible']),
+        'capturedTimeNotClassifiedWithDelay': rate(capture_counts['timeNotClassified'], capture_counts['timeCaptured']),
         'capturedTimeWithoutDueCheck': rate(capture_counts['timeWithoutDueCheck'], capture_counts['timeCaptured']),
         'satisfiedWithoutLinkedEvidence': rate(sum(not a['evidenceExists'] for a in all_assessments), len(all_assessments)),
         'satisfiedButFixtureDisagrees': rate(sum(not a['fixtureSemanticCheck'] for a in semantic_checks), len(semantic_checks)),

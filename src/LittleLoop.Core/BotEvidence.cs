@@ -9,8 +9,26 @@ public sealed record BotHarnessOption(string Id, string Description, string[] Ca
     public bool CanQueue => Availability == "available-to-queue";
 }
 
+[JsonConverter(typeof(GoalObligationEnumConverter<BotEvidenceKind>))]
+public enum BotEvidenceKind { Decision, UserSource, HostObservation, HarnessReport, ToolOutcome, Counterexample, UnknownOutcome }
+
 public sealed record BotEvidenceFact(long EventId, BotEventKind Source, int? GoalVersion, string? Status, string Text,
-    string? ToolId = null, string? ToolKind = null);
+    string? ToolId = null, string? ToolKind = null)
+{
+    public BotEvidenceKind EvidenceKind => Source switch
+    {
+        BotEventKind.UserMessage => BotEvidenceKind.UserSource,
+        BotEventKind.BotDecision => BotEvidenceKind.Decision,
+        BotEventKind.Timer => BotEvidenceKind.HostObservation,
+        BotEventKind.HarnessReceipt when Status == "returned" => BotEvidenceKind.HarnessReport,
+        BotEventKind.ToolResult when Status == "completed" => BotEvidenceKind.ToolOutcome,
+        BotEventKind.ToolResult when Status is "failed" or "denied" or "error" or "declined" => BotEvidenceKind.Counterexample,
+        _ => BotEvidenceKind.UnknownOutcome
+    };
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? SupersededByEventId { get; init; }
+}
 
 /// <summary>A Bot's assessment of evidence at a particular goal version. It is separate from execution and goal completion.</summary>
 public sealed record BotEvidenceVerification(long DecisionEventId, int? GoalVersion);

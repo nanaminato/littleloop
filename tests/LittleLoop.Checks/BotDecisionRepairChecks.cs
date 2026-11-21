@@ -33,6 +33,7 @@ internal static class BotDecisionRepairChecks
             "unknown-harness", "harness-reference", "harness", ContinueReview, BotAction.Delegate);
         await Correction(Receipt, """{"action":"delegate","instruction":"Check the report"}""",
             "missing-harness", "harness-reference", "harness", ContinueReview, BotAction.Delegate);
+        await CheckSchemaFeedback();
 
         await Correction(Receipt with { Goals = [Target with { RemainingTurns = 0 }] }, ContinueReview,
             "turn-budget-exhausted", "field", "action", Ask, BotAction.Wait, delegateAllowed: false);
@@ -88,7 +89,8 @@ internal static class BotDecisionRepairChecks
         await Reject(() => new ModelBotDecisionEngine(repeated, maxFormatAttempts: 2)
             .DecideAsync(Receipt with { ObserveModelCall = repeatedCalls.Add }, default));
         Require(repeated.Inputs.Count == 2 && repeatedCalls.Count == 2 &&
-            repeatedCalls.All(c => c is { Error.Code: "unknown-harness", Draft.Raw: not null }),
+            repeatedCalls.All(c => c is { Error.Code: "unknown-harness", Draft.Raw: not null }) &&
+            repeatedCalls[0].PriorSameError == 0 && repeatedCalls[1].PriorSameError == 1,
             "attempt budget keeps all rejected drafts and does not dispatch a third");
 
         var stale = new BotDecisionError("goal-version-changed", "goal-version-conflict", "The goal has been revised.", "goalId");
@@ -109,6 +111,41 @@ internal static class BotDecisionRepairChecks
             Receipt with { CheckFreshness = _ => Task.FromResult<BotDecisionError?>(denied) }, default), denied);
         Require(restricted.Inputs.Count == 1, "permission refusal is terminal for the snapshot before attempting repair");
         Console.WriteLine("PASS deterministic Bot draft repair, evidence safety, stale snapshots and metered retry bounds");
+    }
+
+    private static async Task CheckSchemaFeedback()
+    {
+        const string unexpectedField = """{"action":"wait","obligationEdits":[{"action":"withdraw","oldId":"some-id"}]}""";
+        var (_, client, audit) = await Observe(Receipt, unexpectedField, Ask);
+        var unknown = audit[0].Error;
+        var feedback = JsonDocument.Parse(client.Prompts[1][(client.Prompts[1].LastIndexOf('\n') + 1)..]);
+        using (feedback)
+        {
+            var error = feedback.RootElement.GetProperty("error");
+            Require(unknown is { Code: "unknown-field", Field: "obligationEdits[0].oldId", Actual: "\"some-id\"" } &&
+                unknown.Expected?.Contains("id?: UUID string", StringComparison.Ordinal) == true &&
+                error.GetProperty("actual").GetString() == unknown.Actual &&
+                feedback.RootElement.GetProperty("goal").GetProperty("version").GetInt32() == 5,
+                "nested unknown field reports its exact path, actual value, allowed shape and goal version");
+        }
+
+        var (_, _, wrongType) = await Observe(Receipt,
+            """{"action":"wait","obligationAssessments":[{"id":123,"status":"unknown","reason":"no evidence"}]}""", Ask);
+        Require(wrongType[0].Error is
+            { Code: "invalid-field-type", Field: "obligationAssessments[0].id", Expected: "UUID string", Actual: "123" },
+            "an incorrect field type reports the containing array index");
+
+        var (_, _, missing) = await Observe(Receipt, $$"""
+            {"action":"wait","obligationAssessments":[{"id":"{{Goal}}","status":"unknown"}]}
+            """, Ask);
+        Require(missing[0].Error is
+            { Code: "missing-required-field", Field: "obligationAssessments[0].reason", Expected: "string", Actual: "<missing>" },
+            "a missing required member reports its exact path");
+
+        var (_, _, duplicate) = await Observe(Receipt, """{"action":"wait","message":"one","message":"two"}""", Ask);
+        Require(duplicate[0].Error is
+            { Code: "duplicate-field", Field: "message", Expected: "one string", Actual: "\"two\"" },
+            "duplicate fields identify the conflicting field and second value");
     }
 
     private static async Task Correction(BotDecisionContext context, string original, string code, string category, string field,

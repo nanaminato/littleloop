@@ -11,12 +11,112 @@ internal static partial class WorkerChecks
         Action<bool, string> check)
     {
         await CheckTimedObligation(config, owner, check);
+        await CheckWaitingForExternalInput(owner, check);
         await CheckRevisionObligations(owner, check);
         await CheckParallelObligations(owner, check);
         await CheckDirectedObligationSource(owner, check);
         await CheckObligationEvidence(owner, check);
+        await CheckFactQueries(owner, check);
         await CheckDroppedInitialEditsInRepair(owner, check);
         await CheckFailedObligationRepair(config, project, owner, check);
+    }
+
+    private static async Task CheckFactQueries(Account owner, Action<bool, string> check)
+    {
+        using var fixture = new ObligationFixture(owner);
+        await fixture.Initialize();
+        const string request = "Read the approved title. Use the separate backup if the historical catalog is inaccessible.";
+        var (sequence, running) = await fixture.StartGoal(request,
+            Add(GoalObligationKind.Result, "Read the approved title from a usable source."));
+        var stored = running.Goal!.Obligations!.Single();
+        await fixture.Store.SaveHarnessReceipt(running, new("returned", "fixture-session", "The backup supplied the approved title.",
+            [new("old-catalog", "read", "failed", "Historical catalog is unavailable."),
+             new("read-title", "read", "completed", "Approved title: Cypress."),
+             .. Enumerable.Range(1, 6).Select(i => new HarnessToolResult($"audit-{i}", "read", "completed", $"Read audit page {i}."))],
+            ToolsTruncated: false, DispatchSubmitted: true));
+        var snapshot = await fixture.Snapshot(goal: true);
+        var read = snapshot.Context.ReadFacts!;
+        var dispatch = snapshot.Context.DispatchEvidence.Single().Dispatches.Single();
+        var requirements = await read(new(BotFactQueryKind.Requirements, running.Id), default);
+        check(requirements.OpenConditionCount == 1 && requirements.Conditions!.Single() is
+            { Kind: GoalObligationKind.Result, Status: GoalObligationStatus.Pending } condition && condition.Id == stored.Id &&
+            requirements.Sources!.Single() is { } source && source.Sequence == sequence && source.Text == request,
+            "requirements query returns the open condition, version and original user source");
+
+        var firstQuery = new BotFactQuery(BotFactQueryKind.Events, running.Id, dispatch.DispatchId);
+        var firstPage = await read(firstQuery, default);
+        var secondQuery = firstQuery with { BeforeEventId = firstPage.NextBeforeEventId };
+        var secondPage = await read(secondQuery, default);
+        var success = secondPage.Events!.Single(row => row.Fact.ToolId == "read-title").Fact;
+        var failure = secondPage.Events!.Single(row => row.Fact.ToolId == "old-catalog").Fact;
+        check(firstPage.Events!.Length == 5 && firstPage.NextBeforeEventId.HasValue &&
+            !firstPage.Events.Any(entry => secondPage.Events!.Any(other => entry.Fact.EventId == other.Fact.EventId)) &&
+            success.EvidenceKind == BotEvidenceKind.ToolOutcome && failure.EvidenceKind == BotEvidenceKind.Counterexample,
+            "dispatch query pages report successful and failed tool facts independently with stable event IDs");
+        var foreign = await read(firstQuery with { GoalId = Guid.NewGuid() }, default);
+        check(foreign is { Error.Code: "unknown-fact-query-goal", Events: null },
+            "fact queries cannot disclose a different goal's evidence");
+
+        var proof = new GoalObligationAssessment(stored.Id, GoalObligationStatus.Satisfied,
+            "The backup read returned the approved title.", dispatch.DispatchId, success.EventId);
+        var completion = new BotDecision(BotAction.Complete, running.Id, Message: "The approved title is Cypress.",
+            ObligationAssessments: [proof]);
+        var counterexample = completion with { ObligationAssessments = [proof with { EventId = failure.EventId }] };
+        check(completion.Check(snapshot.Context) is { Field: "obligationAssessments[0].eventId" } &&
+            counterexample.Check(snapshot.Context) is { Field: "obligationAssessments[0].eventId", Actual: { } actual } &&
+            actual.Contains("status=failed", StringComparison.Ordinal),
+            "a hidden older tool outcome must be retrieved and a visible failed probe never proves the desired result");
+
+        var model = new ObligationModel(JsonSerializer.Serialize(new { factQuery = firstQuery }, ObligationJson),
+            JsonSerializer.Serialize(new { factQuery = secondQuery }, ObligationJson), JsonSerializer.Serialize(completion, ObligationJson));
+        var calls = new List<BotModelCall>();
+        var accepted = await new ModelBotDecisionEngine(model, maxFormatAttempts: 1)
+            .DecideAsync(snapshot.Context with { ObserveModelCall = calls.Add }, default);
+        check(calls.Select(call => call.Outcome).SequenceEqual(["fact-query", "fact-query", "accepted"]) &&
+            model.Inputs[2].Contains("Approved title: Cypress.", StringComparison.Ordinal) &&
+            (await fixture.Read(running.Id)).Status == "deciding",
+            "Bot chooses read-only queries and a decision independently of the draft-repair budget");
+        var confirm = new BotDecision(BotAction.Delegate, running.Id, Instruction: "Independently confirm the approved title.",
+            Harness: "deepseek", VerifyDispatchId: dispatch.DispatchId, ReviewDispatchId: dispatch.DispatchId,
+            ReviewReason: "Check the title from a separate source.", ObligationAssessments: [proof]);
+        check(await fixture.TryCommit(snapshot, confirm) is null && (await fixture.Read(running.Id)).Goal!.Obligations!.Single()
+            .Status == GoalObligationStatus.Satisfied,
+            "commit rechecks a cited historical event against the ledger inside its own transaction");
+        var reviewing = await fixture.Claim();
+        await fixture.Return(reviewing, "The independent source also reads Cypress.");
+        var next = await fixture.Snapshot(goal: true);
+        var verifiedPage = await next.Context.ReadFacts!(firstQuery, default);
+        var scoped = (next.Context with { DispatchEvidence = [] }).WithQueriedEvidence([verifiedPage]);
+        var verifiedDispatch = scoped.DispatchEvidence.Single().Dispatches.Single();
+        var duplicate = new BotDecision(BotAction.Delegate, running.Id, Instruction: dispatch.OriginalInstruction, Harness: dispatch.Harness);
+        check(verifiedDispatch.Verification is not null && duplicate.Check(scoped) is { Code: "verified-delegation-repeated" },
+            "a scoped query retains verification committed in a different dispatch and protects against a checked repeat");
+        check(await fixture.TryCommit(next, accepted) is null && (await fixture.Read(running.Id)).Status == "completed",
+            "a Bot can complete with scoped historical proof and a newer independent report");
+    }
+
+    private static async Task CheckWaitingForExternalInput(Account owner, Action<bool, string> check)
+    {
+        using var fixture = new ObligationFixture(owner);
+        await fixture.Initialize();
+        const string request = "Review the report in the workspace.";
+        var (sequence, work) = await fixture.StartGoal(request, Add(GoalObligationKind.Result, request));
+        await fixture.Return(work, "Two reports exist with no identifying date in the request.");
+        var receipt = await fixture.Snapshot(goal: true);
+        await fixture.Commit(receipt, new(BotAction.Wait, work.Id, Message: "Which reporting date should I use?"));
+        fixture.Reopen();
+        var waiting = await fixture.Read(work.Id);
+        check(waiting is { Status: "waiting-input", Input.Loop.Wake: null, Input.Loop.ScheduledWakeups: 0 } &&
+            await fixture.Store.NextBotInput(goal: true) is null,
+            "an external-input wait survives storage reopening without registering a clock reservation");
+        await fixture.Say("Please use the June report.", sequence);
+        var answer = await fixture.Snapshot(goal: false);
+        await fixture.Commit(answer, new(BotAction.Revise, work.Id, Instruction: "Review the June report.",
+            ObligationEdits: [Add(GoalObligationKind.Constraint, "Use the June report.")]));
+        var continued = await fixture.Snapshot(goal: true);
+        check(continued.Context.Trigger is { Kind: BotEventKind.BotDecision, Status: "Revise" } trigger && trigger.GoalId == work.Id &&
+            continued.Context.Goals.Single().Goal.Requirements.Contains("Review the June report."),
+            "new user evidence reopens a waiting goal for a new Bot decision without any timer");
     }
 
     private static async Task CheckTimedObligation(IConfiguration config, Account owner, Action<bool, string> check)
@@ -40,6 +140,19 @@ internal static partial class WorkerChecks
         var receipt = await fixture.Snapshot(goal: true);
         var dispatch = receipt.Context.DispatchEvidence.Single().Dispatches.Single();
         var resultProof = Satisfy(result, dispatch);
+        var skipReservation = new BotDecision(BotAction.Delegate, goalId, Message: "I will schedule the follow-up.",
+            Instruction: "Proceed to the next step.", Harness: "codex");
+        var reservationError = await fixture.TryCommit(receipt, skipReservation);
+        var deferred = skipReservation with { GoalWakeDeferralReason = "The saved count has not yet been confirmed as the baseline." };
+        check(reservationError is { Code: "time-condition-disposition-required", Field: "goalWakeDeferralReason" } &&
+            reservationError.Message.Contains(timed.Id.ToString(), StringComparison.Ordinal) &&
+            deferred.Check(receipt.Context) is null &&
+            (await fixture.Read(goalId)).Input.Loop is { ScheduledWakeups: 0, Wake: null },
+            "continuing past an unreserved time condition needs a deliberate Bot deferral and prose does not register a wake");
+        var poll = new BotDecision(BotAction.Wait, goalId, WakeAfterSeconds: 5);
+        check(poll.Check(receipt.Context) is { Code: "time-condition-disposition-required" } &&
+            (poll with { GoalWakeDeferralReason = "Check for the baseline before starting the required interval." }).Check(receipt.Context) is null,
+            "a separate timed check may leave the required interval unscheduled with a reason");
         var premature = new BotDecision(BotAction.Complete, goalId, Message: "The count is 3.",
             ObligationAssessments: [resultProof]);
         check(premature.Check(receipt.Context) is { Code: "unsatisfied-obligations" } &&
@@ -59,6 +172,7 @@ internal static partial class WorkerChecks
         check(repaired.Decision is { Action: BotAction.Wait, WakeAfterSeconds: 43 } && repaired.Decision.WakeObligationId == timed.Id &&
             calls.Count == 2 && calls[0] is { Error.Code: "wake-requires-wait", Draft.Raw: not null } && calls[0].Draft!.Raw == raw &&
             model.Inputs[1].Contains(timed.Id.ToString(), StringComparison.Ordinal) &&
+            model.Inputs[1].Contains($"\"unreservedTimeConditionIds\":[\"{timed.Id}\"]", StringComparison.Ordinal) &&
             model.Inputs[1].Contains(timingText, StringComparison.Ordinal),
             "repairing an illegal Delegate preserves the original draft and sees the still-effective timed condition");
         await CheckDroppedWakeInRepair(receipt.Context, illegal, raw, check);
@@ -66,11 +180,14 @@ internal static partial class WorkerChecks
 
         var waiting = await fixture.Read(goalId);
         var checkId = waiting.Goal!.Obligations!.Single(item => item.Id == timed.Id).Check!.Id;
+        var wakeIntent = (await fixture.Store.GoalObservations(goalId)).Single(e => e.Status == "Wait");
         fixture.Clock.Advance(42_999);
         check(waiting.Goal.Obligations!.Single(item => item.Id == result.Id).Status == GoalObligationStatus.Satisfied &&
             waiting.Goal.Obligations!.Single(item => item.Id == timed.Id) is { Status: GoalObligationStatus.InProgress, Check.Observed: false } &&
+            wakeIntent.CheckId == checkId && wakeIntent.WakeObligationId == timed.Id &&
+            wakeIntent.WakeAtUnixMilliseconds == waiting.Input.Loop?.Wake?.AtUnixMilliseconds &&
             await fixture.Store.NextBotInput(goal: true) is null,
-            "a durable reservation is in progress and supplies no before-due wake evidence");
+            "the decision and reservation identify the same scheduled wake and supply no before-due wake evidence");
 
         await fixture.Say("What have you confirmed so far?", sequence);
         var progress = await fixture.Snapshot(goal: false);
@@ -81,6 +198,9 @@ internal static partial class WorkerChecks
         var beforeDueEvidence = progress.Context with { Trigger = receipt.Context.Trigger, ReplyGoalId = null };
         check(scheduledIsNotProof.Check(beforeDueEvidence) is { Code: "obligation-evidence-missing" },
             "claiming satisfaction with an unobserved check ID is rejected as missing evidence");
+        check(new BotDecision(BotAction.Wait, goalId, Message: "I need more input.")
+            .Check(progress.Context with { ReplyGoalId = null }) is { Code: "wake-already-scheduled" },
+            "an unrelated plain wait cannot erase a previously committed wake");
         await fixture.Commit(progress, new(BotAction.Reply, goalId, Message: "The count is 3. The follow-up is pending.",
             GoalReplyReason: "The user requests a progress report without changing the goal."));
 
@@ -103,6 +223,8 @@ internal static partial class WorkerChecks
         check(due.Context.Trigger is { Kind: BotEventKind.Timer } && due.Context.Trigger.CheckId == checkId &&
             due.Context.Trigger.WakeObligationId == timed.Id,
             "the due Timer enters the unified decision context with evidence scoped to its own condition");
+        check(wait.Check(due.Context) is { Code: "time-check-already-observed" },
+            "a due time condition can be assessed without registering a duplicate reservation");
         var complete = premature with
         {
             Message = "I rechecked the saved distinct-label count against the archived report. The count remains 3.",
@@ -139,7 +261,9 @@ internal static partial class WorkerChecks
         Action<bool, string> check)
     {
         var dropsWake = illegal with { WakeAfterSeconds = null, WakeObligationId = null };
-        var model = new ObligationModel(original, JsonSerializer.Serialize(dropsWake, ObligationJson));
+        // An otherwise legal user-input wait must not silently discard a specific earlier proposed reservation.
+        var asksInstead = new BotDecision(BotAction.Wait, illegal.GoalId, Message: "Which baseline should I use?");
+        var model = new ObligationModel(original, JsonSerializer.Serialize(asksInstead, ObligationJson));
         var calls = new List<BotModelCall>();
         try
         {
@@ -413,11 +537,15 @@ internal static partial class WorkerChecks
             var correction = await model.Next();
             correction.Return(second);
 
-            var stopped = await fixture.Until(goalId, item => item.Status == "waiting-input");
+            await UntilAudit(first, second);
+            fixture.Clock.Advance(2_000);
+            (await model.Next()).Return(first);
+            (await model.Next()).Return(second);
+            var stopped = await fixture.Until(goalId, item => item.Error is not null);
             check(stopped.Error is not null && stopped.Output is null && stopped.Goal!.Obligations!.Length == 2 &&
                 stopped.Goal.Obligations.All(item => item.Status != GoalObligationStatus.Satisfied) &&
-                harness.Calls.Count == 1 && await fixture.Store.NextBotInput(goal: true) is null,
-                "exhausting the normal draft-repair budget persists a failed decision without fabricating satisfaction or replaying execution");
+                stopped.Status == "deciding" && harness.Calls.Count == 1 && await fixture.Store.NextBotInput(goal: true) is null,
+                "exhausting technical decision recovery preserves the trigger without fabricating satisfaction, a human wait or a dispatch");
             check(await fixture.RepairWasRecorded(goalId, first, second),
                 "the failed repair preserves both rejected decision drafts in the durable event ledger");
 
@@ -425,10 +553,26 @@ internal static partial class WorkerChecks
             const string wrongReply = """{"action":"reply","message":"The signature date requirement is saved."}""";
             (await model.Next()).Return(wrongReply);
             (await model.Next()).Return(wrongReply);
+            await UntilAudit(wrongReply, wrongReply);
+            fixture.Clock.Advance(2_000);
+            var retry = await model.Next();
+            using (var body = JsonDocument.Parse(retry.Input))
+                check(body.RootElement.GetProperty("trigger").GetProperty("sequence").GetInt64() == supplement &&
+                    body.RootElement.GetProperty("decisionRecovery").GetProperty("failures").GetInt32() == 1,
+                    "revision retry keeps the current user message as the original trigger");
+            retry.Return(wrongReply);
+            (await model.Next()).Return(wrongReply);
             var unresolved = await fixture.Until(goalId, item => item.Goal?.PendingRequirementSources?.Contains(supplement) == true);
             check(unresolved.Goal!.Obligations!.Length == 2 && unresolved.Goal.Requirements.Length == 0 &&
                 await fixture.RepairWasRecorded(goalId, wrongReply, wrongReply),
                 "a failed goal-linked revision is recorded as an unresolved user source instead of an acknowledged requirement");
+
+            async Task UntilAudit(string a, string b)
+            {
+                using var deadline = new CancellationTokenSource(Timeout);
+                while (!await fixture.RepairWasRecorded(goalId, a, b))
+                    await Task.Delay(25, deadline.Token);
+            }
         }
         finally { await worker.StopAsync(default); }
     }
@@ -607,7 +751,7 @@ internal static partial class WorkerChecks
             query.Parameters.AddWithValue("$id", id.ToString());
             query.Parameters.AddWithValue("$first", first);
             query.Parameters.AddWithValue("$second", second);
-            return Convert.ToInt64(await query.ExecuteScalarAsync()) == 1;
+            return Convert.ToInt64(await query.ExecuteScalarAsync()) > 0;
         }
 
         public void Dispose() => database.Dispose();

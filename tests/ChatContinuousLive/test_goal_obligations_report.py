@@ -2,6 +2,7 @@
 
 import unittest
 
+from autonomy_reliability_report import audit
 from goal_obligations_report import measure_trial
 
 
@@ -45,6 +46,8 @@ class GoalObligationsReportTests(unittest.TestCase):
     def test_scheduled_time_is_neither_evidence_nor_semantic_satisfaction(self):
         result = self.score([self.timed])
         self.assertEqual(result['capture']['sourceGroups']['timedCheck'], ['timed'])
+        self.assertEqual(result['capture']['timeConditionIdsWithRequiredDelay'], ['timed'])
+        self.assertEqual(result['capture']['timeConditionIdsWithDueCheck'], [])
         self.assertEqual(result['capture']['sourceGroups']['supplementalNotice'], [])
         self.assertFalse(result['assessments'][0]['evidenceExists'])
         self.assertFalse(result['assessments'][0]['fixtureSemanticCheck'])
@@ -58,6 +61,7 @@ class GoalObligationsReportTests(unittest.TestCase):
         result = self.score([after], [('Wait', {'version': 4, 'obligations': [before]}),
             ('Complete', {'version': 4, 'obligations': [after]})])
         self.assertTrue(result['restart']['persistedObligationCheck'])
+        self.assertEqual(result['capture']['timeConditionIdsWithDueCheck'], ['timed'])
         self.assertTrue(result['assessments'][0]['evidenceExists'])
         self.assertTrue(result['assessments'][0]['fixtureSemanticCheck'])
         self.trace['events'][2]['observation']['goalId'] = 'other-goal'
@@ -82,6 +86,7 @@ class GoalObligationsReportTests(unittest.TestCase):
         condition = {**self.timed, 'kind': 'behavior', 'delaySeconds': None, 'status': 'pending'}
         score = self.score([condition])
         self.assertEqual(score['capture']['sourceGroups']['timedCheck'], ['timed'])
+        self.assertEqual(score['capture']['timeConditionIdsWithRequiredDelay'], [])
         self.assertEqual(score['capture']['timeConditionIdsWithDueCheck'], [])
 
     def test_expected_failure_is_exact_tool_evidence_for_behavior(self):
@@ -91,6 +96,29 @@ class GoalObligationsReportTests(unittest.TestCase):
             'assessment': {'id': 'probe', 'dispatchId': 'probe', 'eventId': 8, 'expectedToolStatus': 'failed'}}
         self.assertTrue(self.score([obligation])['assessments'][0]['evidenceExists'])
         self.assertFalse(self.score([{**obligation, 'kind': 'result'}])['assessments'][0]['evidenceExists'])
+
+    def test_internal_recovery_counts_rejected_drafts_and_durable_continuation_separately(self):
+        bad_draft = {'outcome': 'invalid-decision', 'error': {'code': 'missing-harness', 'field': '$.harness'}}
+        valid_draft = {'outcome': 'accepted'}
+        events = [
+            event(1, 'DecisionAudit', {'goalVersion': 4, 'sequence': 27}, {
+                'triggerKind': 'HarnessReceipt', 'cognitionSource': {
+                    'engine': 'host/decision-deferred', 'modelCalls': [bad_draft, bad_draft],
+                },
+            }),
+            event(2, 'BotDecision', {'goalVersion': 5, 'sequence': 27}, {
+                'triggerKind': 'HarnessReceipt', 'triggerGoalVersion': 4, 'cognitionSource': {
+                    'engine': 'model', 'modelCalls': [bad_draft, valid_draft],
+                },
+            }),
+        ]
+        calls, metrics = audit(events)
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(metrics['invalidDrafts'], 3)
+        self.assertEqual(metrics['repeatedDraftErrors'], 1)
+        self.assertEqual(metrics['errorsRepeatedAfterDeferral'], 1)
+        self.assertEqual(metrics['redraftedAndCommitted'], 1)
+        self.assertEqual(metrics['recoveredDecisions'], 1)
 
 
 if __name__ == '__main__':

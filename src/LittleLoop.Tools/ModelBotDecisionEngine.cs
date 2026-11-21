@@ -9,13 +9,15 @@ using LittleLoop.Core;
 namespace LittleLoop.Tools;
 
 /// <summary>Produces one action, allowing a bounded correction of an invalid model response before dispatch.</summary>
-public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxInputCharacters = 32768, int maxFormatAttempts = 2) : IBotDecisionEngine
+public sealed partial class ModelBotDecisionEngine(ISemanticModelClient client, int maxInputCharacters = 32768, int maxFormatAttempts = 2) : IBotDecisionEngine
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = false,
         RespectRequiredConstructorParameters = true,
+        RespectNullableAnnotations = true,
         AllowDuplicateProperties = false,
+        NumberHandling = JsonNumberHandling.Strict,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) }
@@ -42,7 +44,8 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
         - delegate: the listed harnesses can investigate and perform work in their configured workspaces. When the
           user asks you to improve an implementation, begin by inspecting it through a harness. A broad request can
           start with a discovery step. Learn what you can from the workspace before asking the user to design the fix.
-          Give the selected harness one actionable instruction with relevant constraints and a check for its result.
+          Every Delegate requires the exact harness ID in "harness", including when resuming the same Harness.
+          Give it one actionable "instruction" with relevant constraints and a check for its result.
           For new work omit goalId, give objective AND a short message describing what you
           will do first. For further work supply goalId, omit objective, and send message only for meaningful progress.
           Continue the same harness when its context helps. If another harness is better suited to the next step,
@@ -54,7 +57,7 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
         - wait: suspend a goal awaiting input or evidence. Use message for a specific question or a concrete blocker.
           If a requested capability is missing say which one. When the trigger has no goal, a question alone is valid.
           If a specific future check advances the goal, set wakeAfterSeconds (5 through 604800) on wait for a goal
-          in deciding or waiting-input with remainingWakeups above zero. Use a plain wait if human input is required.
+          in deciding or waiting-input with remainingWakeups above zero. A plain wait does not register a check.
         - complete: close goalId only when its actual objective and requirements are met. Summarize the evidence if
           a report would help. message may be omitted. The host observes autoFinalReport for completion messages.
         - remember: persist an explicitly stated lasting preference or rule as instruction. For a constraint on
@@ -82,11 +85,25 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
         For a local toolResult without a goalId choose reply to explain the result.
         A timer is the scheduled check of a waiting-input goal. Reassess the current evidence. You can delegate
         for that goal, wait (with a message to report progress and optionally another check), or complete with evidence.
+        decisionRecovery, when present, contains internal diagnostics for this original trigger. Reconsider the
+        next action from the current state and those diagnostics. If the evidence is insufficient, seek evidence or
+        continue useful authorized work with the relevant condition open. Ask a person only for information or authority
+        unavailable through the listed capabilities.
 
         Review the dispatch evidence before choosing another round. A returned report and a completed tool call are
         different facts from verified work. If the evidence satisfies a requirement you can record your assessment
         with verifyDispatchId on your next goal action. Use reviewDispatchId and reviewReason on a new delegation
         to repeat an earlier dispatch for a new requirement, a contradiction or another specific reason.
+        Observed evidence describes what was recorded. The evidence kind distinguishes a harness report, a tool
+        outcome, a counterexample, a host observation and an unknown outcome. An assessment in verification records
+        your earlier judgment. A new review dispatch provides its own evidence and must be assessed on its merits.
+        If factQueryAvailable and a needed detail is missing, you may instead return a read-only query, for example
+        {"factQuery":{"kind":"requirements","goalId":"<goal UUID>"}} or
+        {"factQuery":{"kind":"events","goalId":"<goal UUID>","dispatchId":"<optional dispatch UUID>"}}.
+        For an older page use the returned nextBeforeEventId as beforeEventId. A query neither dispatches nor waits.
+        The next request includes the result. Use a query only when more detail would change your decision.
+        If there is no evidence of the required result, leave it open and choose the next useful authorized action.
+        A failed probe can establish that the probe failed. It cannot establish that a fallback produced a result.
         Check whether the actual and expected values differ before treating a result as failed. Prefer making
         progress from verified evidence when no requirement or observation materially changes it.
 
@@ -96,20 +113,29 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
         Any required relative delay/check uses kind "time" with the exact delaySeconds, even in the middle of work.
         Make the delay its own time condition, with its starting event and following work in the description.
         Preserve distinct conditions for required work and final notice. Describe ordering and dependencies precisely.
-        To update an active goal from the current user message use Revise. "replace" has the old id, new kind and
-        description, and reason quoting or explaining the user's basis for replacement. "withdraw" has the old id and
-        the user's basis as reason. Leave unrelated conditions intact. A goal-linked informational Reply uses
+        To update an active goal from the current user message use Revise. The only edit fields are action, id, kind,
+        description, delaySeconds, reason, sourceSequence. For replace and withdraw use "id" for the existing
+        condition's UUID. Replace also supplies the new kind and description. Both supply a user-sourced reason.
+        Leave unrelated conditions intact. A goal-linked informational Reply uses
         goalReplyReason to explain why the message changes no requirement. Reply cannot acknowledge saving a requirement.
         The goal's pendingRequirementSources must be reviewed through a sourced Revise or genuinely informational
-        Reply using resolveSourceSequence. Keep the original request's meaning and state how you resolved it.
+        Reply using resolveSourceSequence with an ID from that list. Omit resolveSourceSequence for a normal
+        revision from the current turn. Keep the original request's meaning and state how you resolved it.
         A goal-linked user message cannot directly schedule work or complete the goal. Apply the user's revision
         first, ask for clarification, or use a goal control when the user explicitly asked for it.
         For a legacy goal with null obligations, initialize with add edits referencing each displayed same-goal
         sourceSequence before attempting Complete. Use a non-completion goal action to record the initialization.
         Established goals cannot edit the user's obligations in response to a tool, timer or harness report.
 
-        For an unfulfilled time condition, schedule Wait with its exact wakeObligationId and the required
-        wakeAfterSeconds. A planned check or a dispatch finishing is not proof that the waiting period elapsed.
+        For each unreservedTimeConditionId, read its description and compare its starting event with the latest
+        observation before continuing. Once you decide it is time to wait, use {"action":"wait","goalId":"<goal UUID>",
+        "wakeObligationId":"<time condition UUID>","wakeAfterSeconds":60}, replacing 60 with the condition's delay.
+        Only that action registers the wake. A time edit, an announcement saying you will wait, a Harness
+        instruction, and a delegation have no scheduling effect. Do not send work that must follow this check yet.
+        If the starting event has not occurred or you need information to establish it, delegate with
+        goalWakeDeferralReason describing what still needs to happen. For an independent timed check, give the same
+        explanation of why the time condition is still unreserved. Keep assessments of those conditions open.
+        A dispatch finishing or a scheduled check that has not fired is not proof that the waiting period elapsed.
         After the matching Timer marked due, or after an observed matching check already appears in the ledger,
         assess that time condition using its checkId and retain any separate work that must occur after the timer.
         obligationAssessments entries use id, status, reason, and supporting references. Use "satisfied" with a
@@ -143,14 +169,16 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
     {
         token.ThrowIfCancellationRequested();
         if (maxFormatAttempts is < 1 or > 3) throw new ArgumentOutOfRangeException(nameof(maxFormatAttempts));
-        var (input, visible) = Input(context);
+        var factQueries = new List<BotFactQueryResponse>();
+        var (input, visible) = Input(context, factQueries);
         string instruction = Prompt;
+        var rejected = new List<BotDecisionError>();
         RetainedWake? retainedWake = null;
         BotDecision? retainedEdits = null;
         for (int attempt = 1; attempt <= maxFormatAttempts; attempt++)
         {
             token.ThrowIfCancellationRequested();
-            if (attempt > 1 && visible.CheckFreshness is { } check &&
+            if ((attempt > 1 || factQueries.Count > 0) && visible.CheckFreshness is { } check &&
                 await check(token) is { } superseded)
                 throw new BotDecisionSupersededException(superseded);
             SemanticModelReply reply;
@@ -168,21 +196,43 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
                 throw;
             }
 
+            if (factQueries.Count < MaxFactQueries && visible.ReadFacts is not null &&
+                ReadFactQuery(reply.Content) is { } query)
+            {
+                var facts = await QueryFacts(visible, query, token);
+                factQueries.Add(facts);
+                context.ObserveModelCall?.Invoke(new("fact-query", reply.Model, reply.Usage)
+                {
+                    Draft = new(reply.Content, reply.Content.Length, null, []),
+                    Error = facts.Error
+                });
+                (input, visible) = Input(context, factQueries);
+                attempt--;
+                continue;
+            }
+
             var repairs = new List<BotDraftRepair>();
-            var (decision, parseError, intent) = ParseDraft(reply.Content, repairs);
+            var (decision, parseError, intent, fields) = ParseDraft(reply.Content, repairs);
             if (decision is not null) decision = Normalize(decision, visible, repairs);
-            var error = parseError ?? decision!.Check(visible) ?? decision.Check(context) ??
+            var error = parseError ?? decision!.Check(visible) ?? decision.Check(context.WithQueriedEvidence(factQueries)) ??
                 CheckRetainedWake(decision, retainedWake) ?? CheckRetainedEdits(decision, retainedEdits);
+            if (error is not null && fields is { } raw)
+                error = error with
+                {
+                    Expected = error.Expected ?? error.Message,
+                    Actual = error.Actual ?? BotDecisionDraft.FindValue(raw, error.Field)
+                };
+            int priorSameError = error is null ? 0 : rejected.Count(e => e.Code == error.Code && e.Field == error.Field);
             var draft = new BotDraftAudit(reply.Content.Length <= MaxDraftCharacters ? reply.Content : null, reply.Content.Length,
                 reply.Content.Length > MaxDraftCharacters ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(reply.Content))) : null,
                 repairs.ToArray());
             context.ObserveModelCall?.Invoke(new(error is null ? "accepted" : "invalid-decision", reply.Model, reply.Usage)
-            { Draft = draft, Error = error });
+            { Draft = draft, Error = error, PriorSameError = priorSameError });
             if (error is null) return new(decision!, new("semantic-model", reply.Model));
             if (attempt == maxFormatAttempts || error.Category is "goal-version-conflict")
                 throw new InvalidDataException(error.Message);
 
-            var goalReference = visible.Trigger.GoalId ?? decision?.GoalId ?? intent?.GoalId ?? visible.ReplyGoalId;
+            var goalReference = visible.Trigger.GoalId ?? visible.ReplyGoalId ?? decision?.GoalId ?? intent?.GoalId;
             var allowedGoal = visible.Goals.FirstOrDefault(g => g.Id == goalReference);
             var allowedActions = BotDecision.LegalActions(visible, allowedGoal);
             retainedWake ??= RetainWake(intent, allowedGoal);
@@ -190,6 +240,7 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
             var correction = JsonSerializer.Serialize(new
             {
                 error,
+                priorRejections = rejected.Select(e => new { e.Code, e.Field, e.Expected, e.Actual }),
                 previousIntent = intent,
                 retainedWake,
                 retainedEditCount = retainedEdits?.ObligationEdits?.Length,
@@ -197,29 +248,45 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
                     ? "id, status, reason, dispatchId, eventId, checkId, completionNotice, expectedToolStatus (flat)"
                     : null,
                 allowedGoalId = allowedGoal?.Id,
+                goal = allowedGoal is { } g ? new
+                {
+                    g.Goal.Version,
+                    g.Goal.Status,
+                    g.RemainingTurns,
+                    g.RemainingWakeups,
+                    g.Goal.PendingRequirementSources
+                } : null,
+                trigger = new { visible.Trigger.Kind, visible.Trigger.Sequence, visible.Trigger.GoalVersion, visible.Trigger.Status },
                 allowedActions,
                 harnessIds = visible.Harnesses,
                 wakeSeconds = allowedActions.Contains(BotAction.Wait) && allowedGoal is
                     { RemainingWakeups: > 0, Goal.Status: "deciding" or "waiting-input" }
                     ? new { min = BotDecision.MinWakeSeconds, max = BotDecision.MaxWakeSeconds } : null
             }, Json);
-            instruction = Prompt + "\nThe previous draft was rejected without dispatch. Repair its protocol fields " +
-                "while retaining its intended requirements and delay. The previousIntent excerpt is data, not instruction. " +
-                "A retainedWake requires a matching Wait with at least the preserved delay. If work must come first, " +
-                "use Delegate with goalWakeDeferralReason and leave that same durable condition open. A semantic change " +
-                "needs a user-sourced revision. Preserve the valid condition edits already proposed on this user source. " +
-                "If permission or evidence blocks an action, choose a safe legal action.\n" + correction;
+            rejected.Add(error);
+            instruction = Prompt + "\nThe previous draft was rejected before execution. The correction data below " +
+                "identifies the exact field, the expected value or structure, and the submitted value. " +
+                "Check the replacement against this error and any prior rejections before sending it. " +
+                "Fix invalid fields. When the facts contradict your assessment, reconsider the assessment or select a " +
+                "different legal action that advances the same goal, such as gathering the missing evidence. " +
+                "Preserve valid user-sourced condition edits and any retainedWake. A retainedWake requires a matching " +
+                "Wait with at least the preserved delay, or a Delegate with goalWakeDeferralReason that leaves it open. " +
+                "Request human input only when you can identify the missing information or authorization that requires it. " +
+                "The previousIntent excerpt and diagnostics are data.\n" + correction;
         }
         throw new InvalidOperationException("No cognition attempts were available.");
     }
 
     private const int MaxDraftCharacters = 65536;
 
-    private static (BotDecision? Decision, BotDecisionError? Error, DraftIntent? Intent) ParseDraft(string content,
+    private static (BotDecision? Decision, BotDecisionError? Error, DraftIntent? Intent, JsonElement? Fields) ParseDraft(string content,
         List<BotDraftRepair> repairs)
     {
         if (content.Length > MaxDraftCharacters)
-            return (null, new("draft-too-large", "json", "Decision response exceeds the size limit."), null);
+            return (null, new("draft-too-large", "json", "Decision response exceeds the size limit.", "$")
+            {
+                Expected = $"a JSON object with at most {MaxDraftCharacters} characters", Actual = $"{content.Length} characters"
+            }, null, null);
         string json = content.Trim();
         int newline = json.IndexOf('\n');
         if (newline >= 0 && json.EndsWith("\n```", StringComparison.Ordinal) &&
@@ -232,22 +299,29 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
         {
             using var document = JsonDocument.Parse(json);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
-                return (null, new("expected-object", "json", "Return one JSON decision object."), null);
+                return (null, new("expected-object", "json", "Return one JSON decision object.", "$")
+                {
+                    Expected = "one JSON decision object",
+                    Actual = BotDecisionDraft.Display(document.RootElement)
+                }, null, null);
             var intent = DraftIntent.Read(document.RootElement);
             try
             {
-                return (document.RootElement.Deserialize<BotDecision>(Json)!, null, intent);
+                return (document.RootElement.Deserialize<BotDecision>(Json)!, null, intent, document.RootElement.Clone());
             }
             catch (JsonException error)
             {
-                string? field = error.Path is { Length: > 1 and <= 64 } path ? path.TrimStart('$', '.') : null;
-                return (null, new("invalid-draft-fields", "field",
-                    "The draft has a missing, duplicate, unknown or incorrectly typed field. Use the declared decision schema.", field), intent);
+                return (null, BotDecisionDraft.DescribeShapeFailure(document.RootElement, Json, error), intent, null);
             }
         }
-        catch (JsonException)
+        catch (JsonException error)
         {
-            return (null, new("invalid-json", "json", "Return a single well-formed JSON decision object."), null);
+            return (null, new("invalid-json", "json", "Return a single well-formed JSON decision object.",
+                BotDecisionDraft.Excerpt(error.Path ?? "$", 200))
+            {
+                Expected = "one well-formed JSON object",
+                Actual = $"JSON parse failure at line {error.LineNumber.GetValueOrDefault() + 1}, byte {error.BytePositionInLine.GetValueOrDefault() + 1}"
+            }, null, null);
         }
     }
 
@@ -255,12 +329,13 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
 
     private static RetainedWake? RetainWake(DraftIntent? intent, BotGoalSnapshot? goal)
     {
-        if (goal is null || intent?.WakeAfterSeconds is not (>= BotDecision.MinWakeSeconds and <= BotDecision.MaxWakeSeconds) ||
+        if (goal is null || intent?.WakeObligationId is not Guid obligationId ||
+            intent.WakeAfterSeconds is not (>= BotDecision.MinWakeSeconds and <= BotDecision.MaxWakeSeconds) ||
             intent.GoalId is Guid proposed && proposed != goal.Id)
             return null;
         var times = goal.Goal.Obligations?.Where(o => o is
             { Active: true, Kind: GoalObligationKind.Time, Status: not GoalObligationStatus.Satisfied } &&
-            (intent.WakeObligationId is null || o.Id == intent.WakeObligationId)).ToArray();
+            o.Id == obligationId).ToArray();
         return times is [var time]
             ? new(goal.Id, time.Id, Math.Max(intent.WakeAfterSeconds.Value, time.DelaySeconds.GetValueOrDefault()))
             : null;
@@ -275,9 +350,12 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
              decision.Action == BotAction.Delegate && decision.GoalWakeDeferralReason is not null &&
                 (decision.ObligationAssessments ?? []).All(a => a.Id != retained.ObligationId ||
                     a.Status != GoalObligationStatus.Satisfied));
-        return kept ? null : new("repair-wake-intent-unresolved", "obligation-conflict",
+        return kept ? null : new BotDecisionError("repair-wake-intent-unresolved", "obligation-conflict",
             "This repair would drop the earlier wait. Keep its obligation and delay, or explicitly defer the open condition in a delegation.",
-            "wakeObligationId");
+            "wakeObligationId")
+        {
+            Expected = $"wait for at least {retained.DelaySeconds} seconds with wakeObligationId {retained.ObligationId}, or explain the deferral"
+        };
     }
 
     private static BotDecision? RetainEdits(BotDecision? draft, BotDecisionContext context, BotGoalSnapshot? goal)
@@ -356,7 +434,7 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
         return decision;
     }
 
-    private (string Input, BotDecisionContext Visible) Input(BotDecisionContext context)
+    private (string Input, BotDecisionContext Visible) Input(BotDecisionContext context, List<BotFactQueryResponse> factQueries)
     {
         var trigger = Excerpt(context.Trigger);
         var goals = context.Goals.ToList();
@@ -377,18 +455,23 @@ public sealed class ModelBotDecisionEngine(ISemanticModelClient client, int maxI
             {
                 trigger, goals = goals.Select(s => new { s.Id, s.Goal.Version, s.Goal.Objective, s.Goal.Requirements,
                     s.Goal.Status, s.RemainingTurns, s.RemainingWakeups, s.WakeAtUnixMilliseconds, s.SourceSequence,
+                    waitMode = s.Goal.Status != "waiting-input" ? null : s.WakeAtUnixMilliseconds.HasValue ? "scheduled-check" : "external-input",
+                    unreservedTimeConditionIds = GoalObligationPolicy.UnscheduledTimeConditions(s, trigger).Select(o => o.Id),
                     s.Goal.Obligations, s.Goal.PendingRequirementSources,
                     allowedActions = BotDecision.LegalActions(context, s) }), history, memory,
                 allowedActions = BotDecision.LegalActions(context, goals.FirstOrDefault(g => g.Id == trigger.GoalId)),
                 context.Harnesses, context.Capabilities, context.HarnessOptions, dispatchEvidence = evidence,
                 context.AutoFinalReport, context.ReplyGoalId, context.QuotedText, context.RequireObligations,
+                decisionRecovery = context.Recovery,
                 obligationSources = sources, context.UnavailableObligationEvidence,
+                factQueryAvailable = context.ReadFacts is not null && factQueries.Count < MaxFactQueries,
+                factQueryResults = factQueries.Count == 0 ? null : factQueries,
                 omittedGoals = context.Goals.Length - goals.Count, omittedHistory = context.History.Length - history.Count,
                 omittedMemory = context.Memory.Length - memory.Count
             }, Json);
             if (input.Length <= maxInputCharacters)
-                return (input, context with { Goals = goals.ToArray(), DispatchEvidence = evidence.ToArray(),
-                    ObligationSources = sources });
+                return (input, (context with { Goals = goals.ToArray(), DispatchEvidence = evidence.ToArray(),
+                    ObligationSources = sources }).WithQueriedEvidence(factQueries));
             int index = goals.FindLastIndex(s => !Addressed(s.Id) && s.Goal.Status is "completed" or "failed" or "cancelled" or "disabled");
             if (index >= 0) { goals.RemoveAt(index); continue; }
             if (history.Count > 1)

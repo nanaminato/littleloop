@@ -13,15 +13,26 @@ public sealed record BotDecisionSource(string Engine, string? Model = null)
 
 public sealed record BotDecisionResult(BotDecision Decision, BotDecisionSource Source);
 
+/// <summary>Diagnostics from an earlier evaluation of the same uncommitted observation.</summary>
+public sealed record BotDecisionRecovery(int Failures, BotDecisionError[] Errors);
+
 public sealed record BotModelCall(string Outcome, string? Model = null, BotTokenUsage? Usage = null)
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public BotDraftAudit? Draft { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public BotDecisionError? Error { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PriorSameError { get; init; }
 }
 
-public sealed record BotDecisionError(string Code, string Category, string Message, string? Field = null);
+public sealed record BotDecisionError(string Code, string Category, string Message, string? Field = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Expected { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Actual { get; init; }
+}
 public sealed record BotDraftRepair(string Field, string Change);
 public sealed record BotDraftAudit(string? Raw, int Characters, string? Sha256, BotDraftRepair[] Repairs);
 
