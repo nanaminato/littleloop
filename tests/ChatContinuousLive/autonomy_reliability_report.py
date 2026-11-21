@@ -209,7 +209,7 @@ def measure(batch, rates):
             'incorrectCompletionDecisionIds': sorted(wrong_deliverables | wrong_behavior | wrong_revision),
             'completionWithMissedBusinessTimerIds': sorted(wrong_behavior),
             'completionWithMissedRevisionIds': sorted(wrong_revision),
-            'metrics': metrics, 'diagnostics': diagnostics,
+            'metrics': metrics, 'diagnostics': diagnostics, 'decisionApi': cost(captured, rates),
         })
     report = {
         'assemblyHashes': batch['assemblyHashes'],
@@ -222,8 +222,10 @@ def measure(batch, rates):
         'completionsWithMissedBusinessTimer': sum(len(trial['completionWithMissedBusinessTimerIds']) for trial in trials),
         'completionsWithMissedRevision': sum(len(trial['completionWithMissedRevisionIds']) for trial in trials),
         'repeatExecutions': sum(trial['metrics'].get('invalidRepeats', 0) for trial in trials),
+        'duplicateSettlements': sum(trial['metrics'].get('duplicateReceiptCount', 0) for trial in trials),
         'humanWaitTrials': sum(trial['waitingForHuman'] for trial in trials),
         'decisionBlockedTrials': sum(trial['stoppedByDecisionFailure'] for trial in trials),
+        'waitingOrBlockedTrials': sum(trial['waitingForHuman'] or trial['stoppedByDecisionFailure'] for trial in trials),
         'businessTimerHonoredTrials': sum(trial['businessTimerHonored'] for trial in trials),
         'trialsWithoutEnduranceMetrics': sum(not trial['metrics'] for trial in trials),
         'invalidDrafts': sum(trial['diagnostics']['invalidDrafts'] for trial in trials),
